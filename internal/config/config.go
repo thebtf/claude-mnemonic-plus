@@ -72,6 +72,8 @@ type Config struct {
 	RerankingEnabled          bool     `json:"reranking_enabled"`
 	ContextShowLastSummary    bool     `json:"context_show_last_summary"`
 	CleanupStaleObservations  bool     `json:"cleanup_stale_observations"`
+	WorkerHost                string   // env-only
+	WorkerToken               string   // env-only
 }
 
 var (
@@ -172,6 +174,7 @@ func Default() *Config {
 		MaintenanceIntervalHours:  6,     // Run every 6 hours
 		ObservationRetentionDays:  0,     // 0 = no age-based deletion (keep all)
 		CleanupStaleObservations:  false, // Don't auto-cleanup stale observations
+		WorkerHost:                "127.0.0.1",
 	}
 }
 
@@ -196,6 +199,11 @@ func Load() (*Config, error) {
 	// Map settings to config
 	if v, ok := settings["CLAUDE_MNEMONIC_WORKER_PORT"].(float64); ok {
 		cfg.WorkerPort = int(v)
+	}
+	// WorkerHost and WorkerToken are env-only (not settable via JSON file).
+	// WorkerToken in particular must never be persisted to disk.
+	if v, ok := settings["CLAUDE_MNEMONIC_DB_PATH"].(string); ok && v != "" {
+		cfg.DBPath = v
 	}
 	if v, ok := settings["CLAUDE_MNEMONIC_MODEL"].(string); ok {
 		cfg.Model = v
@@ -270,6 +278,17 @@ func Load() (*Config, error) {
 		cfg.HubThreshold = int(v)
 	}
 
+	// Environment variable overrides (take precedence over JSON settings)
+	if v := strings.TrimSpace(os.Getenv("CLAUDE_MNEMONIC_DB_PATH")); v != "" {
+		cfg.DBPath = v
+	}
+	if v := strings.TrimSpace(os.Getenv("CLAUDE_MNEMONIC_WORKER_HOST")); v != "" {
+		cfg.WorkerHost = v
+	}
+	if v := strings.TrimSpace(os.Getenv("CLAUDE_MNEMONIC_API_TOKEN")); v != "" {
+		cfg.WorkerToken = v
+	}
+
 	return cfg, nil
 }
 
@@ -310,4 +329,24 @@ func GetWorkerPort() int {
 		}
 	}
 	return Get().WorkerPort
+}
+
+// GetWorkerHost returns the worker host from environment, config, or fallback.
+func GetWorkerHost() string {
+	host := strings.TrimSpace(os.Getenv("CLAUDE_MNEMONIC_WORKER_HOST"))
+	if host != "" {
+		return host
+	}
+	if cfgHost := strings.TrimSpace(Get().WorkerHost); cfgHost != "" {
+		return cfgHost
+	}
+	return "127.0.0.1"
+}
+
+// GetWorkerToken returns the worker authentication token.
+func GetWorkerToken() string {
+	if token := strings.TrimSpace(os.Getenv("CLAUDE_MNEMONIC_API_TOKEN")); token != "" {
+		return token
+	}
+	return Get().WorkerToken
 }

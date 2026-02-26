@@ -13,6 +13,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/lukaszraczylo/claude-mnemonic/internal/config"
 )
 
 // Version is set at build time via ldflags
@@ -42,7 +44,7 @@ func GetWorkerPort() int {
 // IsWorkerRunning checks if the worker is running and healthy.
 func IsWorkerRunning(port int) bool {
 	client := &http.Client{Timeout: HealthCheckTimeout}
-	resp, err := client.Get(fmt.Sprintf("http://127.0.0.1:%d/api/health", port))
+	resp, err := client.Get(fmt.Sprintf("http://%s:%d/api/health", config.GetWorkerHost(), port))
 	if err != nil {
 		return false
 	}
@@ -129,7 +131,7 @@ func EnsureWorkerRunning() (int, error) {
 // GetWorkerVersion gets the version of the running worker.
 func GetWorkerVersion(port int) string {
 	client := &http.Client{Timeout: HealthCheckTimeout}
-	resp, err := client.Get(fmt.Sprintf("http://127.0.0.1:%d/api/version", port))
+	resp, err := client.Get(fmt.Sprintf("http://%s:%d/api/version", config.GetWorkerHost(), port))
 	if err != nil {
 		return ""
 	}
@@ -149,7 +151,7 @@ func GetWorkerVersion(port int) string {
 
 // IsPortInUse checks if the port is in use (regardless of health).
 func IsPortInUse(port int) bool {
-	conn, err := net.DialTimeout("tcp", fmt.Sprintf("127.0.0.1:%d", port), 500*time.Millisecond)
+	conn, err := net.DialTimeout("tcp", fmt.Sprintf("%s:%d", config.GetWorkerHost(), port), 500*time.Millisecond)
 	if err != nil {
 		return false
 	}
@@ -236,7 +238,7 @@ func POST(port int, path string, body interface{}) (map[string]interface{}, erro
 	}
 
 	resp, err := client.Post(
-		fmt.Sprintf("http://127.0.0.1:%d%s", port, path),
+		fmt.Sprintf("http://%s:%d%s", config.GetWorkerHost(), port, path),
 		"application/json",
 		bytes.NewReader(jsonBody),
 	)
@@ -262,7 +264,7 @@ func POST(port int, path string, body interface{}) (map[string]interface{}, erro
 func GET(port int, path string) (map[string]interface{}, error) {
 	client := &http.Client{Timeout: 10 * time.Second}
 
-	resp, err := client.Get(fmt.Sprintf("http://127.0.0.1:%d%s", port, path))
+	resp, err := client.Get(fmt.Sprintf("http://%s:%d%s", config.GetWorkerHost(), port, path))
 	if err != nil {
 		return nil, err
 	}

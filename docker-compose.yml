@@ -1,0 +1,16 @@
+services:
+  mnemonic:
+    build: .
+    ports:
+      - "37777:37777"
+    environment:
+      CLAUDE_MNEMONIC_WORKER_HOST: "0.0.0.0"
+      CLAUDE_MNEMONIC_WORKER_PORT: "37777"
+      # Set API token for remote access security:
+      # CLAUDE_MNEMONIC_API_TOKEN: "your-secret-token-here"
+    volumes:
+      - mnemonic-data:/data
+    restart: unless-stopped
+
+volumes:
+  mnemonic-data:

@@ -137,6 +137,7 @@ type Service struct {
 	configWatcher      *watcher.Watcher
 	updater            *update.Updater
 	rateLimiter        *PerClientRateLimiter
+	tokenAuth          *TokenAuth
 	expensiveOpLimiter *ExpensiveOperationLimiter
 	version            string
 	recentQueriesBuf   [maxRecentQueries]RecentSearchQuery
@@ -354,6 +355,12 @@ func NewService(version string) (*Service, error) {
 	// These limits are per-client and allow for intensive CLI usage
 	rateLimiter := NewPerClientRateLimiter(100.0, 200)
 
+	tokenAuth, err := NewTokenAuth(config.GetWorkerToken())
+	if err != nil {
+		log.Error().Err(err).Msg("failed to create token auth middleware")
+		return nil, err
+	}
+
 	svc := &Service{
 		version:            version,
 		config:             cfg,
@@ -365,6 +372,7 @@ func NewService(version string) (*Service, error) {
 		updater:            update.New(version, installDir),
 		retrievalStats:     make(map[string]*RetrievalStats),
 		rateLimiter:        rateLimiter,
+		tokenAuth:          tokenAuth,
 		expensiveOpLimiter: NewExpensiveOperationLimiter(),
 		bulkOpLimiter:      NewBulkOperationLimiter(60), // 60 second cooldown for bulk operations
 		cachedObsCounts:    make(map[string]cachedCount),
@@ -1172,6 +1180,9 @@ func (s *Service) setupMiddleware() {
 	if s.rateLimiter != nil {
 		s.router.Use(PerClientRateLimitMiddleware(s.rateLimiter))
 	}
+	if s.tokenAuth != nil {
+		s.router.Use(s.tokenAuth.Middleware)
+	}
 
 	// Note: Timeout middleware is applied per-route, not globally,
 	// to avoid killing SSE connections which need to stay open indefinitely
@@ -1512,8 +1523,9 @@ func (s *Service) invalidateAllObsCountCache() {
 func (s *Service) Start() error {
 	port := config.GetWorkerPort()
 
+	host := config.GetWorkerHost()
 	s.server = &http.Server{
-		Addr:              fmt.Sprintf(":%d", port),
+		Addr:              fmt.Sprintf("%s:%d", host, port),
 		Handler:           s.router,
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       30 * time.Second,

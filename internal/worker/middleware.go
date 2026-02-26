@@ -4,6 +4,7 @@ package worker
 import (
 	"context"
 	"crypto/rand"
+	"crypto/subtle"
 	"encoding/hex"
 	"fmt"
 	"net/http"
@@ -88,8 +89,9 @@ func MaxBodySize(maxBytes int64) func(http.Handler) http.Handler {
 	}
 }
 
-// TokenAuth provides simple token-based authentication for localhost services.
-// The token is generated at startup and must be provided in the X-Auth-Token header.
+// TokenAuth provides token-based authentication for the worker HTTP API.
+// The token is supplied via CLAUDE_MNEMONIC_API_TOKEN and must be provided in
+// the X-Auth-Token header or Authorization: Bearer header.
 type TokenAuth struct {
 	ExemptPaths map[string]bool
 	token       string
@@ -97,25 +99,18 @@ type TokenAuth struct {
 	enabled     bool
 }
 
-// NewTokenAuth creates a new TokenAuth with a randomly generated token.
-// If enabled is false, authentication is skipped (useful for development).
-func NewTokenAuth(enabled bool) (*TokenAuth, error) {
+// NewTokenAuth creates a new TokenAuth using a provided token.
+// If token is empty, authentication is skipped (useful for development).
+func NewTokenAuth(token string) (*TokenAuth, error) {
+	trimmedToken := strings.TrimSpace(token)
 	ta := &TokenAuth{
-		enabled: enabled,
+		enabled: trimmedToken != "",
+		token:   trimmedToken,
 		ExemptPaths: map[string]bool{
 			"/health":     true,
 			"/api/health": true,
 			"/api/ready":  true,
 		},
-	}
-
-	if enabled {
-		// Generate 32-byte random token
-		tokenBytes := make([]byte, 32)
-		if _, err := rand.Read(tokenBytes); err != nil {
-			return nil, err
-		}
-		ta.token = hex.EncodeToString(tokenBytes)
 	}
 
 	return ta, nil
@@ -161,7 +156,7 @@ func (ta *TokenAuth) Middleware(next http.Handler) http.Handler {
 			}
 		}
 
-		if providedToken != token {
+		if subtle.ConstantTimeCompare([]byte(providedToken), []byte(token)) != 1 {
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}
