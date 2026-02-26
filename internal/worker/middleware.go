@@ -102,10 +102,9 @@ type TokenAuth struct {
 // NewTokenAuth creates a new TokenAuth using a provided token.
 // If token is empty, authentication is skipped (useful for development).
 func NewTokenAuth(token string) (*TokenAuth, error) {
-	trimmedToken := strings.TrimSpace(token)
 	ta := &TokenAuth{
-		enabled: trimmedToken != "",
-		token:   trimmedToken,
+		enabled: token != "",
+		token:   token,
 		ExemptPaths: map[string]bool{
 			"/health":     true,
 			"/api/health": true,

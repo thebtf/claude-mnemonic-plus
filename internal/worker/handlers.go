@@ -14,6 +14,7 @@ import (
 	"net/http"
 	"strconv"
 
+	"github.com/lukaszraczylo/claude-mnemonic/internal/embedding"
 	"github.com/rs/zerolog/log"
 )
 
@@ -244,5 +245,38 @@ func (s *Service) requireReady(next http.Handler) http.Handler {
 			return
 		}
 		next.ServeHTTP(w, r)
+	})
+}
+
+// handleListModels returns available embedding models in OpenAI-compatible format.
+// Compatible with LiteLLM proxy model listing.
+func (s *Service) handleListModels(w http.ResponseWriter, _ *http.Request) {
+	models := embedding.ListModels()
+
+	type modelData struct {
+		ID      string `json:"id"`
+		Object  string `json:"object"`
+		Created int64  `json:"created"`
+		OwnedBy string `json:"owned_by"`
+	}
+
+	type response struct {
+		Object string      `json:"object"`
+		Data   []modelData `json:"data"`
+	}
+
+	data := make([]modelData, 0, len(models))
+	for _, m := range models {
+		data = append(data, modelData{
+			ID:      m.Version,
+			Object:  "model",
+			Created: 0,
+			OwnedBy: "claude-mnemonic",
+		})
+	}
+
+	writeJSON(w, response{
+		Object: "list",
+		Data:   data,
 	})
 }

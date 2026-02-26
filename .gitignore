@@ -90,3 +90,6 @@ docs/dist
 # Non-template plugin configs (keep only .tpl files)
 plugin/.claude-plugin/plugin.json
 plugin/.claude-plugin/marketplace.json
+
+# Agent working state
+.agent/CONTINUITY.md

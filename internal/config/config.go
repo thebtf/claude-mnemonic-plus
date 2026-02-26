@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 )
@@ -38,12 +39,17 @@ var CriticalConcepts = []string{
 // Config holds the application configuration.
 // Field order optimized for memory alignment (fieldalignment).
 type Config struct {
-	ContextFullField          string   `json:"context_full_field"`
-	DBPath                    string   `json:"db_path"`
-	Model                     string   `json:"model"`
-	ClaudeCodePath            string   `json:"claude_code_path"`
-	EmbeddingModel            string   `json:"embedding_model"`
-	VectorStorageStrategy     string   `json:"vector_storage_strategy"`
+	ContextFullField          string `json:"context_full_field"`
+	DBPath                    string `json:"db_path"`
+	Model                     string `json:"model"`
+	ClaudeCodePath            string `json:"claude_code_path"`
+	EmbeddingModel            string `json:"embedding_model"`
+	VectorStorageStrategy     string `json:"vector_storage_strategy"`
+	EmbeddingProvider         string `json:"embedding_provider"`
+	EmbeddingBaseURL          string `json:"embedding_base_url"`
+	EmbeddingModelName        string `json:"embedding_model_name"`
+	EmbeddingDimensions       int    `json:"embedding_dimensions"`
+	EmbeddingAPIKey           string
 	ContextObsConcepts        []string `json:"context_obs_concepts"`
 	ContextObsTypes           []string `json:"context_obs_types"`
 	ContextFullCount          int      `json:"context_full_count"`
@@ -90,6 +96,9 @@ func DataDir() string {
 
 // DBPath returns the database file path.
 func DBPath() string {
+	if v := strings.TrimSpace(os.Getenv("CLAUDE_MNEMONIC_DB_PATH")); v != "" {
+		return v
+	}
 	return filepath.Join(DataDir(), "claude-mnemonic.db")
 }
 
@@ -158,7 +167,11 @@ func Default() *Config {
 		GraphEdgeWeight:           0.3,   // Minimum edge weight to follow
 		GraphRebuildIntervalMin:   60,    // Rebuild graph every 60 minutes
 		VectorStorageStrategy:     "hub", // Hub storage strategy (LEANN-inspired)
-		HubThreshold:              5,     // Require 5+ accesses to store embedding
+		EmbeddingProvider:         "builtin",
+		EmbeddingBaseURL:          "https://api.openai.com/v1",
+		EmbeddingModelName:        "text-embedding-3-small",
+		EmbeddingDimensions:       1536,
+		HubThreshold:              5, // Require 5+ accesses to store embedding
 		ContextObservations:       100,
 		ContextFullCount:          25,
 		ContextSessionCount:       10,
@@ -274,6 +287,19 @@ func Load() (*Config, error) {
 	if v, ok := settings["CLAUDE_MNEMONIC_VECTOR_STORAGE_STRATEGY"].(string); ok && v != "" {
 		cfg.VectorStorageStrategy = v
 	}
+	if v, ok := settings["EMBEDDING_PROVIDER"].(string); ok && v != "" {
+		cfg.EmbeddingProvider = v
+	}
+	if v, ok := settings["EMBEDDING_BASE_URL"].(string); ok && v != "" {
+		cfg.EmbeddingBaseURL = v
+	}
+	// EMBEDDING_API_KEY is env-only, NOT loaded from JSON file.
+	if v, ok := settings["EMBEDDING_MODEL_NAME"].(string); ok && v != "" {
+		cfg.EmbeddingModelName = v
+	}
+	if v, ok := settings["EMBEDDING_DIMENSIONS"].(float64); ok && v > 0 {
+		cfg.EmbeddingDimensions = int(v)
+	}
 	if v, ok := settings["CLAUDE_MNEMONIC_HUB_THRESHOLD"].(float64); ok && v > 0 {
 		cfg.HubThreshold = int(v)
 	}
@@ -287,6 +313,23 @@ func Load() (*Config, error) {
 	}
 	if v := strings.TrimSpace(os.Getenv("CLAUDE_MNEMONIC_API_TOKEN")); v != "" {
 		cfg.WorkerToken = v
+	}
+	if v := strings.TrimSpace(os.Getenv("EMBEDDING_PROVIDER")); v != "" {
+		cfg.EmbeddingProvider = v
+	}
+	if v := strings.TrimSpace(os.Getenv("EMBEDDING_BASE_URL")); v != "" {
+		cfg.EmbeddingBaseURL = v
+	}
+	if v := strings.TrimSpace(os.Getenv("EMBEDDING_API_KEY")); v != "" {
+		cfg.EmbeddingAPIKey = v
+	}
+	if v := strings.TrimSpace(os.Getenv("EMBEDDING_MODEL_NAME")); v != "" {
+		cfg.EmbeddingModelName = v
+	}
+	if v := strings.TrimSpace(os.Getenv("EMBEDDING_DIMENSIONS")); v != "" {
+		if d, err := strconv.Atoi(v); err == nil && d > 0 {
+			cfg.EmbeddingDimensions = d
+		}
 	}
 
 	return cfg, nil
@@ -345,8 +388,50 @@ func GetWorkerHost() string {
 
 // GetWorkerToken returns the worker authentication token.
 func GetWorkerToken() string {
-	if token := strings.TrimSpace(os.Getenv("CLAUDE_MNEMONIC_API_TOKEN")); token != "" {
-		return token
+	return strings.TrimSpace(os.Getenv("CLAUDE_MNEMONIC_API_TOKEN"))
+}
+
+// GetEmbeddingProvider returns the embedding provider ("builtin" or "openai").
+func GetEmbeddingProvider() string {
+	if v := strings.TrimSpace(os.Getenv("EMBEDDING_PROVIDER")); v != "" {
+		return v
 	}
-	return Get().WorkerToken
+	return Get().EmbeddingProvider
+}
+
+// GetEmbeddingBaseURL returns the OpenAI-compatible API base URL.
+func GetEmbeddingBaseURL() string {
+	if v := strings.TrimSpace(os.Getenv("EMBEDDING_BASE_URL")); v != "" {
+		return v
+	}
+	return Get().EmbeddingBaseURL
+}
+
+// GetEmbeddingAPIKey returns the embedding API key (env-only, never from config file).
+func GetEmbeddingAPIKey() string {
+	return strings.TrimSpace(os.Getenv("EMBEDDING_API_KEY"))
+}
+
+// GetEmbeddingModelName returns the embedding model name for external providers.
+func GetEmbeddingModelName() string {
+	if v := strings.TrimSpace(os.Getenv("EMBEDDING_MODEL_NAME")); v != "" {
+		return v
+	}
+	if cfg := Get(); cfg.EmbeddingModelName != "" {
+		return cfg.EmbeddingModelName
+	}
+	return "text-embedding-3-small"
+}
+
+// GetEmbeddingDimensions returns the embedding vector dimensions for external providers.
+func GetEmbeddingDimensions() int {
+	if v := strings.TrimSpace(os.Getenv("EMBEDDING_DIMENSIONS")); v != "" {
+		if d, err := strconv.Atoi(v); err == nil && d > 0 {
+			return d
+		}
+	}
+	if cfg := Get(); cfg.EmbeddingDimensions > 0 {
+		return cfg.EmbeddingDimensions
+	}
+	return 1536
 }

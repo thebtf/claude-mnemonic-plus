@@ -159,7 +159,7 @@ func TestMaxBodySize(t *testing.T) {
 
 func TestTokenAuth(t *testing.T) {
 	t.Run("disabled auth allows all requests", func(t *testing.T) {
-		ta, err := NewTokenAuth(false)
+		ta, err := NewTokenAuth("")
 		if err != nil {
 			t.Fatalf("NewTokenAuth() error = %v", err)
 		}
@@ -179,7 +179,7 @@ func TestTokenAuth(t *testing.T) {
 	})
 
 	t.Run("enabled auth requires token", func(t *testing.T) {
-		ta, err := NewTokenAuth(true)
+		ta, err := NewTokenAuth("worker-token")
 		if err != nil {
 			t.Fatalf("NewTokenAuth() error = %v", err)
 		}
@@ -219,7 +219,7 @@ func TestTokenAuth(t *testing.T) {
 	})
 
 	t.Run("exempt paths skip auth", func(t *testing.T) {
-		ta, err := NewTokenAuth(true)
+		ta, err := NewTokenAuth("worker-token")
 		if err != nil {
 			t.Fatalf("NewTokenAuth() error = %v", err)
 		}

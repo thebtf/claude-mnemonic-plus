@@ -357,8 +357,7 @@ func NewService(version string) (*Service, error) {
 
 	tokenAuth, err := NewTokenAuth(config.GetWorkerToken())
 	if err != nil {
-		log.Error().Err(err).Msg("failed to create token auth middleware")
-		return nil, err
+		return nil, fmt.Errorf("init token auth: %w", err)
 	}
 
 	svc := &Service{
@@ -432,7 +431,7 @@ func (s *Service) initializeAsync() {
 
 	var reranker *reranking.Service
 
-	emb, err := embedding.NewService()
+	emb, err := embedding.NewServiceFromConfig()
 	if err != nil {
 		log.Warn().Err(err).Msg("Embedding service creation failed - vector search disabled")
 	} else {
@@ -686,7 +685,7 @@ func (s *Service) reinitializeDatabase() {
 
 	var reranker *reranking.Service
 
-	emb, err := embedding.NewService()
+	emb, err := embedding.NewServiceFromConfig()
 	if err != nil {
 		log.Warn().Err(err).Msg("Embedding service creation failed after reinit")
 	} else {
@@ -1229,6 +1228,11 @@ func (s *Service) setupRoutes() {
 
 	// SSE endpoint (works before DB is ready)
 	s.router.Get("/api/events", s.sseBroadcaster.HandleSSE)
+
+	// OpenAI-compatible model list endpoint. Intentionally outside requireReady group:
+	// the model registry is populated at init() time (before DB is ready), so this
+	// endpoint is always available and useful for LiteLLM proxy configuration.
+	s.router.Get("/v1/models", s.handleListModels)
 
 	// Routes that require DB to be ready
 	s.router.Group(func(r chi.Router) {

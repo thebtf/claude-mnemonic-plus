@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"sync"
 
+	"github.com/lukaszraczylo/claude-mnemonic/internal/config"
 	"github.com/sugarme/tokenizer"
 	"github.com/sugarme/tokenizer/pretrained"
 	ort "github.com/yalue/onnxruntime_go"
@@ -479,6 +480,18 @@ func NewServiceWithModel(version string) (*Service, error) {
 	}
 
 	return &Service{model: model}, nil
+}
+
+// NewServiceFromConfig creates an embedding service based on EMBEDDING_PROVIDER config.
+// Uses "openai" provider when EMBEDDING_PROVIDER=openai, builtin ONNX otherwise.
+func NewServiceFromConfig() (*Service, error) {
+	provider := config.GetEmbeddingProvider()
+	switch provider {
+	case "openai":
+		return NewServiceWithModel(OpenAIModelVersion)
+	default:
+		return NewService() // builtin BGE
+	}
 }
 
 // Name returns the human-readable model name.
