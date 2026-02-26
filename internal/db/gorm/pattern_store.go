@@ -306,19 +306,18 @@ func (s *PatternStore) DeletePattern(ctx context.Context, id int64) error {
 func (s *PatternStore) SearchPatternsFTS(ctx context.Context, searchQuery string, limit int) ([]*models.Pattern, error) {
 	var patterns []Pattern
 
-	// Use raw SQL for FTS5 MATCH query
+	// PostgreSQL full-text search via tsvector column (added in migration 010).
 	query := `
 		SELECT p.*
 		FROM patterns p
-		JOIN patterns_fts fts ON p.id = fts.rowid
-		WHERE patterns_fts MATCH ?
+		WHERE p.search_vector @@ websearch_to_tsquery('english', ?)
 		AND p.status = 'active'
-		ORDER BY rank
+		ORDER BY ts_rank(p.search_vector, websearch_to_tsquery('english', ?)) DESC
 		LIMIT ?
 	`
 
 	err := s.db.WithContext(ctx).
-		Raw(query, searchQuery, limit).
+		Raw(query, searchQuery, searchQuery, limit).
 		Scan(&patterns).Error
 
 	if err != nil {

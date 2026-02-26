@@ -13,6 +13,12 @@ import (
 
 // runMigrations runs all database migrations using gormigrate.
 func runMigrations(db *gorm.DB, sqlDB *sql.DB) error {
+	// Enable pgvector extension before running any migrations.
+	// CREATE EXTENSION IF NOT EXISTS is idempotent.
+	if err := db.Exec("CREATE EXTENSION IF NOT EXISTS vector").Error; err != nil {
+		return fmt.Errorf("enable pgvector extension: %w", err)
+	}
+
 	m := gormigrate.New(db, gormigrate.DefaultOptions, []*gormigrate.Migration{
 		// Migration 001: Core tables (SDKSession, Observation, SessionSummary)
 		{
@@ -43,30 +49,19 @@ func runMigrations(db *gorm.DB, sqlDB *sql.DB) error {
 			},
 		},
 
-		// Migration 003: FTS5 virtual table for user prompts
+		// Migration 003: Full-text search for user prompts via tsvector (PostgreSQL).
+		// Replaces SQLite FTS5 virtual table with a generated tsvector column + GIN index.
 		{
 			ID: "003_user_prompts_fts",
 			Migrate: func(tx *gorm.DB) error {
 				sqls := []string{
-					`CREATE VIRTUAL TABLE IF NOT EXISTS user_prompts_fts USING fts5(
-						prompt_text,
-						content='user_prompts',
-						content_rowid='id'
-					)`,
-					`CREATE TRIGGER IF NOT EXISTS user_prompts_ai AFTER INSERT ON user_prompts BEGIN
-						INSERT INTO user_prompts_fts(rowid, prompt_text)
-						VALUES (new.id, new.prompt_text);
-					END`,
-					`CREATE TRIGGER IF NOT EXISTS user_prompts_ad AFTER DELETE ON user_prompts BEGIN
-						INSERT INTO user_prompts_fts(user_prompts_fts, rowid, prompt_text)
-						VALUES('delete', old.id, old.prompt_text);
-					END`,
-					`CREATE TRIGGER IF NOT EXISTS user_prompts_au AFTER UPDATE ON user_prompts BEGIN
-						INSERT INTO user_prompts_fts(user_prompts_fts, rowid, prompt_text)
-						VALUES('delete', old.id, old.prompt_text);
-						INSERT INTO user_prompts_fts(rowid, prompt_text)
-						VALUES (new.id, new.prompt_text);
-					END`,
+					`ALTER TABLE user_prompts
+					 ADD COLUMN IF NOT EXISTS search_vector tsvector
+					 GENERATED ALWAYS AS (
+					   to_tsvector('english', COALESCE(prompt_text, ''))
+					 ) STORED`,
+					`CREATE INDEX IF NOT EXISTS idx_user_prompts_fts
+					 ON user_prompts USING GIN(search_vector)`,
 				}
 				for _, s := range sqls {
 					if err := tx.Exec(s).Error; err != nil {
@@ -77,44 +72,34 @@ func runMigrations(db *gorm.DB, sqlDB *sql.DB) error {
 			},
 			Rollback: func(tx *gorm.DB) error {
 				sqls := []string{
-					"DROP TRIGGER IF EXISTS user_prompts_au",
-					"DROP TRIGGER IF EXISTS user_prompts_ad",
-					"DROP TRIGGER IF EXISTS user_prompts_ai",
-					"DROP TABLE IF EXISTS user_prompts_fts",
+					"DROP INDEX IF EXISTS idx_user_prompts_fts",
+					"ALTER TABLE user_prompts DROP COLUMN IF EXISTS search_vector",
 				}
 				for _, s := range sqls {
 					if err := tx.Exec(s).Error; err != nil {
-						return err
+						continue
 					}
 				}
 				return nil
 			},
 		},
 
-		// Migration 004: FTS5 virtual table for observations
+		// Migration 004: Full-text search for observations via tsvector (PostgreSQL).
 		{
 			ID: "004_observations_fts",
 			Migrate: func(tx *gorm.DB) error {
 				sqls := []string{
-					`CREATE VIRTUAL TABLE IF NOT EXISTS observations_fts USING fts5(
-						title, subtitle, narrative,
-						content='observations',
-						content_rowid='id'
-					)`,
-					`CREATE TRIGGER IF NOT EXISTS observations_ai AFTER INSERT ON observations BEGIN
-						INSERT INTO observations_fts(rowid, title, subtitle, narrative)
-						VALUES (new.id, new.title, new.subtitle, new.narrative);
-					END`,
-					`CREATE TRIGGER IF NOT EXISTS observations_ad AFTER DELETE ON observations BEGIN
-						INSERT INTO observations_fts(observations_fts, rowid, title, subtitle, narrative)
-						VALUES('delete', old.id, old.title, old.subtitle, old.narrative);
-					END`,
-					`CREATE TRIGGER IF NOT EXISTS observations_au AFTER UPDATE ON observations BEGIN
-						INSERT INTO observations_fts(observations_fts, rowid, title, subtitle, narrative)
-						VALUES('delete', old.id, old.title, old.subtitle, old.narrative);
-						INSERT INTO observations_fts(rowid, title, subtitle, narrative)
-						VALUES (new.id, new.title, new.subtitle, new.narrative);
-					END`,
+					`ALTER TABLE observations
+					 ADD COLUMN IF NOT EXISTS search_vector tsvector
+					 GENERATED ALWAYS AS (
+					   to_tsvector('english',
+					     COALESCE(title, '') || ' ' ||
+					     COALESCE(subtitle, '') || ' ' ||
+					     COALESCE(narrative, '')
+					   )
+					 ) STORED`,
+					`CREATE INDEX IF NOT EXISTS idx_observations_fts
+					 ON observations USING GIN(search_vector)`,
 				}
 				for _, s := range sqls {
 					if err := tx.Exec(s).Error; err != nil {
@@ -125,44 +110,37 @@ func runMigrations(db *gorm.DB, sqlDB *sql.DB) error {
 			},
 			Rollback: func(tx *gorm.DB) error {
 				sqls := []string{
-					"DROP TRIGGER IF EXISTS observations_au",
-					"DROP TRIGGER IF EXISTS observations_ad",
-					"DROP TRIGGER IF EXISTS observations_ai",
-					"DROP TABLE IF EXISTS observations_fts",
+					"DROP INDEX IF EXISTS idx_observations_fts",
+					"ALTER TABLE observations DROP COLUMN IF EXISTS search_vector",
 				}
 				for _, s := range sqls {
 					if err := tx.Exec(s).Error; err != nil {
-						return err
+						continue
 					}
 				}
 				return nil
 			},
 		},
 
-		// Migration 005: FTS5 virtual table for session summaries
+		// Migration 005: Full-text search for session summaries via tsvector (PostgreSQL).
 		{
 			ID: "005_session_summaries_fts",
 			Migrate: func(tx *gorm.DB) error {
 				sqls := []string{
-					`CREATE VIRTUAL TABLE IF NOT EXISTS session_summaries_fts USING fts5(
-						request, investigated, learned, completed, next_steps, notes,
-						content='session_summaries',
-						content_rowid='id'
-					)`,
-					`CREATE TRIGGER IF NOT EXISTS session_summaries_ai AFTER INSERT ON session_summaries BEGIN
-						INSERT INTO session_summaries_fts(rowid, request, investigated, learned, completed, next_steps, notes)
-						VALUES (new.id, new.request, new.investigated, new.learned, new.completed, new.next_steps, new.notes);
-					END`,
-					`CREATE TRIGGER IF NOT EXISTS session_summaries_ad AFTER DELETE ON session_summaries BEGIN
-						INSERT INTO session_summaries_fts(session_summaries_fts, rowid, request, investigated, learned, completed, next_steps, notes)
-						VALUES('delete', old.id, old.request, old.investigated, old.learned, old.completed, old.next_steps, old.notes);
-					END`,
-					`CREATE TRIGGER IF NOT EXISTS session_summaries_au AFTER UPDATE ON session_summaries BEGIN
-						INSERT INTO session_summaries_fts(session_summaries_fts, rowid, request, investigated, learned, completed, next_steps, notes)
-						VALUES('delete', old.id, old.request, old.investigated, old.learned, old.completed, old.next_steps, old.notes);
-						INSERT INTO session_summaries_fts(rowid, request, investigated, learned, completed, next_steps, notes)
-						VALUES (new.id, new.request, new.investigated, new.learned, new.completed, new.next_steps, new.notes);
-					END`,
+					`ALTER TABLE session_summaries
+					 ADD COLUMN IF NOT EXISTS search_vector tsvector
+					 GENERATED ALWAYS AS (
+					   to_tsvector('english',
+					     COALESCE(request, '') || ' ' ||
+					     COALESCE(investigated, '') || ' ' ||
+					     COALESCE(learned, '') || ' ' ||
+					     COALESCE(completed, '') || ' ' ||
+					     COALESCE(next_steps, '') || ' ' ||
+					     COALESCE(notes, '')
+					   )
+					 ) STORED`,
+					`CREATE INDEX IF NOT EXISTS idx_session_summaries_fts
+					 ON session_summaries USING GIN(search_vector)`,
 				}
 				for _, s := range sqls {
 					if err := tx.Exec(s).Error; err != nil {
@@ -173,10 +151,39 @@ func runMigrations(db *gorm.DB, sqlDB *sql.DB) error {
 			},
 			Rollback: func(tx *gorm.DB) error {
 				sqls := []string{
-					"DROP TRIGGER IF EXISTS session_summaries_au",
-					"DROP TRIGGER IF EXISTS session_summaries_ad",
-					"DROP TRIGGER IF EXISTS session_summaries_ai",
-					"DROP TABLE IF EXISTS session_summaries_fts",
+					"DROP INDEX IF EXISTS idx_session_summaries_fts",
+					"ALTER TABLE session_summaries DROP COLUMN IF EXISTS search_vector",
+				}
+				for _, s := range sqls {
+					if err := tx.Exec(s).Error; err != nil {
+						continue
+					}
+				}
+				return nil
+			},
+		},
+
+		// Migration 006: pgvector vectors table.
+		// Replaces sqlite-vec VIRTUAL TABLE with a standard PostgreSQL table using vector(384).
+		// An HNSW index is created for efficient cosine similarity search.
+		{
+			ID: "006_sqlite_vec_vectors",
+			Migrate: func(tx *gorm.DB) error {
+				sqls := []string{
+					`CREATE TABLE IF NOT EXISTS vectors (
+						doc_id       TEXT PRIMARY KEY,
+						embedding    vector(384) NOT NULL,
+						sqlite_id    BIGINT,
+						doc_type     TEXT,
+						field_type   TEXT,
+						project      TEXT,
+						scope        TEXT,
+						model_version TEXT
+					)`,
+					// HNSW index for fast approximate nearest-neighbor search with cosine distance.
+					`CREATE INDEX IF NOT EXISTS idx_vectors_embedding_hnsw
+					 ON vectors USING hnsw (embedding vector_cosine_ops)
+					 WITH (m = 16, ef_construction = 64)`,
 				}
 				for _, s := range sqls {
 					if err := tx.Exec(s).Error; err != nil {
@@ -184,25 +191,6 @@ func runMigrations(db *gorm.DB, sqlDB *sql.DB) error {
 					}
 				}
 				return nil
-			},
-		},
-
-		// Migration 006: sqlite-vec vectors table
-		{
-			ID: "006_sqlite_vec_vectors",
-			Migrate: func(tx *gorm.DB) error {
-				// Note: Uses bge-small-en-v1.5 embeddings (384 dimensions) with model_version
-				sql := `CREATE VIRTUAL TABLE IF NOT EXISTS vectors USING vec0(
-					doc_id TEXT PRIMARY KEY,
-					embedding float[384],
-					sqlite_id INTEGER,
-					doc_type TEXT,
-					field_type TEXT,
-					project TEXT,
-					scope TEXT,
-					model_version TEXT
-				)`
-				return tx.Exec(sql).Error
 			},
 			Rollback: func(tx *gorm.DB) error {
 				return tx.Exec("DROP TABLE IF EXISTS vectors").Error
@@ -264,30 +252,22 @@ func runMigrations(db *gorm.DB, sqlDB *sql.DB) error {
 			},
 		},
 
-		// Migration 010: FTS5 virtual table for patterns
+		// Migration 010: Full-text search for patterns via tsvector (PostgreSQL).
 		{
 			ID: "010_patterns_fts",
 			Migrate: func(tx *gorm.DB) error {
 				sqls := []string{
-					`CREATE VIRTUAL TABLE IF NOT EXISTS patterns_fts USING fts5(
-						name, description, recommendation,
-						content='patterns',
-						content_rowid='id'
-					)`,
-					`CREATE TRIGGER IF NOT EXISTS patterns_ai AFTER INSERT ON patterns BEGIN
-						INSERT INTO patterns_fts(rowid, name, description, recommendation)
-						VALUES (new.id, new.name, new.description, new.recommendation);
-					END`,
-					`CREATE TRIGGER IF NOT EXISTS patterns_ad AFTER DELETE ON patterns BEGIN
-						INSERT INTO patterns_fts(patterns_fts, rowid, name, description, recommendation)
-						VALUES('delete', old.id, old.name, old.description, old.recommendation);
-					END`,
-					`CREATE TRIGGER IF NOT EXISTS patterns_au AFTER UPDATE ON patterns BEGIN
-						INSERT INTO patterns_fts(patterns_fts, rowid, name, description, recommendation)
-						VALUES('delete', old.id, old.name, old.description, old.recommendation);
-						INSERT INTO patterns_fts(rowid, name, description, recommendation)
-						VALUES (new.id, new.name, new.description, new.recommendation);
-					END`,
+					`ALTER TABLE patterns
+					 ADD COLUMN IF NOT EXISTS search_vector tsvector
+					 GENERATED ALWAYS AS (
+					   to_tsvector('english',
+					     COALESCE(name, '') || ' ' ||
+					     COALESCE(description, '') || ' ' ||
+					     COALESCE(recommendation, '')
+					   )
+					 ) STORED`,
+					`CREATE INDEX IF NOT EXISTS idx_patterns_fts
+					 ON patterns USING GIN(search_vector)`,
 				}
 				for _, s := range sqls {
 					if err := tx.Exec(s).Error; err != nil {
@@ -298,14 +278,12 @@ func runMigrations(db *gorm.DB, sqlDB *sql.DB) error {
 			},
 			Rollback: func(tx *gorm.DB) error {
 				sqls := []string{
-					"DROP TRIGGER IF EXISTS patterns_au",
-					"DROP TRIGGER IF EXISTS patterns_ad",
-					"DROP TRIGGER IF EXISTS patterns_ai",
-					"DROP TABLE IF EXISTS patterns_fts",
+					"DROP INDEX IF EXISTS idx_patterns_fts",
+					"ALTER TABLE patterns DROP COLUMN IF EXISTS search_vector",
 				}
 				for _, s := range sqls {
 					if err := tx.Exec(s).Error; err != nil {
-						return err
+						continue
 					}
 				}
 				return nil
@@ -383,10 +361,10 @@ func runMigrations(db *gorm.DB, sqlDB *sql.DB) error {
 			ID: "013_observation_archival",
 			Migrate: func(tx *gorm.DB) error {
 				sqls := []string{
-					// Add archival columns
-					`ALTER TABLE observations ADD COLUMN is_archived INTEGER DEFAULT 0`,
-					`ALTER TABLE observations ADD COLUMN archived_at_epoch INTEGER`,
-					`ALTER TABLE observations ADD COLUMN archived_reason TEXT`,
+					// Add archival columns (IF NOT EXISTS: PostgreSQL 9.6+, idempotent)
+					`ALTER TABLE observations ADD COLUMN IF NOT EXISTS is_archived INTEGER DEFAULT 0`,
+					`ALTER TABLE observations ADD COLUMN IF NOT EXISTS archived_at_epoch INTEGER`,
+					`ALTER TABLE observations ADD COLUMN IF NOT EXISTS archived_reason TEXT`,
 					// Index for archived observations
 					`CREATE INDEX IF NOT EXISTS idx_observations_archived ON observations(is_archived)`,
 					// Composite index for filtering active (non-archived) observations

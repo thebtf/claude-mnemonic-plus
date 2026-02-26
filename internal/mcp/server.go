@@ -15,7 +15,7 @@ import (
 	"github.com/lukaszraczylo/claude-mnemonic/internal/maintenance"
 	"github.com/lukaszraczylo/claude-mnemonic/internal/scoring"
 	"github.com/lukaszraczylo/claude-mnemonic/internal/search"
-	"github.com/lukaszraczylo/claude-mnemonic/internal/vector/sqlitevec"
+	"github.com/lukaszraczylo/claude-mnemonic/internal/vector"
 	"github.com/lukaszraczylo/claude-mnemonic/pkg/models"
 	"github.com/rs/zerolog/log"
 )
@@ -30,7 +30,7 @@ type Server struct {
 	patternStore       *gorm.PatternStore
 	relationStore      *gorm.RelationStore
 	sessionStore       *gorm.SessionStore
-	vectorClient       *sqlitevec.Client
+	vectorClient       vector.Client
 	scoreCalculator    *scoring.Calculator
 	recalculator       *scoring.Recalculator
 	maintenanceService *maintenance.Service
@@ -45,7 +45,7 @@ func NewServer(
 	patternStore *gorm.PatternStore,
 	relationStore *gorm.RelationStore,
 	sessionStore *gorm.SessionStore,
-	vectorClient *sqlitevec.Client,
+	vectorClient vector.Client,
 	scoreCalculator *scoring.Calculator,
 	recalculator *scoring.Recalculator,
 	maintenanceService *maintenance.Service,
@@ -1087,17 +1087,17 @@ func (s *Server) handleFindSimilarObservations(ctx context.Context, args json.Ra
 		return "", fmt.Errorf("vector search not available")
 	}
 
-	where := sqlitevec.BuildWhereFilter(sqlitevec.DocTypeObservation, params.Project)
+	where := vector.BuildWhereFilter(vector.DocTypeObservation, params.Project)
 	results, err := s.vectorClient.Query(ctx, params.Query, params.Limit*2, where)
 	if err != nil {
 		return "", fmt.Errorf("vector search failed: %w", err)
 	}
 
 	// Filter by similarity threshold
-	filtered := sqlitevec.FilterByThreshold(results, params.MinSimilarity, params.Limit)
+	filtered := vector.FilterByThreshold(results, params.MinSimilarity, params.Limit)
 
 	// Extract observation IDs and build similarity map
-	obsIDs := sqlitevec.ExtractObservationIDs(filtered, params.Project)
+	obsIDs := vector.ExtractObservationIDs(filtered, params.Project)
 	similarityMap := make(map[int64]float64, len(filtered))
 	for _, r := range filtered {
 		if sqliteID, ok := r.Metadata["sqlite_id"].(float64); ok {
@@ -1833,7 +1833,7 @@ func (s *Server) handleSuggestConsolidations(ctx context.Context, args json.RawM
 		}
 
 		// Query for similar observations
-		where := sqlitevec.BuildWhereFilter(sqlitevec.DocTypeObservation, params.Project)
+		where := vector.BuildWhereFilter(vector.DocTypeObservation, params.Project)
 		results, err := s.vectorClient.Query(ctx, searchText, 10, where)
 		if err != nil {
 			continue

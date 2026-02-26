@@ -1,17 +1,16 @@
-//go:build ignore
-
-// Package sqlitevec provides sqlite-vec based vector database integration for claude-mnemonic.
-package sqlitevec
+// Package pgvector provides PostgreSQL+pgvector based vector storage for claude-mnemonic.
+package pgvector
 
 import (
 	"context"
 	"fmt"
 
+	"github.com/lukaszraczylo/claude-mnemonic/internal/vector"
 	"github.com/lukaszraczylo/claude-mnemonic/pkg/models"
 	"github.com/rs/zerolog/log"
 )
 
-// Sync provides synchronization between SQLite data and vector embeddings.
+// Sync provides synchronization between PostgreSQL data and vector embeddings.
 type Sync struct {
 	client *Client
 }
@@ -35,15 +34,15 @@ func (s *Sync) SyncObservation(ctx context.Context, obs *models.Observation) err
 	log.Debug().
 		Int64("observationId", obs.ID).
 		Int("docCount", len(docs)).
-		Msg("Synced observation to sqlite-vec")
+		Msg("Synced observation to pgvector")
 
 	return nil
 }
 
 // formatObservationDocs formats an observation into vector documents.
 // Each semantic field becomes a separate vector document (granular approach).
-func (s *Sync) formatObservationDocs(obs *models.Observation) []Document {
-	docs := make([]Document, 0, len(obs.Facts)+2)
+func (s *Sync) formatObservationDocs(obs *models.Observation) []vector.Document {
+	docs := make([]vector.Document, 0, len(obs.Facts)+2)
 
 	// Determine scope for metadata
 	scope := string(obs.Scope)
@@ -68,30 +67,30 @@ func (s *Sync) formatObservationDocs(obs *models.Observation) []Document {
 		baseMetadata["subtitle"] = obs.Subtitle.String
 	}
 	if len(obs.Concepts) > 0 {
-		baseMetadata["concepts"] = joinStrings(obs.Concepts, ",")
+		baseMetadata["concepts"] = vector.JoinStrings(obs.Concepts, ",")
 	}
 	if len(obs.FilesRead) > 0 {
-		baseMetadata["files_read"] = joinStrings(obs.FilesRead, ",")
+		baseMetadata["files_read"] = vector.JoinStrings(obs.FilesRead, ",")
 	}
 	if len(obs.FilesModified) > 0 {
-		baseMetadata["files_modified"] = joinStrings(obs.FilesModified, ",")
+		baseMetadata["files_modified"] = vector.JoinStrings(obs.FilesModified, ",")
 	}
 
 	// Narrative as separate document
 	if obs.Narrative.Valid && obs.Narrative.String != "" {
-		docs = append(docs, Document{
+		docs = append(docs, vector.Document{
 			ID:       fmt.Sprintf("obs_%d_narrative", obs.ID),
 			Content:  obs.Narrative.String,
-			Metadata: copyMetadata(baseMetadata, "field_type", "narrative"),
+			Metadata: vector.CopyMetadata(baseMetadata, "field_type", "narrative"),
 		})
 	}
 
 	// Each fact as separate document
 	for i, fact := range obs.Facts {
-		docs = append(docs, Document{
+		docs = append(docs, vector.Document{
 			ID:      fmt.Sprintf("obs_%d_fact_%d", obs.ID, i),
 			Content: fact,
-			Metadata: copyMetadataMulti(baseMetadata, map[string]any{
+			Metadata: vector.CopyMetadataMulti(baseMetadata, map[string]any{
 				"field_type": "fact",
 				"fact_index": i,
 			}),
@@ -115,14 +114,14 @@ func (s *Sync) SyncSummary(ctx context.Context, summary *models.SessionSummary) 
 	log.Debug().
 		Int64("summaryId", summary.ID).
 		Int("docCount", len(docs)).
-		Msg("Synced summary to sqlite-vec")
+		Msg("Synced summary to pgvector")
 
 	return nil
 }
 
 // formatSummaryDocs formats a session summary into vector documents.
-func (s *Sync) formatSummaryDocs(summary *models.SessionSummary) []Document {
-	docs := make([]Document, 0, 6)
+func (s *Sync) formatSummaryDocs(summary *models.SessionSummary) []vector.Document {
+	docs := make([]vector.Document, 0, 6)
 
 	baseMetadata := map[string]any{
 		"sqlite_id":        summary.ID,
@@ -153,10 +152,10 @@ func (s *Sync) formatSummaryDocs(summary *models.SessionSummary) []Document {
 
 	for _, field := range fields {
 		if field.valid && field.value != "" {
-			docs = append(docs, Document{
+			docs = append(docs, vector.Document{
 				ID:       fmt.Sprintf("summary_%d_%s", summary.ID, field.name),
 				Content:  field.value,
-				Metadata: copyMetadata(baseMetadata, "field_type", field.name),
+				Metadata: vector.CopyMetadata(baseMetadata, "field_type", field.name),
 			})
 		}
 	}
@@ -166,7 +165,7 @@ func (s *Sync) formatSummaryDocs(summary *models.SessionSummary) []Document {
 
 // SyncUserPrompt syncs a single user prompt to the vector store.
 func (s *Sync) SyncUserPrompt(ctx context.Context, prompt *models.UserPromptWithSession) error {
-	doc := Document{
+	doc := vector.Document{
 		ID:      fmt.Sprintf("prompt_%d", prompt.ID),
 		Content: prompt.PromptText,
 		Metadata: map[string]any{
@@ -181,13 +180,13 @@ func (s *Sync) SyncUserPrompt(ctx context.Context, prompt *models.UserPromptWith
 		},
 	}
 
-	if err := s.client.AddDocuments(ctx, []Document{doc}); err != nil {
+	if err := s.client.AddDocuments(ctx, []vector.Document{doc}); err != nil {
 		return fmt.Errorf("add prompt doc: %w", err)
 	}
 
 	log.Debug().
 		Int64("promptId", prompt.ID).
-		Msg("Synced user prompt to sqlite-vec")
+		Msg("Synced user prompt to pgvector")
 
 	return nil
 }
@@ -198,7 +197,7 @@ func (s *Sync) DeleteObservations(ctx context.Context, observationIDs []int64) e
 		return nil
 	}
 
-	// Generate all possible document IDs for these observations
+	// Generate all possible document IDs for these observations.
 	// Pattern: obs_{id}_narrative, obs_{id}_fact_{0..n}
 	const maxFactsPerObs = 20
 	ids := make([]string, 0, len(observationIDs)*(maxFactsPerObs+1))
@@ -216,7 +215,7 @@ func (s *Sync) DeleteObservations(ctx context.Context, observationIDs []int64) e
 
 	log.Debug().
 		Int("observationCount", len(observationIDs)).
-		Msg("Deleted observations from sqlite-vec")
+		Msg("Deleted observations from pgvector")
 
 	return nil
 }
@@ -238,7 +237,7 @@ func (s *Sync) DeleteUserPrompts(ctx context.Context, promptIDs []int64) error {
 
 	log.Debug().
 		Int("promptCount", len(promptIDs)).
-		Msg("Deleted user prompts from sqlite-vec")
+		Msg("Deleted user prompts from pgvector")
 
 	return nil
 }
@@ -257,14 +256,14 @@ func (s *Sync) SyncPattern(ctx context.Context, pattern *models.Pattern) error {
 	log.Debug().
 		Int64("patternId", pattern.ID).
 		Int("docCount", len(docs)).
-		Msg("Synced pattern to sqlite-vec")
+		Msg("Synced pattern to pgvector")
 
 	return nil
 }
 
 // formatPatternDocs formats a pattern into vector documents.
-func (s *Sync) formatPatternDocs(pattern *models.Pattern) []Document {
-	docs := make([]Document, 0, 3)
+func (s *Sync) formatPatternDocs(pattern *models.Pattern) []vector.Document {
+	docs := make([]vector.Document, 0, 3)
 
 	baseMetadata := map[string]any{
 		"sqlite_id":        pattern.ID,
@@ -278,36 +277,36 @@ func (s *Sync) formatPatternDocs(pattern *models.Pattern) []Document {
 	}
 
 	if len(pattern.Signature) > 0 {
-		baseMetadata["signature"] = joinStrings(pattern.Signature, ",")
+		baseMetadata["signature"] = vector.JoinStrings(pattern.Signature, ",")
 	}
 	if len(pattern.Projects) > 0 {
-		baseMetadata["projects"] = joinStrings(pattern.Projects, ",")
+		baseMetadata["projects"] = vector.JoinStrings(pattern.Projects, ",")
 	}
 
 	// Pattern name as document
 	if pattern.Name != "" {
-		docs = append(docs, Document{
+		docs = append(docs, vector.Document{
 			ID:       fmt.Sprintf("pattern_%d_name", pattern.ID),
 			Content:  pattern.Name,
-			Metadata: copyMetadata(baseMetadata, "field_type", "name"),
+			Metadata: vector.CopyMetadata(baseMetadata, "field_type", "name"),
 		})
 	}
 
 	// Pattern description as document
 	if pattern.Description.Valid && pattern.Description.String != "" {
-		docs = append(docs, Document{
+		docs = append(docs, vector.Document{
 			ID:       fmt.Sprintf("pattern_%d_description", pattern.ID),
 			Content:  pattern.Description.String,
-			Metadata: copyMetadata(baseMetadata, "field_type", "description"),
+			Metadata: vector.CopyMetadata(baseMetadata, "field_type", "description"),
 		})
 	}
 
 	// Pattern recommendation as document
 	if pattern.Recommendation.Valid && pattern.Recommendation.String != "" {
-		docs = append(docs, Document{
+		docs = append(docs, vector.Document{
 			ID:       fmt.Sprintf("pattern_%d_recommendation", pattern.ID),
 			Content:  pattern.Recommendation.String,
-			Metadata: copyMetadata(baseMetadata, "field_type", "recommendation"),
+			Metadata: vector.CopyMetadata(baseMetadata, "field_type", "recommendation"),
 		})
 	}
 
@@ -320,7 +319,7 @@ func (s *Sync) DeletePatterns(ctx context.Context, patternIDs []int64) error {
 		return nil
 	}
 
-	// Generate all possible document IDs for these patterns
+	// Generate all possible document IDs for these patterns.
 	// Pattern: pattern_{id}_name, pattern_{id}_description, pattern_{id}_recommendation
 	ids := make([]string, 0, len(patternIDs)*3)
 
@@ -336,7 +335,7 @@ func (s *Sync) DeletePatterns(ctx context.Context, patternIDs []int64) error {
 
 	log.Debug().
 		Int("patternCount", len(patternIDs)).
-		Msg("Deleted patterns from sqlite-vec")
+		Msg("Deleted patterns from pgvector")
 
 	return nil
 }
@@ -381,7 +380,7 @@ func (s *Sync) BatchSyncObservations(ctx context.Context, observations []*models
 		end := min(i+cfg.BatchSize, len(observations))
 
 		batch := observations[i:end]
-		var docs []Document
+		var docs []vector.Document
 
 		// Collect all documents for this batch
 		for _, obs := range batch {
@@ -433,7 +432,7 @@ func (s *Sync) BatchSyncSummaries(ctx context.Context, summaries []*models.Sessi
 		end := min(i+cfg.BatchSize, len(summaries))
 
 		batch := summaries[i:end]
-		var docs []Document
+		var docs []vector.Document
 
 		// Collect all documents for this batch
 		for _, summary := range batch {
@@ -485,11 +484,11 @@ func (s *Sync) BatchSyncPrompts(ctx context.Context, prompts []*models.UserPromp
 		end := min(i+cfg.BatchSize, len(prompts))
 
 		batch := prompts[i:end]
-		docs := make([]Document, 0, len(batch))
+		docs := make([]vector.Document, 0, len(batch))
 
 		// Collect all documents for this batch
 		for _, prompt := range batch {
-			docs = append(docs, Document{
+			docs = append(docs, vector.Document{
 				ID:      fmt.Sprintf("prompt_%d", prompt.ID),
 				Content: prompt.PromptText,
 				Metadata: map[string]any{

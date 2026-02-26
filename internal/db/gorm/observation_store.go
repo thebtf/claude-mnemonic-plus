@@ -592,10 +592,12 @@ func (s *ObservationStore) SearchObservationsFTS(ctx context.Context, query, pro
 		return nil, nil
 	}
 
-	// Build FTS5 query: keyword1 OR keyword2 OR keyword3
+	// Build keywords string for LIKE fallback (still used below).
 	ftsTerms := strings.Join(keywords, " OR ")
+	_ = ftsTerms // used only in fallback path below
 
-	// Use FTS5 via raw SQL (GORM can't handle FTS5 MATCH operator)
+	// PostgreSQL full-text search via tsvector column (added in migration 004).
+	// websearch_to_tsquery handles natural-language queries including OR operators.
 	ftsQuery := `
 		SELECT o.id, o.sdk_session_id, o.project, COALESCE(o.scope, 'project') as scope, o.type,
 		       o.title, o.subtitle, o.facts, o.narrative, o.concepts, o.files_read, o.files_modified,
@@ -606,14 +608,14 @@ func (s *ObservationStore) SearchObservationsFTS(ctx context.Context, query, pro
 		       o.last_retrieved_at_epoch, o.score_updated_at_epoch,
 		       COALESCE(o.is_superseded, 0) as is_superseded
 		FROM observations o
-		JOIN observations_fts fts ON o.id = fts.rowid
-		WHERE observations_fts MATCH ?
-		  AND (o.project = ? OR o.scope = 'global')
-		ORDER BY rank, COALESCE(o.importance_score, 1.0) DESC
-		LIMIT ?
+		WHERE o.search_vector @@ websearch_to_tsquery('english', $1)
+		  AND (o.project = $2 OR o.scope = 'global')
+		ORDER BY ts_rank(o.search_vector, websearch_to_tsquery('english', $1)) DESC,
+		         COALESCE(o.importance_score, 1.0) DESC
+		LIMIT $3
 	`
 
-	rows, err := s.rawDB.QueryContext(ctx, ftsQuery, ftsTerms, project, limit)
+	rows, err := s.rawDB.QueryContext(ctx, ftsQuery, query, project, limit)
 	if err != nil {
 		// FTS failed, try LIKE fallback
 		return s.searchObservationsLike(ctx, keywords, project, limit)

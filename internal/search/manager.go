@@ -13,7 +13,7 @@ import (
 	"time"
 
 	"github.com/lukaszraczylo/claude-mnemonic/internal/db/gorm"
-	"github.com/lukaszraczylo/claude-mnemonic/internal/vector/sqlitevec"
+	"github.com/lukaszraczylo/claude-mnemonic/internal/vector"
 	"github.com/lukaszraczylo/claude-mnemonic/pkg/models"
 	"github.com/rs/zerolog/log"
 	"golang.org/x/sync/singleflight"
@@ -118,7 +118,7 @@ type Manager struct {
 	ctx              context.Context
 	searchGroup      singleflight.Group
 	cancel           context.CancelFunc
-	vectorClient     *sqlitevec.Client
+	vectorClient     vector.Client
 	metrics          *SearchMetrics
 	promptStore      *gorm.PromptStore
 	observationStore *gorm.ObservationStore
@@ -150,7 +150,7 @@ func NewManager(
 	observationStore *gorm.ObservationStore,
 	summaryStore *gorm.SummaryStore,
 	promptStore *gorm.PromptStore,
-	vectorClient *sqlitevec.Client,
+	vectorClient vector.Client,
 ) *Manager {
 	ctx, cancel := context.WithCancel(context.Background())
 	m := &Manager{
@@ -734,16 +734,16 @@ func (m *Manager) vectorSearch(ctx context.Context, params SearchParams) (*Unifi
 	}()
 
 	// Build where filter based on search type
-	var docType sqlitevec.DocType
+	var docType vector.DocType
 	switch params.Type {
 	case "observations":
-		docType = sqlitevec.DocTypeObservation
+		docType = vector.DocTypeObservation
 	case "sessions":
-		docType = sqlitevec.DocTypeSessionSummary
+		docType = vector.DocTypeSessionSummary
 	case "prompts":
-		docType = sqlitevec.DocTypeUserPrompt
+		docType = vector.DocTypeUserPrompt
 	}
-	where := sqlitevec.BuildWhereFilter(docType, params.Project)
+	where := vector.BuildWhereFilter(docType, params.Project)
 
 	// Query sqlite-vec
 	vectorResults, err := m.vectorClient.Query(ctx, params.Query, params.Limit*2, where)
@@ -754,7 +754,7 @@ func (m *Manager) vectorSearch(ctx context.Context, params SearchParams) (*Unifi
 	}
 
 	// Extract IDs grouped by document type using shared helper
-	extracted := sqlitevec.ExtractIDsByDocType(vectorResults)
+	extracted := vector.ExtractIDsByDocType(vectorResults)
 	obsIDs := extracted.ObservationIDs
 	summaryIDs := extracted.SummaryIDs
 	promptIDs := extracted.PromptIDs

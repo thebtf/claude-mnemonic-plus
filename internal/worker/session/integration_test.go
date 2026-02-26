@@ -1,3 +1,5 @@
+//go:build ignore
+
 // Package session provides session lifecycle management for claude-mnemonic.
 package session
 

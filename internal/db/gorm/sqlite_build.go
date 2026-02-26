@@ -1,5 +1,4 @@
-//go:build !sqlite_omit_load_extension
-// +build !sqlite_omit_load_extension
+//go:build ignore
 
 // Package gorm provides GORM-based database operations for claude-mnemonic.
 package gorm

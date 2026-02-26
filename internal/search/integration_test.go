@@ -1,3 +1,5 @@
+//go:build ignore
+
 // Package search provides unified search capabilities for claude-mnemonic.
 package search
 

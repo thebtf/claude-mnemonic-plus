@@ -1,3 +1,5 @@
+//go:build ignore
+
 // Package hybrid provides LEANN-inspired selective vector storage for claude-mnemonic.
 //
 // This package implements a hybrid storage strategy where frequently-accessed

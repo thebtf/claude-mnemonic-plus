@@ -50,6 +50,8 @@ type Config struct {
 	EmbeddingModelName        string `json:"embedding_model_name"`
 	EmbeddingDimensions       int    `json:"embedding_dimensions"`
 	EmbeddingAPIKey           string
+	DatabaseDSN               string   `json:"-"`                  // env-only: DATABASE_DSN (contains password, never JSON)
+	DatabaseMaxConns          int      `json:"database_max_conns"` // PostgreSQL pool size (default: 10)
 	ContextObsConcepts        []string `json:"context_obs_concepts"`
 	ContextObsTypes           []string `json:"context_obs_types"`
 	ContextFullCount          int      `json:"context_full_count"`
@@ -188,6 +190,7 @@ func Default() *Config {
 		ObservationRetentionDays:  0,     // 0 = no age-based deletion (keep all)
 		CleanupStaleObservations:  false, // Don't auto-cleanup stale observations
 		WorkerHost:                "127.0.0.1",
+		DatabaseMaxConns:          10,
 	}
 }
 
@@ -331,6 +334,14 @@ func Load() (*Config, error) {
 			cfg.EmbeddingDimensions = d
 		}
 	}
+	if v := strings.TrimSpace(os.Getenv("DATABASE_DSN")); v != "" {
+		cfg.DatabaseDSN = v
+	}
+	if v := strings.TrimSpace(os.Getenv("DATABASE_MAX_CONNS")); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			cfg.DatabaseMaxConns = n
+		}
+	}
 
 	return cfg, nil
 }
@@ -410,6 +421,16 @@ func GetEmbeddingBaseURL() string {
 // GetEmbeddingAPIKey returns the embedding API key (env-only, never from config file).
 func GetEmbeddingAPIKey() string {
 	return strings.TrimSpace(os.Getenv("EMBEDDING_API_KEY"))
+}
+
+// GetDatabaseDSN returns the PostgreSQL DSN.
+// env DATABASE_DSN takes priority (contains password, never stored in config file).
+// Returns empty string if not configured.
+func GetDatabaseDSN() string {
+	if v := strings.TrimSpace(os.Getenv("DATABASE_DSN")); v != "" {
+		return v
+	}
+	return Get().DatabaseDSN
 }
 
 // GetEmbeddingModelName returns the embedding model name for external providers.

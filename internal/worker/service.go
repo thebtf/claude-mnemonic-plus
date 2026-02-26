@@ -20,7 +20,8 @@ import (
 	"github.com/lukaszraczylo/claude-mnemonic/internal/scoring"
 	"github.com/lukaszraczylo/claude-mnemonic/internal/search/expansion"
 	"github.com/lukaszraczylo/claude-mnemonic/internal/update"
-	"github.com/lukaszraczylo/claude-mnemonic/internal/vector/sqlitevec"
+	"github.com/lukaszraczylo/claude-mnemonic/internal/vector"
+	"github.com/lukaszraczylo/claude-mnemonic/internal/vector/pgvector"
 	"github.com/lukaszraczylo/claude-mnemonic/internal/watcher"
 	"github.com/lukaszraczylo/claude-mnemonic/internal/worker/sdk"
 	"github.com/lukaszraczylo/claude-mnemonic/internal/worker/session"
@@ -117,8 +118,8 @@ type Service struct {
 	sseBroadcaster     *sse.Broadcaster
 	processor          *sdk.Processor
 	embedSvc           *embedding.Service
-	vectorClient       *sqlitevec.Client
-	vectorSync         *sqlitevec.Sync
+	vectorClient       vector.Client
+	vectorSync         *pgvector.Sync
 	vectorSyncSem      chan struct{}
 	queryExpander      *expansion.Expander
 	scoreCalculator    *scoring.Calculator
@@ -222,7 +223,7 @@ func (s *Service) setupVectorSyncCallbacks(
 	promptStore *gorm.PromptStore,
 	processor *sdk.Processor,
 	sessionManager *session.Manager,
-	vectorSync *sqlitevec.Sync,
+	vectorSync *pgvector.Sync,
 ) {
 	// Set pattern sync callback if vector sync is available
 	if patternDetector != nil && vectorSync != nil {
@@ -401,9 +402,8 @@ func (s *Service) initializeAsync() {
 
 	// Initialize database (this includes migrations - can be slow)
 	store, err := gorm.NewStore(gorm.Config{
-		Path:     s.config.DBPath,
-		MaxConns: s.config.MaxConns,
-		// WALMode is enabled automatically by GORM
+		DSN:      s.config.DatabaseDSN,
+		MaxConns: s.config.DatabaseMaxConns,
 	})
 	if err != nil {
 		s.setInitError(fmt.Errorf("init database: %w", err))
@@ -424,10 +424,10 @@ func (s *Service) initializeAsync() {
 	// Create session manager
 	sessionManager := session.NewManager(sessionStore)
 
-	// Create embedding service and sqlite-vec client for vector search (optional)
+	// Create embedding service and pgvector client for vector search (optional)
 	var embedSvc *embedding.Service
-	var vectorClient *sqlitevec.Client
-	var vectorSync *sqlitevec.Sync
+	var vectorClient vector.Client
+	var vectorSync *pgvector.Sync
 
 	var reranker *reranking.Service
 
@@ -436,18 +436,19 @@ func (s *Service) initializeAsync() {
 		log.Warn().Err(err).Msg("Embedding service creation failed - vector search disabled")
 	} else {
 		embedSvc = emb
-		// Create sqlite-vec client using the same DB connection
-		client, err := sqlitevec.NewClient(sqlitevec.Config{
-			DB: store.GetRawDB(),
-		}, embedSvc)
+		// Create pgvector client using the GORM DB connection
+		client, err := pgvector.NewClient(pgvector.Config{
+			DB:       store.DB,
+			EmbedSvc: embedSvc,
+		})
 		if err != nil {
-			log.Warn().Err(err).Msg("sqlite-vec client creation failed - vector search disabled")
+			log.Warn().Err(err).Msg("pgvector client creation failed - vector search disabled")
 		} else {
 			vectorClient = client
-			vectorSync = sqlitevec.NewSync(client)
+			vectorSync = pgvector.NewSync(client)
 			log.Info().
 				Str("model", embedSvc.Version()).
-				Msg("sqlite-vec vector search enabled")
+				Msg("pgvector vector search enabled")
 		}
 
 		// Create cross-encoder reranking service if enabled
@@ -583,21 +584,7 @@ func (s *Service) initializeAsync() {
 
 // startWatchers initializes and starts file watchers for database and config.
 func (s *Service) startWatchers() {
-	// Watch database file for deletion
-	dbWatcher, err := watcher.New(s.config.DBPath, func() {
-		log.Warn().Str("path", s.config.DBPath).Msg("Database file deleted, reinitializing...")
-		s.reinitializeDatabase()
-	})
-	if err != nil {
-		log.Warn().Err(err).Msg("Failed to create database watcher")
-	} else {
-		s.dbWatcher = dbWatcher
-		if err := dbWatcher.Start(); err != nil {
-			log.Warn().Err(err).Msg("Failed to start database watcher")
-		} else {
-			log.Info().Str("path", s.config.DBPath).Msg("Database file watcher started")
-		}
-	}
+	// Database file watcher is not applicable for PostgreSQL (no local file to watch).
 
 	// Watch config file for changes (triggers process exit for restart)
 	configPath := config.SettingsPath()
@@ -653,11 +640,10 @@ func (s *Service) reinitializeDatabase() {
 		return
 	}
 
-	// Create new database
+	// Reconnect to PostgreSQL
 	store, err := gorm.NewStore(gorm.Config{
-		Path:     s.config.DBPath,
-		MaxConns: s.config.MaxConns,
-		// WALMode is enabled automatically by GORM
+		DSN:      s.config.DatabaseDSN,
+		MaxConns: s.config.DatabaseMaxConns,
 	})
 	if err != nil {
 		s.setInitError(fmt.Errorf("reinit database: %w", err))
@@ -678,10 +664,10 @@ func (s *Service) reinitializeDatabase() {
 	// Create new session manager
 	sessionManager := session.NewManager(sessionStore)
 
-	// Recreate embedding service and sqlite-vec client
+	// Recreate embedding service and pgvector client
 	var embedSvc *embedding.Service
-	var vectorClient *sqlitevec.Client
-	var vectorSync *sqlitevec.Sync
+	var vectorClient vector.Client
+	var vectorSync *pgvector.Sync
 
 	var reranker *reranking.Service
 
@@ -690,15 +676,16 @@ func (s *Service) reinitializeDatabase() {
 		log.Warn().Err(err).Msg("Embedding service creation failed after reinit")
 	} else {
 		embedSvc = emb
-		client, err := sqlitevec.NewClient(sqlitevec.Config{
-			DB: store.GetRawDB(),
-		}, embedSvc)
+		client, err := pgvector.NewClient(pgvector.Config{
+			DB:       store.DB,
+			EmbedSvc: embedSvc,
+		})
 		if err != nil {
-			log.Warn().Err(err).Msg("sqlite-vec client creation failed after reinit")
+			log.Warn().Err(err).Msg("pgvector client creation failed after reinit")
 		} else {
 			vectorClient = client
-			vectorSync = sqlitevec.NewSync(client)
-			log.Info().Msg("sqlite-vec reconnected after reinit")
+			vectorSync = pgvector.NewSync(client)
+			log.Info().Msg("pgvector reconnected after reinit")
 		}
 
 		// Recreate cross-encoder reranking service if enabled
@@ -862,7 +849,7 @@ func (s *Service) rebuildAllVectors(
 	observationStore *gorm.ObservationStore,
 	summaryStore *gorm.SummaryStore,
 	promptStore *gorm.PromptStore,
-	vectorSync *sqlitevec.Sync,
+	vectorSync *pgvector.Sync,
 ) {
 	defer s.wg.Done()
 
@@ -884,7 +871,7 @@ func (s *Service) rebuildAllVectors(
 	var syncErrors int
 
 	// Use batch sync config for efficient processing
-	cfg := sqlitevec.DefaultBatchSyncConfig()
+	cfg := pgvector.DefaultBatchSyncConfig()
 
 	// Phase 1: Rebuild observations using batch sync
 	observations, err := observationStore.GetAllObservations(s.ctx)
@@ -964,8 +951,8 @@ func (s *Service) rebuildStaleVectors(
 	observationStore *gorm.ObservationStore,
 	summaryStore *gorm.SummaryStore,
 	promptStore *gorm.PromptStore,
-	vectorClient *sqlitevec.Client,
-	vectorSync *sqlitevec.Sync,
+	vectorClient vector.Client,
+	vectorSync *pgvector.Sync,
 ) {
 	defer s.wg.Done()
 

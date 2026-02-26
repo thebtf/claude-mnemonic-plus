@@ -11,7 +11,7 @@ import (
 
 	"github.com/lukaszraczylo/claude-mnemonic/internal/db/gorm"
 	"github.com/lukaszraczylo/claude-mnemonic/internal/embedding"
-	"github.com/lukaszraczylo/claude-mnemonic/internal/vector/sqlitevec"
+	"github.com/lukaszraczylo/claude-mnemonic/internal/vector"
 	"github.com/lukaszraczylo/claude-mnemonic/pkg/models"
 	"github.com/rs/zerolog/log"
 )
@@ -37,10 +37,10 @@ func (s *Service) handleGetObservations(w http.ResponseWriter, r *http.Request) 
 
 	// Use vector search if query is provided and vector client is available
 	if query != "" && s.vectorClient != nil && s.vectorClient.IsConnected() {
-		where := sqlitevec.BuildWhereFilter(sqlitevec.DocTypeObservation, "")
+		where := vector.BuildWhereFilter(vector.DocTypeObservation, "")
 		vectorResults, vecErr := s.vectorClient.Query(r.Context(), query, pagination.Limit*2, where)
 		if vecErr == nil && len(vectorResults) > 0 {
-			obsIDs := sqlitevec.ExtractObservationIDs(vectorResults, project)
+			obsIDs := vector.ExtractObservationIDs(vectorResults, project)
 			if len(obsIDs) > 0 {
 				observations, err = s.observationStore.GetObservationsByIDs(r.Context(), obsIDs, "date_desc", pagination.Limit)
 				if err == nil {
@@ -106,10 +106,10 @@ func (s *Service) handleGetSummaries(w http.ResponseWriter, r *http.Request) {
 
 	// Use vector search if query is provided and vector client is available
 	if query != "" && s.vectorClient != nil && s.vectorClient.IsConnected() {
-		where := sqlitevec.BuildWhereFilter(sqlitevec.DocTypeSessionSummary, "")
+		where := vector.BuildWhereFilter(vector.DocTypeSessionSummary, "")
 		vectorResults, vecErr := s.vectorClient.Query(r.Context(), query, limit*2, where)
 		if vecErr == nil && len(vectorResults) > 0 {
-			summaryIDs := sqlitevec.ExtractSummaryIDs(vectorResults, project)
+			summaryIDs := vector.ExtractSummaryIDs(vectorResults, project)
 			if len(summaryIDs) > 0 {
 				summaries, err = s.summaryStore.GetSummariesByIDs(r.Context(), summaryIDs, "date_desc", limit)
 				if err == nil {
@@ -159,10 +159,10 @@ func (s *Service) handleGetPrompts(w http.ResponseWriter, r *http.Request) {
 
 	// Use vector search if query is provided and vector client is available
 	if query != "" && s.vectorClient != nil && s.vectorClient.IsConnected() {
-		where := sqlitevec.BuildWhereFilter(sqlitevec.DocTypeUserPrompt, "")
+		where := vector.BuildWhereFilter(vector.DocTypeUserPrompt, "")
 		vectorResults, vecErr := s.vectorClient.Query(r.Context(), query, limit*2, where)
 		if vecErr == nil && len(vectorResults) > 0 {
-			promptIDs := sqlitevec.ExtractPromptIDs(vectorResults, project)
+			promptIDs := vector.ExtractPromptIDs(vectorResults, project)
 			if len(promptIDs) > 0 {
 				prompts, err = s.promptStore.GetPromptsByIDs(r.Context(), promptIDs, "date_desc", limit)
 				if err == nil {

@@ -1,3 +1,5 @@
+//go:build ignore
+
 // Package worker provides the main worker service for claude-mnemonic.
 package worker
 

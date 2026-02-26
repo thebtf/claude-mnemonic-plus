@@ -1,4 +1,4 @@
-//go:build fts5
+//go:build ignore
 
 package gorm
 

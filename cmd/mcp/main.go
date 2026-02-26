@@ -15,7 +15,8 @@ import (
 	"github.com/lukaszraczylo/claude-mnemonic/internal/mcp"
 	"github.com/lukaszraczylo/claude-mnemonic/internal/scoring"
 	"github.com/lukaszraczylo/claude-mnemonic/internal/search"
-	"github.com/lukaszraczylo/claude-mnemonic/internal/vector/sqlitevec"
+	"github.com/lukaszraczylo/claude-mnemonic/internal/vector"
+	"github.com/lukaszraczylo/claude-mnemonic/internal/vector/pgvector"
 	"github.com/lukaszraczylo/claude-mnemonic/internal/watcher"
 	"github.com/lukaszraczylo/claude-mnemonic/pkg/models"
 	"github.com/rs/zerolog"
@@ -55,12 +56,6 @@ func main() {
 		cfg = config.Default()
 	}
 
-	// Override data directory if specified
-	dbPath := cfg.DBPath
-	if *dataDir != "" {
-		dbPath = *dataDir + "/claude-mnemonic.db"
-	}
-
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -75,9 +70,8 @@ func main() {
 
 	// Initialize database store (migrations run automatically)
 	storeCfg := gorm.Config{
-		Path:     dbPath,
-		MaxConns: cfg.MaxConns,
-		// WALMode is enabled automatically by GORM
+		DSN:      cfg.DatabaseDSN,
+		MaxConns: cfg.DatabaseMaxConns,
 	}
 	store, err := gorm.NewStore(storeCfg)
 	if err != nil {
@@ -94,17 +88,17 @@ func main() {
 	sessionStore := gorm.NewSessionStore(store)
 
 	// Initialize embedding service and vector client
-	var vectorClient *sqlitevec.Client
+	var vectorClient vector.Client
 	embedSvc, err := embedding.NewService()
 	if err != nil {
 		log.Warn().Err(err).Msg("Embedding service unavailable, vector search disabled")
 	} else {
 		defer embedSvc.Close()
-		vectorClient, err = sqlitevec.NewClient(sqlitevec.Config{DB: store.GetRawDB()}, embedSvc)
+		vectorClient, err = pgvector.NewClient(pgvector.Config{DB: store.DB, EmbedSvc: embedSvc})
 		if err != nil {
 			log.Warn().Err(err).Msg("Vector client unavailable, vector search disabled")
 		} else {
-			log.Info().Msg("Vector search enabled via sqlite-vec")
+			log.Info().Msg("Vector search enabled via pgvector")
 		}
 	}
 
@@ -119,7 +113,7 @@ func main() {
 	searchMgr := search.NewManager(observationStore, summaryStore, promptStore, vectorClient)
 
 	// Start file watchers
-	startWatchers(ctx, dbPath)
+	startWatchers(ctx)
 
 	// Create and run MCP server with all dependencies
 	// Note: maintenanceService is nil because it runs in the worker process
@@ -143,7 +137,7 @@ func main() {
 }
 
 // startWatchers initializes file watchers for config.
-func startWatchers(ctx context.Context, dbPath string) {
+func startWatchers(ctx context.Context) {
 	// Watch config file for changes (triggers process exit for restart)
 	configPath := config.SettingsPath()
 	configWatcher, err := watcher.New(configPath, func() {

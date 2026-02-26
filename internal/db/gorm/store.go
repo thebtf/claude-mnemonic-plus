@@ -9,15 +9,13 @@ import (
 	"sync"
 	"time"
 
-	sqlite_vec "github.com/asg017/sqlite-vec-go-bindings/cgo"
-	_ "github.com/mattn/go-sqlite3" // Import SQLite driver with FTS5 support
 	"github.com/rs/zerolog/log"
-	"gorm.io/driver/sqlite"
+	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
 )
 
-// Store represents the GORM database connection with sqlite-vec support.
+// Store represents the GORM database connection with PostgreSQL support.
 type Store struct {
 	healthCacheTime time.Time
 	DB              *gorm.DB
@@ -30,54 +28,42 @@ type Store struct {
 
 // Config holds database configuration.
 type Config struct {
-	Path     string          // Path to SQLite database file
-	MaxConns int             // Maximum number of open connections (default: 4)
+	DSN      string          // PostgreSQL DSN (e.g. postgres://user:pass@host/db)
+	MaxConns int             // Maximum number of open connections (default: 10)
 	LogLevel logger.LogLevel // GORM log level (logger.Silent for production)
 }
 
-// NewStore creates a new Store with WAL mode enabled and sqlite-vec registered.
-// CRITICAL: WAL mode and foreign keys are enabled via pragmas for concurrent reads.
+// NewStore creates a new Store connected to PostgreSQL.
 func NewStore(cfg Config) (*Store, error) {
-	// 1. Register sqlite-vec extension (must be done before opening database)
-	sqlite_vec.Auto()
-
-	// 2. Build connection string (foreign keys enabled in DSN)
-	// Use sqlite3 driver (mattn/go-sqlite3) which has FTS5 support
-	dsn := cfg.Path + "?_foreign_keys=ON"
-
-	// 3. Open raw database connection with mattn/go-sqlite3 (has FTS5 support)
-	sqlDB, err := sql.Open("sqlite3", dsn)
-	if err != nil {
-		return nil, fmt.Errorf("open database: %w", err)
-	}
-
-	// 4. Wrap with GORM using existing connection
-	db, err := gorm.Open(sqlite.Dialector{
-		Conn: sqlDB,
-	}, &gorm.Config{
-		Logger: logger.Default.LogMode(cfg.LogLevel),
-		// PrepareStmt enables prepared statement caching for performance
+	// 1. Open GORM with PostgreSQL driver
+	db, err := gorm.Open(postgres.Open(cfg.DSN), &gorm.Config{
+		Logger:      logger.Default.LogMode(cfg.LogLevel),
 		PrepareStmt: true,
-		// Disable default timestamp fields (we manage created_at manually)
-		NowFunc: nil,
+		NowFunc:     nil,
 	})
 	if err != nil {
-		_ = sqlDB.Close() // Explicitly ignore close error during cleanup
-		return nil, fmt.Errorf("open gorm: %w", err)
+		return nil, fmt.Errorf("open gorm postgres: %w", err)
 	}
 
-	// 5. Configure connection pool (same settings as current implementation)
+	// 2. Get underlying *sql.DB for pool configuration
+	sqlDB, err := db.DB()
+	if err != nil {
+		return nil, fmt.Errorf("get sql.DB: %w", err)
+	}
+
+	// 3. Configure connection pool (PostgreSQL connections are expensive)
 	maxConns := cfg.MaxConns
 	if maxConns <= 0 {
-		maxConns = 4
+		maxConns = 10
 	}
 	sqlDB.SetMaxOpenConns(maxConns)
-	sqlDB.SetMaxIdleConns(maxConns)
-	sqlDB.SetConnMaxLifetime(0) // Never expire (SQLite connections are cheap)
+	sqlDB.SetMaxIdleConns(maxConns / 2)
+	sqlDB.SetConnMaxLifetime(1 * time.Hour)
+	sqlDB.SetConnMaxIdleTime(10 * time.Minute)
 
-	// 6. Verify connection
+	// 4. Verify connection
 	if err := sqlDB.Ping(); err != nil {
-		return nil, fmt.Errorf("ping database: %w", err)
+		return nil, fmt.Errorf("ping postgres: %w", err)
 	}
 
 	store := &Store{
@@ -87,34 +73,13 @@ func NewStore(cfg Config) (*Store, error) {
 		healthCacheTTL: 5 * time.Second,     // Cache health checks for 5 seconds
 	}
 
-	// 7. Run migrations FIRST (before PRAGMA commands)
+	// 5. Run migrations
 	if err := runMigrations(db, sqlDB); err != nil {
 		return nil, fmt.Errorf("run migrations: %w", err)
 	}
 
-	// 8. CRITICAL: Set WAL mode and other performance pragmas
-	// Use raw sqlDB to avoid GORM transaction issues
-	pragmas := []string{
-		"PRAGMA journal_mode=WAL",
-		"PRAGMA synchronous=NORMAL",
-		"PRAGMA cache_size=-64000",   // 64MB cache (negative = KB)
-		"PRAGMA temp_store=MEMORY",   // Store temp tables in memory
-		"PRAGMA mmap_size=268435456", // 256MB memory-mapped I/O
-		"PRAGMA page_size=4096",      // 4KB pages (optimal for most systems)
-	}
-	for _, pragma := range pragmas {
-		if _, err := sqlDB.Exec(pragma); err != nil {
-			log.Warn().Str("pragma", pragma).Err(err).Msg("Failed to set pragma (non-fatal)")
-		}
-	}
-	// Set busy timeout to 5 seconds to handle concurrent writes
-	// This allows SQLite to retry when database is locked instead of failing immediately
-	if _, err := sqlDB.Exec("PRAGMA busy_timeout=5000"); err != nil {
-		return nil, fmt.Errorf("set busy timeout: %w", err)
-	}
-
-	// 9. Warm the connection pool
-	store.WarmPool(maxConns)
+	// 6. Warm connection pool
+	store.WarmPool(maxConns / 2)
 
 	return store, nil
 }
@@ -159,8 +124,8 @@ func (s *Store) Ping() error {
 
 // GetRawDB returns the underlying *sql.DB for operations GORM can't handle.
 // Use this for:
-// - FTS5 full-text search queries (MATCH operator)
-// - sqlite-vec vector operations
+// - tsvector full-text search queries
+// - pgvector operations
 // - Complex raw SQL queries
 func (s *Store) GetRawDB() *sql.DB {
 	return s.sqlDB
@@ -176,7 +141,7 @@ func (s *Store) Stats() sql.DBStats {
 	return s.sqlDB.Stats()
 }
 
-// Optimize runs VACUUM and ANALYZE to optimize the database.
+// Optimize runs ANALYZE to update query planner statistics.
 // Should be called periodically (e.g., daily) during low activity.
 func (s *Store) Optimize(ctx context.Context) error {
 	log.Info().Msg("Starting database optimization")
@@ -185,11 +150,6 @@ func (s *Store) Optimize(ctx context.Context) error {
 	// ANALYZE updates statistics for query optimizer
 	if _, err := s.sqlDB.ExecContext(ctx, "ANALYZE"); err != nil {
 		return fmt.Errorf("analyze: %w", err)
-	}
-
-	// PRAGMA optimize runs optimization based on query statistics
-	if _, err := s.sqlDB.ExecContext(ctx, "PRAGMA optimize"); err != nil {
-		log.Warn().Err(err).Msg("PRAGMA optimize failed (non-fatal)")
 	}
 
 	log.Info().Dur("duration", time.Since(start)).Msg("Database optimization complete")

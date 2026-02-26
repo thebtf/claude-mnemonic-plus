@@ -13,7 +13,7 @@ import (
 	"github.com/lukaszraczylo/claude-mnemonic/internal/db/gorm"
 	"github.com/lukaszraczylo/claude-mnemonic/internal/reranking"
 	"github.com/lukaszraczylo/claude-mnemonic/internal/search/expansion"
-	"github.com/lukaszraczylo/claude-mnemonic/internal/vector/sqlitevec"
+	"github.com/lukaszraczylo/claude-mnemonic/internal/vector"
 	"github.com/lukaszraczylo/claude-mnemonic/internal/worker/sdk"
 	"github.com/lukaszraczylo/claude-mnemonic/pkg/models"
 	"github.com/rs/zerolog/log"
@@ -73,12 +73,12 @@ func (s *Service) handleSearchByPrompt(w http.ResponseWriter, r *http.Request) {
 	// Try vector search first if available
 	var vectorSearchFailed bool
 	if s.vectorClient != nil && s.vectorClient.IsConnected() {
-		where := sqlitevec.BuildWhereFilter(sqlitevec.DocTypeObservation, "")
+		where := vector.BuildWhereFilter(vector.DocTypeObservation, "")
 
 		// Search with each expanded query and merge results
 		// Pre-allocate with estimated capacity to avoid repeated reallocation
 		estimatedCapacity := len(expandedQueries) * limit * 2
-		allVectorResults := make([]sqlitevec.QueryResult, 0, estimatedCapacity)
+		allVectorResults := make([]vector.QueryResult, 0, estimatedCapacity)
 		queryWeights := make(map[string]float64, len(expandedQueries))
 		var vectorErrors int
 
@@ -107,7 +107,7 @@ func (s *Service) handleSearchByPrompt(w http.ResponseWriter, r *http.Request) {
 			// Filter by relevance threshold before extracting IDs
 			// Use a slightly lower threshold for expanded queries
 			effectiveThreshold := threshold * 0.9 // Allow slightly lower scores for expanded queries
-			filteredResults := sqlitevec.FilterByThreshold(allVectorResults, effectiveThreshold, 0)
+			filteredResults := vector.FilterByThreshold(allVectorResults, effectiveThreshold, 0)
 
 			// Build similarity map for filtered results (keeping highest weighted score per observation)
 			for _, vr := range filteredResults {
@@ -121,7 +121,7 @@ func (s *Service) handleSearchByPrompt(w http.ResponseWriter, r *http.Request) {
 			}
 
 			// Extract observation IDs with project/scope filtering using shared helper
-			obsIDs := sqlitevec.ExtractObservationIDs(filteredResults, project)
+			obsIDs := vector.ExtractObservationIDs(filteredResults, project)
 
 			if len(obsIDs) > 0 {
 				// Fetch full observations from SQLite
@@ -393,7 +393,7 @@ func (s *Service) handleFileContext(w http.ResponseWriter, r *http.Request) {
 			// Build search query from file path
 			query := buildFileQuery(file)
 
-			where := sqlitevec.BuildWhereFilter(sqlitevec.DocTypeObservation, "")
+			where := vector.BuildWhereFilter(vector.DocTypeObservation, "")
 			vectorResults, vecErr := s.vectorClient.Query(ctx, query, limit*2, where)
 			if vecErr != nil {
 				log.Warn().Err(vecErr).Str("file", file).Msg("Vector search failed for file context")
@@ -401,7 +401,7 @@ func (s *Service) handleFileContext(w http.ResponseWriter, r *http.Request) {
 			}
 
 			// Extract observation IDs from vector results
-			obsIDs := sqlitevec.ExtractObservationIDs(vectorResults, project)
+			obsIDs := vector.ExtractObservationIDs(vectorResults, project)
 			if len(obsIDs) == 0 {
 				return
 			}
