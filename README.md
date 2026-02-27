@@ -4,7 +4,7 @@
 
 [![Go](https://img.shields.io/badge/Go-1.24+-00ADD8?style=flat-square&logo=go)](https://go.dev)
 [![PostgreSQL](https://img.shields.io/badge/PostgreSQL-15+-336791?style=flat-square&logo=postgresql)](https://www.postgresql.org)
-[![License](https://img.shields.io/github/license/lukaszraczylo/claude-mnemonic?style=flat-square)](LICENSE)
+[![License](https://img.shields.io/github/license/thebtf/claude-mnemonic-plus?style=flat-square)](LICENSE)
 
 ---
 
@@ -39,23 +39,23 @@ Fork of [claude-mnemonic](https://github.com/lukaszraczylo/claude-mnemonic) exte
 
 ## Installation
 
-### Method 1: One-Line Remote Install (Recommended)
+### Method 1: One-Line Remote Install (macOS / Linux)
 
 The fastest way to get started. Downloads pre-built binaries, registers the plugin, configures MCP, and starts the worker automatically.
 
 ```bash
-curl -sSL https://raw.githubusercontent.com/lukaszraczylo/claude-mnemonic/main/scripts/install.sh | bash
+curl -sSL https://raw.githubusercontent.com/thebtf/claude-mnemonic-plus/main/scripts/install.sh | bash
 ```
 
 To install a specific version:
 
 ```bash
-curl -sSL https://raw.githubusercontent.com/lukaszraczylo/claude-mnemonic/main/scripts/install.sh | bash -s -- v1.0.0
+curl -sSL https://raw.githubusercontent.com/thebtf/claude-mnemonic-plus/main/scripts/install.sh | bash -s -- v1.0.0
 ```
 
 **What it does:**
 
-1. Detects your OS and architecture (macOS, Linux, Windows via MSYS/Cygwin)
+1. Detects your OS and architecture (macOS Intel/ARM, Linux amd64)
 2. Downloads the release archive from GitHub
 3. Installs binaries to `~/.claude/plugins/marketplaces/claude-mnemonic/`
 4. Registers plugin in Claude Code configuration files
@@ -63,26 +63,50 @@ curl -sSL https://raw.githubusercontent.com/lukaszraczylo/claude-mnemonic/main/s
 6. Sets up the statusline hook
 7. Starts the worker service on port 37777
 
-**Requires:** `curl`, `tar` (or `unzip` on Windows), `jq`
+**Requires:** `curl`, `tar`, `jq`
 
-### Method 2: Build from Source
+### Method 2: Build from Source (all platforms)
 
-For development or when you need the latest changes.
+For development or when you need the latest changes. Works on macOS, Linux, and Windows.
+
+**macOS / Linux:**
 
 ```bash
-git clone https://github.com/YOUR_USER/claude-mnemonic-plus.git
+git clone https://github.com/thebtf/claude-mnemonic-plus.git
 cd claude-mnemonic-plus
 make build      # Build all binaries (worker, mcp-server, 6 hooks)
 make install    # Install to Claude Code, register plugin, start worker
 ```
 
-`make install` performs the same registration as the remote install script: copies binaries, updates `installed_plugins.json`, `settings.json`, and `known_marketplaces.json`, registers the MCP server, and starts the worker.
+**Windows (PowerShell):**
 
-**Requires:** Go 1.24+, CGO enabled, `make`, `jq`
+```powershell
+git clone https://github.com/thebtf/claude-mnemonic-plus.git
+cd claude-mnemonic-plus
+
+# Build all binaries
+$env:CGO_ENABLED = "1"
+go build -tags fts5 -ldflags "-s -w" -o bin\worker.exe .\cmd\worker
+go build -tags fts5 -ldflags "-s -w" -o bin\mcp-server.exe .\cmd\mcp
+go build -tags fts5 -ldflags "-s -w" -o bin\hooks\session-start.exe .\cmd\hooks\session-start
+go build -tags fts5 -ldflags "-s -w" -o bin\hooks\user-prompt.exe .\cmd\hooks\user-prompt
+go build -tags fts5 -ldflags "-s -w" -o bin\hooks\post-tool-use.exe .\cmd\hooks\post-tool-use
+go build -tags fts5 -ldflags "-s -w" -o bin\hooks\subagent-stop.exe .\cmd\hooks\subagent-stop
+go build -tags fts5 -ldflags "-s -w" -o bin\hooks\stop.exe .\cmd\hooks\stop
+go build -tags fts5 -ldflags "-s -w" -o bin\hooks\statusline.exe .\cmd\hooks\statusline
+```
+
+Then follow [Windows Manual Installation](#windows-manual-installation) to register the plugin.
+
+`make install` (macOS/Linux) performs the same registration as the remote install script: copies binaries, updates `installed_plugins.json`, `settings.json`, and `known_marketplaces.json`, registers the MCP server, and starts the worker.
+
+**Requires:** Go 1.24+, CGO enabled, `make` (macOS/Linux) or PowerShell (Windows), `jq`
 
 ### Method 3: Project-Level MCP Configuration
 
 If you only need the MCP tools for a specific project, add to the project's `.claude/settings.json`:
+
+**macOS / Linux:**
 
 ```json
 {
@@ -96,13 +120,68 @@ If you only need the MCP tools for a specific project, add to the project's `.cl
 }
 ```
 
-This scopes the `nia` MCP tools to that project only. The worker must still be running (`make start-worker` or start manually).
+**Windows:**
+
+```json
+{
+  "mcpServers": {
+    "claude-mnemonic": {
+      "command": "C:\\Users\\YOU\\.claude\\plugins\\marketplaces\\claude-mnemonic\\mcp-server.exe",
+      "args": ["--project", "${CLAUDE_PROJECT}"],
+      "env": {}
+    }
+  }
+}
+```
+
+This scopes the `nia` MCP tools to that project only. The worker must still be running.
 
 ### Method 4: Global MCP Configuration
 
-To make the MCP tools available across all projects, add the same configuration to `~/.claude/settings.json`.
+To make the MCP tools available across all projects, add the same configuration to `~/.claude/settings.json` (macOS/Linux) or `%USERPROFILE%\.claude\settings.json` (Windows).
 
-> **Note:** Both `make install` and `scripts/install.sh` configure the global MCP server automatically. Manual configuration is only needed if you installed binaries manually.
+> **Note:** Both `make install` and `scripts/install.sh` configure the global MCP server automatically. Manual configuration is only needed if you installed binaries manually or are on Windows.
+
+### Windows Manual Installation
+
+After building from source (see Method 2), register the plugin manually:
+
+```powershell
+$PluginDir = "$env:USERPROFILE\.claude\plugins\marketplaces\claude-mnemonic"
+
+# Create directories
+New-Item -ItemType Directory -Force -Path "$PluginDir\hooks"
+New-Item -ItemType Directory -Force -Path "$PluginDir\.claude-plugin"
+New-Item -ItemType Directory -Force -Path "$PluginDir\commands"
+
+# Copy binaries
+Copy-Item bin\worker.exe $PluginDir\
+Copy-Item bin\mcp-server.exe $PluginDir\
+Copy-Item bin\hooks\*.exe "$PluginDir\hooks\"
+Copy-Item plugin\hooks\hooks.json "$PluginDir\hooks\"
+Copy-Item plugin\commands\* "$PluginDir\commands\" -ErrorAction SilentlyContinue
+
+# Register MCP server in global settings
+$SettingsFile = "$env:USERPROFILE\.claude\settings.json"
+if (-not (Test-Path $SettingsFile)) { '{}' | Set-Content $SettingsFile }
+$settings = Get-Content $SettingsFile | ConvertFrom-Json
+if (-not $settings.mcpServers) { $settings | Add-Member -NotePropertyName mcpServers -NotePropertyValue @{} }
+$settings.mcpServers.'claude-mnemonic' = @{
+    command = "$PluginDir\mcp-server.exe"
+    args = @("--project", '${CLAUDE_PROJECT}')
+    env = @{}
+}
+$settings | ConvertTo-Json -Depth 10 | Set-Content $SettingsFile
+
+# Start worker
+Start-Process -NoNewWindow -FilePath "$PluginDir\worker.exe"
+```
+
+To verify the worker is running:
+
+```powershell
+Invoke-RestMethod http://localhost:37777/health
+```
 
 ---
 
@@ -423,17 +502,20 @@ For shared brain across multiple machines:
 
 ## File Layout After Installation
 
+**macOS / Linux:** `~/.claude/plugins/marketplaces/claude-mnemonic/`
+**Windows:** `%USERPROFILE%\.claude\plugins\marketplaces\claude-mnemonic\`
+
 ```
-~/.claude/plugins/marketplaces/claude-mnemonic/
-  worker                    HTTP API server (:37777)
-  mcp-server                MCP stdio server (nia tools)
+claude-mnemonic/
+  worker(.exe)              HTTP API server (:37777)
+  mcp-server(.exe)          MCP stdio server (nia tools)
   hooks/
-    session-start           SessionStart hook
-    user-prompt             UserPromptSubmit hook
-    post-tool-use           PostToolUse hook
-    subagent-stop           SubagentStop hook
-    stop                    Stop hook
-    statusline              Status line display
+    session-start(.exe)     SessionStart hook
+    user-prompt(.exe)       UserPromptSubmit hook
+    post-tool-use(.exe)     PostToolUse hook
+    subagent-stop(.exe)     SubagentStop hook
+    stop(.exe)              Stop hook
+    statusline(.exe)        Status line display
     hooks.json              Hook configuration
   commands/
     restart.md              /restart slash command
@@ -508,29 +590,56 @@ plugin/               Claude Code plugin definition
 make uninstall
 ```
 
-### If installed via remote script:
+### If installed via remote script (macOS / Linux):
 
 ```bash
 # Full uninstall (removes data directory too):
-curl -sSL https://raw.githubusercontent.com/lukaszraczylo/claude-mnemonic/main/scripts/install.sh | bash -s -- --uninstall
+curl -sSL https://raw.githubusercontent.com/thebtf/claude-mnemonic-plus/main/scripts/install.sh | bash -s -- --uninstall
 
 # Keep data directory (~/.claude-mnemonic):
-curl -sSL https://raw.githubusercontent.com/lukaszraczylo/claude-mnemonic/main/scripts/install.sh | bash -s -- --uninstall --keep-data
+curl -sSL https://raw.githubusercontent.com/thebtf/claude-mnemonic-plus/main/scripts/install.sh | bash -s -- --uninstall --keep-data
 ```
 
-Both methods stop the worker, remove binaries, and clean up Claude Code configuration files.
+### Windows (PowerShell):
+
+```powershell
+# Stop worker
+Get-Process -Name worker -ErrorAction SilentlyContinue | Stop-Process -Force
+
+# Remove plugin directory
+Remove-Item -Recurse -Force "$env:USERPROFILE\.claude\plugins\marketplaces\claude-mnemonic"
+
+# Remove MCP server from settings
+$SettingsFile = "$env:USERPROFILE\.claude\settings.json"
+if (Test-Path $SettingsFile) {
+    $settings = Get-Content $SettingsFile | ConvertFrom-Json
+    $settings.mcpServers.PSObject.Properties.Remove('claude-mnemonic')
+    $settings | ConvertTo-Json -Depth 10 | Set-Content $SettingsFile
+}
+```
+
+All methods stop the worker, remove binaries, and clean up Claude Code configuration files.
 
 ---
 
 ## Platform Support
 
-| Platform | Status |
-|----------|--------|
-| macOS Intel (amd64) | Supported |
-| macOS Apple Silicon (arm64) | Supported |
-| Linux amd64 | Supported |
-| Linux arm64 | Supported |
-| Windows amd64 | Supported |
+| Platform | Install Script | Build from Source | Notes |
+|----------|---------------|-------------------|-------|
+| macOS Intel (amd64) | Yes | Yes | Full support |
+| macOS Apple Silicon (arm64) | Yes | Yes | Full support |
+| Linux amd64 | Yes | Yes | Full support |
+| Linux arm64 | Yes | Yes | Full support |
+| Windows amd64 | No (use build from source) | Yes | PowerShell manual install; see [Windows Manual Installation](#windows-manual-installation) |
+
+### Windows Notes
+
+- All binaries are built with `.exe` extension (`worker.exe`, `mcp-server.exe`, etc.)
+- Plugin directory: `%USERPROFILE%\.claude\plugins\marketplaces\claude-mnemonic\`
+- Settings file: `%USERPROFILE%\.claude\settings.json`
+- The `Makefile` targets (`make install`, `make start-worker`) use Unix commands and are not compatible with Windows — use the PowerShell instructions instead
+- ONNX runtime requires `onnxruntime.dll` in `internal/embedding/assets/lib/windows-amd64/`
+- Worker logs: use `Start-Process` or run `worker.exe` directly in a terminal
 
 ---
 
