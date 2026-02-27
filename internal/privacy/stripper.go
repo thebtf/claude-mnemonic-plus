@@ -1,4 +1,4 @@
-// Package privacy provides privacy tag handling for claude-mnemonic.
+// Package privacy provides privacy tag handling for engram.
 package privacy
 
 import (
@@ -10,8 +10,8 @@ var (
 	// privateTagRegex matches <private>...</private> tags
 	privateTagRegex = regexp.MustCompile(`(?s)<private>.*?</private>`)
 
-	// memoryTagRegex matches <claude-mnemonic-context>...</claude-mnemonic-context> tags
-	memoryTagRegex = regexp.MustCompile(`(?s)<claude-mnemonic-context>.*?</claude-mnemonic-context>`)
+	// memoryTagRegex matches <engram-context>...</engram-context> tags
+	memoryTagRegex = regexp.MustCompile(`(?s)<engram-context>.*?</engram-context>`)
 )
 
 // StripPrivateTags removes all <private>...</private> content from text.
@@ -19,7 +19,7 @@ func StripPrivateTags(text string) string {
 	return privateTagRegex.ReplaceAllString(text, "")
 }
 
-// StripMemoryTags removes all <claude-mnemonic-context>...</claude-mnemonic-context> content from text.
+// StripMemoryTags removes all <engram-context>...</engram-context> content from text.
 func StripMemoryTags(text string) string {
 	return memoryTagRegex.ReplaceAllString(text, "")
 }

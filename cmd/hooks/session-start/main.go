@@ -7,7 +7,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/thebtf/claude-mnemonic-plus/pkg/hooks"
+	"github.com/thebtf/engram/pkg/hooks"
 )
 
 // Input is the hook input from Claude Code.
@@ -38,7 +38,7 @@ func handleSessionStart(ctx *hooks.HookContext, input *Input) (string, error) {
 
 	result, err := hooks.GET(ctx.Port, endpoint)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "[claude-mnemonic] Warning: context fetch failed: %v\n", err)
+		fmt.Fprintf(os.Stderr, "[engram] Warning: context fetch failed: %v\n", err)
 		return "", nil
 	}
 
@@ -56,11 +56,11 @@ func handleSessionStart(ctx *hooks.HookContext, input *Input) (string, error) {
 	}
 
 	// Show count to user via stderr
-	fmt.Fprintf(os.Stderr, "[claude-mnemonic] Injecting %d observations from project memory (%d detailed, %d condensed)\n",
+	fmt.Fprintf(os.Stderr, "[engram] Injecting %d observations from project memory (%d detailed, %d condensed)\n",
 		len(obsData), min(fullCount, len(obsData)), max(0, len(obsData)-fullCount))
 
 	// Build context string
-	contextBuilder := "<claude-mnemonic-context>\n"
+	contextBuilder := "<engram-context>\n"
 	contextBuilder += fmt.Sprintf("# Project Memory (%d observations)\n", len(obsData))
 	contextBuilder += "Use this knowledge to answer questions without re-exploring the codebase.\n\n"
 
@@ -103,7 +103,7 @@ func handleSessionStart(ctx *hooks.HookContext, input *Input) (string, error) {
 		}
 	}
 
-	contextBuilder += "</claude-mnemonic-context>\n"
+	contextBuilder += "</engram-context>\n"
 	return contextBuilder, nil
 }
 

@@ -1,4 +1,4 @@
 #!/bin/sh
 set -e
-# Worker now serves both HTTP API and MCP SSE on a single port.
-exec worker
+# Engram server: HTTP API + MCP SSE on a single port.
+exec engram-server

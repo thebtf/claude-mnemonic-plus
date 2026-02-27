@@ -6,7 +6,7 @@ import (
 	"net/url"
 	"os"
 
-	"github.com/thebtf/claude-mnemonic-plus/pkg/hooks"
+	"github.com/thebtf/engram/pkg/hooks"
 )
 
 // Input is the hook input from Claude Code.
@@ -121,7 +121,7 @@ func handleUserPrompt(ctx *hooks.HookContext, input *Input) (string, error) {
 	// Return context if we found relevant observations
 	if observationCount > 0 {
 		// Show match count to user via stderr
-		fmt.Fprintf(os.Stderr, "[claude-mnemonic] Found %d relevant memories for this prompt\n", observationCount)
+		fmt.Fprintf(os.Stderr, "[engram] Found %d relevant memories for this prompt\n", observationCount)
 		return contextToInject, nil
 	}
 

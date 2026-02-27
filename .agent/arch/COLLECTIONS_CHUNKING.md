@@ -177,7 +177,7 @@ Regex-based extraction:
 
 **Symptom:** No collections loaded, no error message.
 **Root Cause:** `Load()` returns empty Registry when file not found.
-**Correct Handling:** Check `COLLECTION_CONFIG` env var or `~/.claude-mnemonic/settings.json` for config path. Missing file is intentional for users who don't need collections.
+**Correct Handling:** Check `COLLECTION_CONFIG` env var or `~/.engram/settings.json` for config path. Missing file is intentional for users who don't need collections.
 
 ## Integration Points
 

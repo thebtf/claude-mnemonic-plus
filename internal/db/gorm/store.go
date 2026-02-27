@@ -1,4 +1,4 @@
-// Package gorm provides GORM-based database operations for claude-mnemonic.
+// Package gorm provides GORM-based database operations for engram.
 package gorm
 
 import (
@@ -9,7 +9,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/thebtf/claude-mnemonic-plus/internal/config"
+	"github.com/thebtf/engram/internal/config"
 	"github.com/rs/zerolog/log"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"

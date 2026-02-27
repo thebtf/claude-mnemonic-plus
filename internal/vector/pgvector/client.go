@@ -1,4 +1,4 @@
-// Package pgvector provides PostgreSQL+pgvector based vector storage for claude-mnemonic.
+// Package pgvector provides PostgreSQL+pgvector based vector storage for engram.
 package pgvector
 
 import (
@@ -8,8 +8,8 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/thebtf/claude-mnemonic-plus/internal/embedding"
-	"github.com/thebtf/claude-mnemonic-plus/internal/vector"
+	"github.com/thebtf/engram/internal/embedding"
+	"github.com/thebtf/engram/internal/vector"
 	pgvec "github.com/pgvector/pgvector-go"
 	"github.com/rs/zerolog/log"
 	"gorm.io/gorm"

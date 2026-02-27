@@ -1,4 +1,4 @@
-// Package search provides unified search capabilities for claude-mnemonic.
+// Package search provides unified search capabilities for engram.
 package search
 
 import (
@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/thebtf/claude-mnemonic-plus/pkg/models"
+	"github.com/thebtf/engram/pkg/models"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/suite"
 )

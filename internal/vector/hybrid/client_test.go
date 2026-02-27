@@ -5,7 +5,7 @@ package hybrid
 import (
 	"testing"
 
-	"github.com/thebtf/claude-mnemonic-plus/internal/vector/sqlitevec"
+	"github.com/thebtf/engram/internal/vector/sqlitevec"
 	_ "github.com/mattn/go-sqlite3" // Import SQLite driver for CGO linking
 	"github.com/stretchr/testify/assert"
 )

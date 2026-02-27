@@ -1,4 +1,4 @@
-module github.com/thebtf/claude-mnemonic-plus
+module github.com/thebtf/engram
 
 go 1.25.1
 

@@ -16,11 +16,11 @@ RUN go mod download
 COPY . .
 
 # Build server binary (worker with integrated MCP SSE)
-RUN CGO_ENABLED=1 go build -tags fts5 -ldflags "-s -w" -o /out/worker ./cmd/worker
+RUN CGO_ENABLED=1 go build -tags fts5 -ldflags "-s -w" -o /out/engram-server ./cmd/worker
 
 # Build client-side binaries: MCP stdio proxy + hooks
 RUN CGO_ENABLED=1 go build -tags fts5 -ldflags "-s -w" -o /out/mcp-stdio-proxy ./cmd/mcp-stdio-proxy
-RUN CGO_ENABLED=1 go build -tags fts5 -ldflags "-s -w" -o /out/mcp-server ./cmd/mcp
+RUN CGO_ENABLED=1 go build -tags fts5 -ldflags "-s -w" -o /out/engram-mcp ./cmd/mcp
 RUN CGO_ENABLED=1 go build -tags fts5 -ldflags "-s -w" -o /out/hooks/session-start ./cmd/hooks/session-start
 RUN CGO_ENABLED=1 go build -tags fts5 -ldflags "-s -w" -o /out/hooks/user-prompt ./cmd/hooks/user-prompt
 RUN CGO_ENABLED=1 go build -tags fts5 -ldflags "-s -w" -o /out/hooks/post-tool-use ./cmd/hooks/post-tool-use
@@ -37,17 +37,17 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates curl \
     && rm -rf /var/lib/apt/lists/*
 
-COPY --from=builder /out/worker /usr/local/bin/worker
+COPY --from=builder /out/engram-server /usr/local/bin/engram-server
 
-ENV CLAUDE_MNEMONIC_WORKER_HOST=0.0.0.0
-ENV CLAUDE_MNEMONIC_WORKER_PORT=37777
+ENV ENGRAM_WORKER_HOST=0.0.0.0
+ENV ENGRAM_WORKER_PORT=37777
 
 EXPOSE 37777
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
     CMD curl -f http://localhost:37777/health || exit 1
 
-ENTRYPOINT ["worker"]
+ENTRYPOINT ["engram-server"]
 
 # --- Client image: hooks + MCP proxy (for extracting binaries) ---
 FROM debian:bookworm-slim AS client
@@ -55,7 +55,7 @@ FROM debian:bookworm-slim AS client
 WORKDIR /app
 
 COPY --from=builder /out/mcp-stdio-proxy /app/mcp-stdio-proxy
-COPY --from=builder /out/mcp-server /app/mcp-server
+COPY --from=builder /out/engram-mcp /app/engram-mcp
 COPY --from=builder /out/hooks/ /app/hooks/
 COPY plugin/hooks/hooks.json /app/hooks/hooks.json
 COPY plugin/commands/ /app/commands/

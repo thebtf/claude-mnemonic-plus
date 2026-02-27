@@ -1,10 +1,10 @@
-// Package db defines database interfaces for the claude-mnemonic stores.
+// Package db defines database interfaces for the engram stores.
 package db
 
 import (
 	"context"
 
-	"github.com/thebtf/claude-mnemonic-plus/pkg/models"
+	"github.com/thebtf/engram/pkg/models"
 )
 
 // ObservationReader defines read operations for observations.

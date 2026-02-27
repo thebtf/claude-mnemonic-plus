@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/thebtf/claude-mnemonic-plus/internal/chunking"
+	"github.com/thebtf/engram/internal/chunking"
 )
 
 // newChunker returns a Chunker with sensible defaults for tests.

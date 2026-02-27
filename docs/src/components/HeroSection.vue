@@ -72,18 +72,18 @@ defineProps({
   },
   secondaryCta: {
     type: Object,
-    default: () => ({ label: 'View Source', href: 'https://github.com/thebtf/claude-mnemonic-plus', icon: 'fab fa-github' })
+    default: () => ({ label: 'View Source', href: 'https://github.com/thebtf/engram', icon: 'fab fa-github' })
   },
   installCommand: {
     type: String,
-    default: 'curl -sSL https://raw.githubusercontent.com/thebtf/claude-mnemonic-plus/main/scripts/install.sh | bash'
+    default: 'curl -sSL https://raw.githubusercontent.com/thebtf/engram/main/scripts/install.sh | bash'
   }
 })
 
 const copied = ref(false)
 
 function copyCommand() {
-  navigator.clipboard.writeText('curl -sSL https://raw.githubusercontent.com/thebtf/claude-mnemonic-plus/main/scripts/install.sh | bash')
+  navigator.clipboard.writeText('curl -sSL https://raw.githubusercontent.com/thebtf/engram/main/scripts/install.sh | bash')
   copied.value = true
   setTimeout(() => copied.value = false, 2000)
 }

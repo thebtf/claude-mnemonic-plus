@@ -1,6 +1,6 @@
 //go:build ignore
 
-// Package worker provides the main worker service for claude-mnemonic.
+// Package worker provides the main worker service for engram.
 package worker
 
 import (
@@ -16,12 +16,12 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/thebtf/claude-mnemonic-plus/internal/config"
-	"github.com/thebtf/claude-mnemonic-plus/internal/db/gorm"
-	"github.com/thebtf/claude-mnemonic-plus/internal/update"
-	"github.com/thebtf/claude-mnemonic-plus/internal/worker/session"
-	"github.com/thebtf/claude-mnemonic-plus/internal/worker/sse"
-	"github.com/thebtf/claude-mnemonic-plus/pkg/models"
+	"github.com/thebtf/engram/internal/config"
+	"github.com/thebtf/engram/internal/db/gorm"
+	"github.com/thebtf/engram/internal/update"
+	"github.com/thebtf/engram/internal/worker/session"
+	"github.com/thebtf/engram/internal/worker/sse"
+	"github.com/thebtf/engram/pkg/models"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

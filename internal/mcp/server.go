@@ -1,4 +1,4 @@
-// Package mcp provides the MCP (Model Context Protocol) server for claude-mnemonic.
+// Package mcp provides the MCP (Model Context Protocol) server for engram.
 package mcp
 
 import (
@@ -11,15 +11,15 @@ import (
 	"strings"
 	"time"
 
-	"github.com/thebtf/claude-mnemonic-plus/internal/collections"
-	"github.com/thebtf/claude-mnemonic-plus/internal/consolidation"
-	"github.com/thebtf/claude-mnemonic-plus/internal/db/gorm"
-	"github.com/thebtf/claude-mnemonic-plus/internal/maintenance"
-	"github.com/thebtf/claude-mnemonic-plus/internal/scoring"
-	"github.com/thebtf/claude-mnemonic-plus/internal/search"
-	"github.com/thebtf/claude-mnemonic-plus/internal/sessions"
-	"github.com/thebtf/claude-mnemonic-plus/internal/vector"
-	"github.com/thebtf/claude-mnemonic-plus/pkg/models"
+	"github.com/thebtf/engram/internal/collections"
+	"github.com/thebtf/engram/internal/consolidation"
+	"github.com/thebtf/engram/internal/db/gorm"
+	"github.com/thebtf/engram/internal/maintenance"
+	"github.com/thebtf/engram/internal/scoring"
+	"github.com/thebtf/engram/internal/search"
+	"github.com/thebtf/engram/internal/sessions"
+	"github.com/thebtf/engram/internal/vector"
+	"github.com/thebtf/engram/pkg/models"
 	"github.com/rs/zerolog/log"
 )
 
@@ -189,7 +189,7 @@ func (s *Server) handleInitialize(req *Request) *Response {
 			"tools": map[string]any{},
 		},
 		"serverInfo": map[string]any{
-			"name":    "claude-mnemonic",
+			"name":    "engram",
 			"version": s.version,
 		},
 	}

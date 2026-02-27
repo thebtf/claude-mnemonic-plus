@@ -1,4 +1,4 @@
-// Package config provides configuration management for claude-mnemonic.
+// Package config provides configuration management for engram.
 package config
 
 import (
@@ -58,13 +58,13 @@ func (s *ConfigSuite) TestDefault() {
 // TestDataDir tests data directory path.
 func (s *ConfigSuite) TestDataDir() {
 	dir := DataDir()
-	s.Contains(dir, ".claude-mnemonic")
+	s.Contains(dir, ".engram")
 }
 
 // TestDBPath tests database path.
 func (s *ConfigSuite) TestDBPath() {
 	path := DBPath()
-	s.Contains(path, "claude-mnemonic.db")
+	s.Contains(path, "engram.db")
 }
 
 // TestSettingsPath tests settings file path.
@@ -134,28 +134,28 @@ func (s *ConfigSuite) TestLoad_TableDriven() {
 		},
 		{
 			name:           "custom port",
-			settingsJSON:   `{"CLAUDE_MNEMONIC_WORKER_PORT": 38888}`,
+			settingsJSON:   `{"ENGRAM_WORKER_PORT": 38888}`,
 			expectedPort:   38888,
 			expectedModel:  DefaultModel,
 			expectedObsObs: 100,
 		},
 		{
 			name:           "custom model",
-			settingsJSON:   `{"CLAUDE_MNEMONIC_MODEL": "sonnet"}`,
+			settingsJSON:   `{"ENGRAM_MODEL": "sonnet"}`,
 			expectedPort:   DefaultWorkerPort,
 			expectedModel:  "sonnet",
 			expectedObsObs: 100,
 		},
 		{
 			name:           "custom observations",
-			settingsJSON:   `{"CLAUDE_MNEMONIC_CONTEXT_OBSERVATIONS": 200}`,
+			settingsJSON:   `{"ENGRAM_CONTEXT_OBSERVATIONS": 200}`,
 			expectedPort:   DefaultWorkerPort,
 			expectedModel:  DefaultModel,
 			expectedObsObs: 200,
 		},
 		{
 			name:           "multiple settings",
-			settingsJSON:   `{"CLAUDE_MNEMONIC_WORKER_PORT": 39999, "CLAUDE_MNEMONIC_MODEL": "opus", "CLAUDE_MNEMONIC_CONTEXT_OBSERVATIONS": 50}`,
+			settingsJSON:   `{"ENGRAM_WORKER_PORT": 39999, "ENGRAM_MODEL": "opus", "ENGRAM_CONTEXT_OBSERVATIONS": 50}`,
 			expectedPort:   39999,
 			expectedModel:  "opus",
 			expectedObsObs: 50,
@@ -179,12 +179,12 @@ func (s *ConfigSuite) TestLoad_TableDriven() {
 			os.Setenv("HOME", tempDir)
 
 			// Create data dir
-			err = os.MkdirAll(filepath.Join(tempDir, ".claude-mnemonic"), 0750)
+			err = os.MkdirAll(filepath.Join(tempDir, ".engram"), 0750)
 			s.Require().NoError(err)
 
 			if tt.settingsJSON != "" {
 				writeErr := os.WriteFile(
-					filepath.Join(tempDir, ".claude-mnemonic", "settings.json"),
+					filepath.Join(tempDir, ".engram", "settings.json"),
 					[]byte(tt.settingsJSON),
 					0600,
 				)
@@ -232,20 +232,20 @@ func TestGetWorkerPort_TableDriven(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Save original env
-			origEnv := os.Getenv("CLAUDE_MNEMONIC_WORKER_PORT")
-			defer os.Setenv("CLAUDE_MNEMONIC_WORKER_PORT", origEnv)
+			origEnv := os.Getenv("ENGRAM_WORKER_PORT")
+			defer os.Setenv("ENGRAM_WORKER_PORT", origEnv)
 
 			if tt.setEnv {
-				os.Setenv("CLAUDE_MNEMONIC_WORKER_PORT", tt.envValue)
+				os.Setenv("ENGRAM_WORKER_PORT", tt.envValue)
 			} else {
-				os.Unsetenv("CLAUDE_MNEMONIC_WORKER_PORT")
+				os.Unsetenv("ENGRAM_WORKER_PORT")
 			}
 
 			// We can't easily test GetWorkerPort since it uses Get() which caches
 			// So we test the env parsing logic directly
 			if tt.setEnv && tt.envValue != "" {
 				if tt.wantPort != DefaultWorkerPort {
-					assert.Equal(t, tt.envValue, os.Getenv("CLAUDE_MNEMONIC_WORKER_PORT"))
+					assert.Equal(t, tt.envValue, os.Getenv("ENGRAM_WORKER_PORT"))
 				}
 			}
 		})
@@ -331,12 +331,12 @@ func TestLoad_ClaudeCodePath(t *testing.T) {
 	defer os.Setenv("HOME", origHome)
 
 	// Create data dir and settings
-	err = os.MkdirAll(filepath.Join(tempDir, ".claude-mnemonic"), 0750)
+	err = os.MkdirAll(filepath.Join(tempDir, ".engram"), 0750)
 	require.NoError(t, err)
 
 	settingsJSON := `{"CLAUDE_CODE_PATH": "/usr/local/bin/claude"}`
 	err = os.WriteFile(
-		filepath.Join(tempDir, ".claude-mnemonic", "settings.json"),
+		filepath.Join(tempDir, ".engram", "settings.json"),
 		[]byte(settingsJSON),
 		0600,
 	)
@@ -360,7 +360,7 @@ func TestGet(t *testing.T) {
 	os.Setenv("HOME", tempDir)
 
 	// Create data dir
-	err = os.MkdirAll(filepath.Join(tempDir, ".claude-mnemonic"), 0750)
+	err = os.MkdirAll(filepath.Join(tempDir, ".engram"), 0750)
 	require.NoError(t, err)
 
 	// Get() should return a valid config
@@ -373,28 +373,28 @@ func TestGet(t *testing.T) {
 // TestGetWorkerPort_WithEnv tests GetWorkerPort with environment variable.
 func TestGetWorkerPort_WithEnv(t *testing.T) {
 	// Save original env
-	origEnv := os.Getenv("CLAUDE_MNEMONIC_WORKER_PORT")
-	defer os.Setenv("CLAUDE_MNEMONIC_WORKER_PORT", origEnv)
+	origEnv := os.Getenv("ENGRAM_WORKER_PORT")
+	defer os.Setenv("ENGRAM_WORKER_PORT", origEnv)
 
 	// Test with valid port in env
-	os.Setenv("CLAUDE_MNEMONIC_WORKER_PORT", "45678")
+	os.Setenv("ENGRAM_WORKER_PORT", "45678")
 	port := GetWorkerPort()
 	assert.Equal(t, 45678, port)
 
 	// Test with invalid port (should fall back to config)
-	os.Setenv("CLAUDE_MNEMONIC_WORKER_PORT", "not-a-number")
+	os.Setenv("ENGRAM_WORKER_PORT", "not-a-number")
 	port = GetWorkerPort()
 	// Should return from Get().WorkerPort, which is default
 	assert.Greater(t, port, 0)
 
 	// Test with zero port (should fall back to config)
-	os.Setenv("CLAUDE_MNEMONIC_WORKER_PORT", "0")
+	os.Setenv("ENGRAM_WORKER_PORT", "0")
 	port = GetWorkerPort()
 	// Zero is invalid, so should use default
 	assert.Greater(t, port, 0)
 
 	// Test with no env (should use config)
-	os.Unsetenv("CLAUDE_MNEMONIC_WORKER_PORT")
+	os.Unsetenv("ENGRAM_WORKER_PORT")
 	port = GetWorkerPort()
 	assert.Greater(t, port, 0)
 }
@@ -411,17 +411,17 @@ func TestLoad_ContextSettings(t *testing.T) {
 	defer os.Setenv("HOME", origHome)
 
 	// Create data dir and settings
-	err = os.MkdirAll(filepath.Join(tempDir, ".claude-mnemonic"), 0750)
+	err = os.MkdirAll(filepath.Join(tempDir, ".engram"), 0750)
 	require.NoError(t, err)
 
 	settingsJSON := `{
-		"CLAUDE_MNEMONIC_CONTEXT_FULL_COUNT": 50,
-		"CLAUDE_MNEMONIC_CONTEXT_SESSION_COUNT": 20,
-		"CLAUDE_MNEMONIC_CONTEXT_OBS_TYPES": "bugfix,feature",
-		"CLAUDE_MNEMONIC_CONTEXT_OBS_CONCEPTS": "security,performance"
+		"ENGRAM_CONTEXT_FULL_COUNT": 50,
+		"ENGRAM_CONTEXT_SESSION_COUNT": 20,
+		"ENGRAM_CONTEXT_OBS_TYPES": "bugfix,feature",
+		"ENGRAM_CONTEXT_OBS_CONCEPTS": "security,performance"
 	}`
 	err = os.WriteFile(
-		filepath.Join(tempDir, ".claude-mnemonic", "settings.json"),
+		filepath.Join(tempDir, ".engram", "settings.json"),
 		[]byte(settingsJSON),
 		0600,
 	)

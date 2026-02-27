@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/thebtf/claude-mnemonic-plus/pkg/hooks"
+	"github.com/thebtf/engram/pkg/hooks"
 )
 
 // Input is the hook input from Claude Code.

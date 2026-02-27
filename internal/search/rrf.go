@@ -1,4 +1,4 @@
-// Package search provides unified search capabilities for claude-mnemonic.
+// Package search provides unified search capabilities for engram.
 package search
 
 import "sort"

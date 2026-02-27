@@ -1,4 +1,4 @@
-// Package hooks provides hook utilities for claude-mnemonic.
+// Package hooks provides hook utilities for engram.
 package hooks
 
 import (
@@ -19,12 +19,12 @@ func TestGetWorkerPort(t *testing.T) {
 	assert.Equal(t, DefaultWorkerPort, port)
 
 	// Test with environment variable
-	t.Setenv("CLAUDE_MNEMONIC_WORKER_PORT", "12345")
+	t.Setenv("ENGRAM_WORKER_PORT", "12345")
 	port = GetWorkerPort()
 	assert.Equal(t, 12345, port)
 
 	// Test with invalid environment variable (should return default)
-	t.Setenv("CLAUDE_MNEMONIC_WORKER_PORT", "invalid")
+	t.Setenv("ENGRAM_WORKER_PORT", "invalid")
 	port = GetWorkerPort()
 	assert.Equal(t, DefaultWorkerPort, port)
 }
@@ -754,7 +754,7 @@ func TestGetWorkerPort_EdgeCases(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			if tt.shouldSetEnv {
-				t.Setenv("CLAUDE_MNEMONIC_WORKER_PORT", tt.envValue)
+				t.Setenv("ENGRAM_WORKER_PORT", tt.envValue)
 			}
 			port := GetWorkerPort()
 			assert.Equal(t, tt.expectedPort, port)

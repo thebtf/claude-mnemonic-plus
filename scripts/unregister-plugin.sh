@@ -1,14 +1,14 @@
 #!/bin/bash
-# Unregister claude-mnemonic plugin from Claude Code
+# Unregister engram plugin from Claude Code
 
 set -e
 
 PLUGINS_FILE="$HOME/.claude/plugins/installed_plugins.json"
 SETTINGS_FILE="$HOME/.claude/settings.json"
 MARKETPLACES_FILE="$HOME/.claude/plugins/known_marketplaces.json"
-CACHE_DIR="$HOME/.claude/plugins/cache/claude-mnemonic"
-PLUGIN_KEY="claude-mnemonic@claude-mnemonic"
-MARKETPLACE_NAME="claude-mnemonic"
+CACHE_DIR="$HOME/.claude/plugins/cache/engram"
+PLUGIN_KEY="engram@engram"
+MARKETPLACE_NAME="engram"
 
 # Check if jq is available
 if ! command -v jq &> /dev/null; then
@@ -17,7 +17,7 @@ if ! command -v jq &> /dev/null; then
     echo "  - $SETTINGS_FILE (remove from enabledPlugins and statusLine)"
     echo "  - $MARKETPLACES_FILE (remove $MARKETPLACE_NAME)"
     echo "  - $CACHE_DIR (remove directory)"
-    echo "  - $HOME/.claude-mnemonic (remove data directory)"
+    echo "  - $HOME/.engram (remove data directory)"
     exit 1
 fi
 
@@ -35,7 +35,7 @@ if [ -f "$SETTINGS_FILE" ]; then
     # Remove from enabledPlugins and clear statusLine if it references our plugin
     jq --arg key "$PLUGIN_KEY" '
         del(.enabledPlugins[$key]) |
-        if .statusLine.command and (.statusLine.command | contains("claude-mnemonic")) then
+        if .statusLine.command and (.statusLine.command | contains("engram")) then
             del(.statusLine)
         else
             .
@@ -59,7 +59,7 @@ if [ -d "$CACHE_DIR" ]; then
 fi
 
 # Remove data directory (database, embeddings, etc.)
-DATA_DIR="$HOME/.claude-mnemonic"
+DATA_DIR="$HOME/.engram"
 if [ -d "$DATA_DIR" ]; then
     rm -rf "$DATA_DIR"
     echo "Data directory removed ($DATA_DIR)"

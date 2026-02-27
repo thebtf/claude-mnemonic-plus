@@ -1,4 +1,4 @@
-// Package worker provides the main worker service for claude-mnemonic.
+// Package worker provides the main worker service for engram.
 package worker
 
 import (
@@ -12,26 +12,26 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
-	"github.com/thebtf/claude-mnemonic-plus/internal/collections"
-	"github.com/thebtf/claude-mnemonic-plus/internal/config"
-	"github.com/thebtf/claude-mnemonic-plus/internal/consolidation"
-	"github.com/thebtf/claude-mnemonic-plus/internal/db/gorm"
-	"github.com/thebtf/claude-mnemonic-plus/internal/embedding"
-	"github.com/thebtf/claude-mnemonic-plus/internal/mcp"
-	"github.com/thebtf/claude-mnemonic-plus/internal/pattern"
-	"github.com/thebtf/claude-mnemonic-plus/internal/reranking"
-	"github.com/thebtf/claude-mnemonic-plus/internal/scoring"
-	"github.com/thebtf/claude-mnemonic-plus/internal/search"
-	"github.com/thebtf/claude-mnemonic-plus/internal/search/expansion"
-	"github.com/thebtf/claude-mnemonic-plus/internal/sessions"
-	"github.com/thebtf/claude-mnemonic-plus/internal/update"
-	"github.com/thebtf/claude-mnemonic-plus/internal/vector"
-	"github.com/thebtf/claude-mnemonic-plus/internal/vector/pgvector"
-	"github.com/thebtf/claude-mnemonic-plus/internal/watcher"
-	"github.com/thebtf/claude-mnemonic-plus/internal/worker/sdk"
-	"github.com/thebtf/claude-mnemonic-plus/internal/worker/session"
-	"github.com/thebtf/claude-mnemonic-plus/internal/worker/sse"
-	"github.com/thebtf/claude-mnemonic-plus/pkg/models"
+	"github.com/thebtf/engram/internal/collections"
+	"github.com/thebtf/engram/internal/config"
+	"github.com/thebtf/engram/internal/consolidation"
+	"github.com/thebtf/engram/internal/db/gorm"
+	"github.com/thebtf/engram/internal/embedding"
+	"github.com/thebtf/engram/internal/mcp"
+	"github.com/thebtf/engram/internal/pattern"
+	"github.com/thebtf/engram/internal/reranking"
+	"github.com/thebtf/engram/internal/scoring"
+	"github.com/thebtf/engram/internal/search"
+	"github.com/thebtf/engram/internal/search/expansion"
+	"github.com/thebtf/engram/internal/sessions"
+	"github.com/thebtf/engram/internal/update"
+	"github.com/thebtf/engram/internal/vector"
+	"github.com/thebtf/engram/internal/vector/pgvector"
+	"github.com/thebtf/engram/internal/watcher"
+	"github.com/thebtf/engram/internal/worker/sdk"
+	"github.com/thebtf/engram/internal/worker/session"
+	"github.com/thebtf/engram/internal/worker/sse"
+	"github.com/thebtf/engram/pkg/models"
 	"github.com/rs/zerolog/log"
 )
 
@@ -360,7 +360,7 @@ func NewService(version string) (*Service, error) {
 
 	// Determine install directory (plugin location)
 	homeDir, _ := os.UserHomeDir()
-	installDir := fmt.Sprintf("%s/.claude/plugins/marketplaces/claude-mnemonic", homeDir)
+	installDir := fmt.Sprintf("%s/.claude/plugins/marketplaces/engram", homeDir)
 
 	// Create rate limiter with generous limits (100 req/sec, burst of 200)
 	// These limits are per-client and allow for intensive CLI usage
@@ -1634,7 +1634,7 @@ func (s *Service) Start() error {
 	}
 
 	// Check if we're in restart mode (after update)
-	isRestart := os.Getenv("CLAUDE_MNEMONIC_RESTART") == "1"
+	isRestart := os.Getenv("ENGRAM_RESTART") == "1"
 
 	s.wg.Add(1)
 	go func() {

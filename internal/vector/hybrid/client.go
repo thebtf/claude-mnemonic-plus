@@ -1,6 +1,6 @@
 //go:build ignore
 
-// Package hybrid provides LEANN-inspired selective vector storage for claude-mnemonic.
+// Package hybrid provides LEANN-inspired selective vector storage for engram.
 //
 // This package implements a hybrid storage strategy where frequently-accessed
 // observations ("hubs") have their embeddings stored, while infrequently-accessed
@@ -17,8 +17,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/thebtf/claude-mnemonic-plus/internal/embedding"
-	"github.com/thebtf/claude-mnemonic-plus/internal/vector/sqlitevec"
+	"github.com/thebtf/engram/internal/embedding"
+	"github.com/thebtf/engram/internal/vector/sqlitevec"
 	"github.com/rs/zerolog/log"
 )
 

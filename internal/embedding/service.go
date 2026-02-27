@@ -10,7 +10,7 @@ import (
 	"path/filepath"
 	"sync"
 
-	"github.com/thebtf/claude-mnemonic-plus/internal/config"
+	"github.com/thebtf/engram/internal/config"
 	"github.com/sugarme/tokenizer"
 	"github.com/sugarme/tokenizer/pretrained"
 	ort "github.com/yalue/onnxruntime_go"
@@ -124,7 +124,7 @@ func extractONNXLibrary() (string, error) {
 	hashStr := hex.EncodeToString(hash[:8]) // Use first 8 bytes
 
 	// Create cache directory
-	cacheDir := filepath.Join(os.TempDir(), "claude-mnemonic-onnx", hashStr)
+	cacheDir := filepath.Join(os.TempDir(), "engram-onnx", hashStr)
 	libPath := filepath.Join(cacheDir, onnxRuntimeLibName)
 
 	// Check if already extracted

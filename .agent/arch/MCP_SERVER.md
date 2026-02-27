@@ -18,7 +18,7 @@ The MCP subsystem exposes 37+ tools via the `nia` MCP server. Two transport mode
 ```
 cmd/mcp/main.go:
   1. Parse flags: -project (required), -data-dir (deprecated), -debug
-  2. Load config from ~/.claude-mnemonic/settings.json
+  2. Load config from ~/.engram/settings.json
   3. Initialize PostgreSQL connection (DATABASE_DSN)
   4. Initialize embedding service (ONNX or OpenAI)
   5. Initialize pgvector client
@@ -31,7 +31,7 @@ cmd/mcp/main.go:
 
 ```
 cmd/mcp-sse/main.go:
-  Port: 37778 (configurable via CLAUDE_MNEMONIC_MCP_SSE_PORT)
+  Port: 37778 (configurable via ENGRAM_MCP_SSE_PORT)
   Routes:
     /sse     -> SSE event stream (persistent connection)
     /message -> POST endpoint for tool calls
@@ -147,7 +147,7 @@ search:
 
 **Symptom:** SSE server fails to start.
 **Root Cause:** Port 37778 already in use by another instance.
-**Correct Handling:** Set `CLAUDE_MNEMONIC_MCP_SSE_PORT` to different port.
+**Correct Handling:** Set `ENGRAM_MCP_SSE_PORT` to different port.
 
 ### GOTCHA-003: Stdin Proxy Requires SSE Server Running
 

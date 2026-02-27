@@ -5,7 +5,7 @@ import (
 	"math/bits"
 	"strings"
 
-	"github.com/thebtf/claude-mnemonic-plus/pkg/models"
+	"github.com/thebtf/engram/pkg/models"
 )
 
 // ClusterObservations groups similar observations and returns only one representative per cluster.

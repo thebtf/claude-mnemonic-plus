@@ -1,4 +1,4 @@
-// Package hooks provides hook utilities for claude-mnemonic.
+// Package hooks provides hook utilities for engram.
 package hooks
 
 import (
@@ -78,7 +78,7 @@ type HookHandler[T any] func(ctx *HookContext, input *T) (additionalContext stri
 // worker startup, and project ID generation.
 func RunHook[T any](hookName string, handler HookHandler[T]) {
 	// Skip if this is an internal call (from SDK processor)
-	if os.Getenv("CLAUDE_MNEMONIC_INTERNAL") == "1" {
+	if os.Getenv("ENGRAM_INTERNAL") == "1" {
 		WriteResponse(hookName, true)
 		return
 	}
@@ -151,7 +151,7 @@ type StatuslineHandler[T any] func(input *T, port int) string
 
 // RunStatuslineHook executes a statusline hook with minimal overhead.
 // Unlike RunHook, this:
-// - Does NOT check CLAUDE_MNEMONIC_INTERNAL (statuslines always run)
+// - Does NOT check ENGRAM_INTERNAL (statuslines always run)
 // - Uses GetWorkerPort() instead of EnsureWorkerRunning() (no startup)
 // - Prints output directly to stdout (no JSON wrapping)
 // This keeps statusline fast (<100ms requirement).

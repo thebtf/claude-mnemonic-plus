@@ -9,9 +9,9 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
-// GetStrategyFromEnv reads CLAUDE_MNEMONIC_VECTOR_STRATEGY from environment
+// GetStrategyFromEnv reads ENGRAM_VECTOR_STRATEGY from environment
 func GetStrategyFromEnv() VectorStorageStrategy {
-	strategyStr := os.Getenv("CLAUDE_MNEMONIC_VECTOR_STRATEGY")
+	strategyStr := os.Getenv("ENGRAM_VECTOR_STRATEGY")
 	if strategyStr == "" {
 		// Default to hub strategy for optimal balance
 		return StorageHub
@@ -26,9 +26,9 @@ func GetStrategyFromEnv() VectorStorageStrategy {
 	return strategy
 }
 
-// GetHubThresholdFromEnv reads CLAUDE_MNEMONIC_HUB_THRESHOLD from environment
+// GetHubThresholdFromEnv reads ENGRAM_HUB_THRESHOLD from environment
 func GetHubThresholdFromEnv() int {
-	thresholdStr := os.Getenv("CLAUDE_MNEMONIC_HUB_THRESHOLD")
+	thresholdStr := os.Getenv("ENGRAM_HUB_THRESHOLD")
 	if thresholdStr == "" {
 		return 5 // Default threshold
 	}
@@ -57,7 +57,7 @@ func GetHubThresholdFromEnv() int {
 }
 
 // IsHybridEnabled checks if hybrid storage should be used
-// Returns false if CLAUDE_MNEMONIC_VECTOR_STRATEGY=always (backwards compat)
+// Returns false if ENGRAM_VECTOR_STRATEGY=always (backwards compat)
 func IsHybridEnabled() bool {
 	strategy := GetStrategyFromEnv()
 	return strategy != StorageAlways

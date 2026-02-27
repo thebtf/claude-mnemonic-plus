@@ -1,4 +1,4 @@
-// Package maintenance provides scheduled maintenance tasks for claude-mnemonic.
+// Package maintenance provides scheduled maintenance tasks for engram.
 package maintenance
 
 import (
@@ -6,8 +6,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/thebtf/claude-mnemonic-plus/internal/config"
-	"github.com/thebtf/claude-mnemonic-plus/internal/db/gorm"
+	"github.com/thebtf/engram/internal/config"
+	"github.com/thebtf/engram/internal/db/gorm"
 	"github.com/rs/zerolog"
 )
 

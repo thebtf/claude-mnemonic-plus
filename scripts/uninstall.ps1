@@ -1,8 +1,8 @@
-# Claude Mnemonic - Windows Uninstallation Script
-# Usage: irm https://raw.githubusercontent.com/thebtf/claude-mnemonic-plus/main/scripts/uninstall.ps1 | iex
+# Engram - Windows Uninstallation Script
+# Usage: irm https://raw.githubusercontent.com/thebtf/engram-plus/main/scripts/uninstall.ps1 | iex
 #
 # Options:
-#   -KeepData    Keep the data directory (~/.claude-mnemonic/)
+#   -KeepData    Keep the data directory (~/.engram/)
 #   -Purge       Remove everything including data (default)
 
 param(
@@ -13,13 +13,13 @@ param(
 $ErrorActionPreference = "Stop"
 
 # Configuration
-$InstallDir = "$env:USERPROFILE\.claude\plugins\marketplaces\claude-mnemonic"
-$CacheDir = "$env:USERPROFILE\.claude\plugins\cache\claude-mnemonic"
-$DataDir = "$env:USERPROFILE\.claude-mnemonic"
+$InstallDir = "$env:USERPROFILE\.claude\plugins\marketplaces\engram"
+$CacheDir = "$env:USERPROFILE\.claude\plugins\cache\engram"
+$DataDir = "$env:USERPROFILE\.engram"
 $PluginsFile = "$env:USERPROFILE\.claude\plugins\installed_plugins.json"
 $SettingsFile = "$env:USERPROFILE\.claude\settings.json"
 $MarketplacesFile = "$env:USERPROFILE\.claude\plugins\known_marketplaces.json"
-$PluginKey = "claude-mnemonic@claude-mnemonic"
+$PluginKey = "engram@engram"
 
 function Write-Info { param($Message) Write-Host "[INFO] $Message" -ForegroundColor Blue }
 function Write-Success { param($Message) Write-Host "[OK] $Message" -ForegroundColor Green }
@@ -27,13 +27,13 @@ function Write-Warn { param($Message) Write-Host "[WARN] $Message" -ForegroundCo
 
 Write-Host ""
 Write-Host "================================================================" -ForegroundColor Cyan
-Write-Host "       Claude Mnemonic - Windows Uninstallation Script          " -ForegroundColor Cyan
+Write-Host "       Engram - Windows Uninstallation Script          " -ForegroundColor Cyan
 Write-Host "================================================================" -ForegroundColor Cyan
 Write-Host ""
 
 # Stop worker processes
 Write-Info "Stopping worker processes..."
-Get-Process | Where-Object { $_.ProcessName -like "*worker*" -and $_.Path -like "*claude-mnemonic*" } | Stop-Process -Force -ErrorAction SilentlyContinue
+Get-Process | Where-Object { $_.ProcessName -like "*worker*" -and $_.Path -like "*engram*" } | Stop-Process -Force -ErrorAction SilentlyContinue
 Start-Sleep -Seconds 1
 Write-Success "Worker processes stopped"
 
@@ -73,7 +73,7 @@ try {
             $modified = $true
         }
         # Remove statusline if it's ours
-        if ($Settings.statusLine -and $Settings.statusLine.command -match "claude-mnemonic") {
+        if ($Settings.statusLine -and $Settings.statusLine.command -match "engram") {
             $Settings.PSObject.Properties.Remove("statusLine")
             $modified = $true
         }
@@ -85,8 +85,8 @@ try {
 
     if (Test-Path $MarketplacesFile) {
         $Marketplaces = Get-Content $MarketplacesFile -Raw | ConvertFrom-Json
-        if ($Marketplaces.PSObject.Properties["claude-mnemonic"]) {
-            $Marketplaces.PSObject.Properties.Remove("claude-mnemonic")
+        if ($Marketplaces.PSObject.Properties["engram"]) {
+            $Marketplaces.PSObject.Properties.Remove("engram")
             $Marketplaces | ConvertTo-Json -Depth 10 | Out-File -Encoding UTF8 $MarketplacesFile
             Write-Success "Removed from known_marketplaces.json"
         }
@@ -119,4 +119,4 @@ if ($KeepData) {
     Write-Host ""
 }
 
-Write-Success "Claude Mnemonic has been uninstalled"
+Write-Success "Engram has been uninstalled"

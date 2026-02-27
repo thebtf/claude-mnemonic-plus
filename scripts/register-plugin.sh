@@ -1,18 +1,18 @@
 #!/bin/bash
-# Register claude-mnemonic plugin with Claude Code
+# Register engram plugin with Claude Code
 
 set -e
 
 PLUGINS_FILE="$HOME/.claude/plugins/installed_plugins.json"
 SETTINGS_FILE="$HOME/.claude/settings.json"
 MARKETPLACES_FILE="$HOME/.claude/plugins/known_marketplaces.json"
-PLUGIN_KEY="claude-mnemonic@claude-mnemonic"
-MARKETPLACE_NAME="claude-mnemonic"
-MARKETPLACE_PATH="$HOME/.claude/plugins/marketplaces/claude-mnemonic"
+PLUGIN_KEY="engram@engram"
+MARKETPLACE_NAME="engram"
+MARKETPLACE_PATH="$HOME/.claude/plugins/marketplaces/engram"
 
 # Get version from git tags (same as Makefile), or use argument if provided
 VERSION="${1:-$(git describe --tags --always --dirty 2>/dev/null || echo "dev")}"
-CACHE_BASE="$HOME/.claude/plugins/cache/claude-mnemonic/claude-mnemonic"
+CACHE_BASE="$HOME/.claude/plugins/cache/engram/engram"
 CACHE_PATH="$CACHE_BASE/$VERSION"
 TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%S.000Z")
 
@@ -126,7 +126,7 @@ EOF
         MCP_ENTRY=$(echo "$MCP_ENTRY" | sed "s|MCP_BINARY_PLACEHOLDER|$MCP_BINARY|g")
 
         # Add or update mcpServers field
-        if jq --arg key "claude-mnemonic" --argjson entry "$MCP_ENTRY" \
+        if jq --arg key "engram" --argjson entry "$MCP_ENTRY" \
             '.mcpServers //= {} | .mcpServers[$key] = $entry' "$SETTINGS_FILE" > "${SETTINGS_FILE}.tmp"; then
             mv "${SETTINGS_FILE}.tmp" "$SETTINGS_FILE"
             echo "MCP server registered successfully"

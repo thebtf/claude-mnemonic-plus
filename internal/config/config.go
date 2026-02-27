@@ -1,4 +1,4 @@
-// Package config provides configuration management for claude-mnemonic.
+// Package config provides configuration management for engram.
 package config
 
 import (
@@ -93,18 +93,18 @@ var (
 	configMu     sync.RWMutex
 )
 
-// DataDir returns the data directory path (~/.claude-mnemonic).
+// DataDir returns the data directory path (~/.engram).
 func DataDir() string {
 	home, _ := os.UserHomeDir()
-	return filepath.Join(home, ".claude-mnemonic")
+	return filepath.Join(home, ".engram")
 }
 
 // DBPath returns the database file path.
 func DBPath() string {
-	if v := strings.TrimSpace(os.Getenv("CLAUDE_MNEMONIC_DB_PATH")); v != "" {
+	if v := strings.TrimSpace(os.Getenv("ENGRAM_DB_PATH")); v != "" {
 		return v
 	}
-	return filepath.Join(DataDir(), "claude-mnemonic.db")
+	return filepath.Join(DataDir(), "engram.db")
 }
 
 // SettingsPath returns the settings file path.
@@ -129,11 +129,11 @@ func EnsureSettings() error {
 
 	// Create default settings file with comments
 	defaultSettings := `{
-  "CLAUDE_MNEMONIC_WORKER_PORT": 37777,
-  "CLAUDE_MNEMONIC_MODEL": "haiku",
-  "CLAUDE_MNEMONIC_CONTEXT_OBSERVATIONS": 100,
-  "CLAUDE_MNEMONIC_CONTEXT_FULL_COUNT": 25,
-  "CLAUDE_MNEMONIC_CONTEXT_SESSION_COUNT": 10
+  "ENGRAM_WORKER_PORT": 37777,
+  "ENGRAM_MODEL": "haiku",
+  "ENGRAM_CONTEXT_OBSERVATIONS": 100,
+  "ENGRAM_CONTEXT_FULL_COUNT": 25,
+  "ENGRAM_CONTEXT_SESSION_COUNT": 10
 }
 `
 	return os.WriteFile(path, []byte(defaultSettings), 0600)
@@ -216,81 +216,81 @@ func Load() (*Config, error) {
 	}
 
 	// Map settings to config
-	if v, ok := settings["CLAUDE_MNEMONIC_WORKER_PORT"].(float64); ok {
+	if v, ok := settings["ENGRAM_WORKER_PORT"].(float64); ok {
 		cfg.WorkerPort = int(v)
 	}
 	// WorkerHost and WorkerToken are env-only (not settable via JSON file).
 	// WorkerToken in particular must never be persisted to disk.
-	if v, ok := settings["CLAUDE_MNEMONIC_DB_PATH"].(string); ok && v != "" {
+	if v, ok := settings["ENGRAM_DB_PATH"].(string); ok && v != "" {
 		cfg.DBPath = v
 	}
-	if v, ok := settings["CLAUDE_MNEMONIC_MODEL"].(string); ok {
+	if v, ok := settings["ENGRAM_MODEL"].(string); ok {
 		cfg.Model = v
 	}
 	if v, ok := settings["CLAUDE_CODE_PATH"].(string); ok {
 		cfg.ClaudeCodePath = v
 	}
-	if v, ok := settings["CLAUDE_MNEMONIC_EMBEDDING_MODEL"].(string); ok && v != "" {
+	if v, ok := settings["ENGRAM_EMBEDDING_MODEL"].(string); ok && v != "" {
 		cfg.EmbeddingModel = v
 	}
 	// Reranking settings
-	if v, ok := settings["CLAUDE_MNEMONIC_RERANKING_ENABLED"].(bool); ok {
+	if v, ok := settings["ENGRAM_RERANKING_ENABLED"].(bool); ok {
 		cfg.RerankingEnabled = v
 	}
-	if v, ok := settings["CLAUDE_MNEMONIC_RERANKING_CANDIDATES"].(float64); ok && v > 0 {
+	if v, ok := settings["ENGRAM_RERANKING_CANDIDATES"].(float64); ok && v > 0 {
 		cfg.RerankingCandidates = int(v)
 	}
-	if v, ok := settings["CLAUDE_MNEMONIC_RERANKING_RESULTS"].(float64); ok && v > 0 {
+	if v, ok := settings["ENGRAM_RERANKING_RESULTS"].(float64); ok && v > 0 {
 		cfg.RerankingResults = int(v)
 	}
-	if v, ok := settings["CLAUDE_MNEMONIC_RERANKING_ALPHA"].(float64); ok && v >= 0 && v <= 1 {
+	if v, ok := settings["ENGRAM_RERANKING_ALPHA"].(float64); ok && v >= 0 && v <= 1 {
 		cfg.RerankingAlpha = v
 	}
-	if v, ok := settings["CLAUDE_MNEMONIC_RERANKING_MIN_IMPROVEMENT"].(float64); ok && v >= 0 {
+	if v, ok := settings["ENGRAM_RERANKING_MIN_IMPROVEMENT"].(float64); ok && v >= 0 {
 		cfg.RerankingMinImprovement = v
 	}
-	if v, ok := settings["CLAUDE_MNEMONIC_RERANKING_PURE_MODE"].(bool); ok {
+	if v, ok := settings["ENGRAM_RERANKING_PURE_MODE"].(bool); ok {
 		cfg.RerankingPureMode = v
 	}
-	if v, ok := settings["CLAUDE_MNEMONIC_CONTEXT_OBSERVATIONS"].(float64); ok {
+	if v, ok := settings["ENGRAM_CONTEXT_OBSERVATIONS"].(float64); ok {
 		cfg.ContextObservations = int(v)
 	}
-	if v, ok := settings["CLAUDE_MNEMONIC_CONTEXT_FULL_COUNT"].(float64); ok {
+	if v, ok := settings["ENGRAM_CONTEXT_FULL_COUNT"].(float64); ok {
 		cfg.ContextFullCount = int(v)
 	}
-	if v, ok := settings["CLAUDE_MNEMONIC_CONTEXT_SESSION_COUNT"].(float64); ok {
+	if v, ok := settings["ENGRAM_CONTEXT_SESSION_COUNT"].(float64); ok {
 		cfg.ContextSessionCount = int(v)
 	}
-	if v, ok := settings["CLAUDE_MNEMONIC_CONTEXT_OBS_TYPES"].(string); ok && v != "" {
+	if v, ok := settings["ENGRAM_CONTEXT_OBS_TYPES"].(string); ok && v != "" {
 		cfg.ContextObsTypes = splitTrim(v)
 	}
-	if v, ok := settings["CLAUDE_MNEMONIC_CONTEXT_OBS_CONCEPTS"].(string); ok && v != "" {
+	if v, ok := settings["ENGRAM_CONTEXT_OBS_CONCEPTS"].(string); ok && v != "" {
 		cfg.ContextObsConcepts = splitTrim(v)
 	}
-	if v, ok := settings["CLAUDE_MNEMONIC_CONTEXT_RELEVANCE_THRESHOLD"].(float64); ok && v >= 0 && v <= 1 {
+	if v, ok := settings["ENGRAM_CONTEXT_RELEVANCE_THRESHOLD"].(float64); ok && v >= 0 && v <= 1 {
 		cfg.ContextRelevanceThreshold = v
 	}
-	if v, ok := settings["CLAUDE_MNEMONIC_CONTEXT_MAX_PROMPT_RESULTS"].(float64); ok && v >= 0 {
+	if v, ok := settings["ENGRAM_CONTEXT_MAX_PROMPT_RESULTS"].(float64); ok && v >= 0 {
 		cfg.ContextMaxPromptResults = int(v)
 	}
 	// Graph settings
-	if v, ok := settings["CLAUDE_MNEMONIC_GRAPH_ENABLED"].(bool); ok {
+	if v, ok := settings["ENGRAM_GRAPH_ENABLED"].(bool); ok {
 		cfg.GraphEnabled = v
 	}
-	if v, ok := settings["CLAUDE_MNEMONIC_GRAPH_MAX_HOPS"].(float64); ok && v > 0 {
+	if v, ok := settings["ENGRAM_GRAPH_MAX_HOPS"].(float64); ok && v > 0 {
 		cfg.GraphMaxHops = int(v)
 	}
-	if v, ok := settings["CLAUDE_MNEMONIC_GRAPH_BRANCH_FACTOR"].(float64); ok && v > 0 {
+	if v, ok := settings["ENGRAM_GRAPH_BRANCH_FACTOR"].(float64); ok && v > 0 {
 		cfg.GraphBranchFactor = int(v)
 	}
-	if v, ok := settings["CLAUDE_MNEMONIC_GRAPH_EDGE_WEIGHT"].(float64); ok && v >= 0 && v <= 1 {
+	if v, ok := settings["ENGRAM_GRAPH_EDGE_WEIGHT"].(float64); ok && v >= 0 && v <= 1 {
 		cfg.GraphEdgeWeight = v
 	}
-	if v, ok := settings["CLAUDE_MNEMONIC_GRAPH_REBUILD_INTERVAL_MIN"].(float64); ok && v > 0 {
+	if v, ok := settings["ENGRAM_GRAPH_REBUILD_INTERVAL_MIN"].(float64); ok && v > 0 {
 		cfg.GraphRebuildIntervalMin = int(v)
 	}
 	// Vector storage settings (LEANN Phase 2)
-	if v, ok := settings["CLAUDE_MNEMONIC_VECTOR_STORAGE_STRATEGY"].(string); ok && v != "" {
+	if v, ok := settings["ENGRAM_VECTOR_STORAGE_STRATEGY"].(string); ok && v != "" {
 		cfg.VectorStorageStrategy = v
 	}
 	if v, ok := settings["EMBEDDING_PROVIDER"].(string); ok && v != "" {
@@ -306,18 +306,18 @@ func Load() (*Config, error) {
 	if v, ok := settings["EMBEDDING_DIMENSIONS"].(float64); ok && v > 0 {
 		cfg.EmbeddingDimensions = int(v)
 	}
-	if v, ok := settings["CLAUDE_MNEMONIC_HUB_THRESHOLD"].(float64); ok && v > 0 {
+	if v, ok := settings["ENGRAM_HUB_THRESHOLD"].(float64); ok && v > 0 {
 		cfg.HubThreshold = int(v)
 	}
 
 	// Environment variable overrides (take precedence over JSON settings)
-	if v := strings.TrimSpace(os.Getenv("CLAUDE_MNEMONIC_DB_PATH")); v != "" {
+	if v := strings.TrimSpace(os.Getenv("ENGRAM_DB_PATH")); v != "" {
 		cfg.DBPath = v
 	}
-	if v := strings.TrimSpace(os.Getenv("CLAUDE_MNEMONIC_WORKER_HOST")); v != "" {
+	if v := strings.TrimSpace(os.Getenv("ENGRAM_WORKER_HOST")); v != "" {
 		cfg.WorkerHost = v
 	}
-	if v := strings.TrimSpace(os.Getenv("CLAUDE_MNEMONIC_API_TOKEN")); v != "" {
+	if v := strings.TrimSpace(os.Getenv("ENGRAM_API_TOKEN")); v != "" {
 		cfg.WorkerToken = v
 	}
 	if v := strings.TrimSpace(os.Getenv("EMBEDDING_PROVIDER")); v != "" {
@@ -388,7 +388,7 @@ func Get() *Config {
 
 // GetWorkerPort returns the worker port from environment or config.
 func GetWorkerPort() int {
-	if port := os.Getenv("CLAUDE_MNEMONIC_WORKER_PORT"); port != "" {
+	if port := os.Getenv("ENGRAM_WORKER_PORT"); port != "" {
 		var p int
 		if err := json.Unmarshal([]byte(port), &p); err == nil && p > 0 {
 			return p
@@ -399,7 +399,7 @@ func GetWorkerPort() int {
 
 // GetWorkerHost returns the worker host from environment, config, or fallback.
 func GetWorkerHost() string {
-	host := strings.TrimSpace(os.Getenv("CLAUDE_MNEMONIC_WORKER_HOST"))
+	host := strings.TrimSpace(os.Getenv("ENGRAM_WORKER_HOST"))
 	if host != "" {
 		return host
 	}
@@ -411,7 +411,7 @@ func GetWorkerHost() string {
 
 // GetWorkerToken returns the worker authentication token.
 func GetWorkerToken() string {
-	return strings.TrimSpace(os.Getenv("CLAUDE_MNEMONIC_API_TOKEN"))
+	return strings.TrimSpace(os.Getenv("ENGRAM_API_TOKEN"))
 }
 
 // GetEmbeddingProvider returns the embedding provider ("builtin" or "openai").
@@ -457,13 +457,13 @@ func GetEmbeddingModelName() string {
 }
 
 // GetCollectionConfigPath returns the path to the collections YAML config.
-// Falls back to ~/.config/claude-mnemonic/collections.yml if env is unset.
+// Falls back to ~/.config/engram/collections.yml if env is unset.
 func GetCollectionConfigPath() string {
 	if v := strings.TrimSpace(os.Getenv("COLLECTION_CONFIG")); v != "" {
 		return v
 	}
 	home, _ := os.UserHomeDir()
-	return filepath.Join(home, ".config", "claude-mnemonic", "collections.yml")
+	return filepath.Join(home, ".config", "engram", "collections.yml")
 }
 
 // GetSessionsDir returns the sessions directory.

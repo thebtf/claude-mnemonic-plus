@@ -1,4 +1,4 @@
-// Package gorm provides GORM-based database operations for claude-mnemonic.
+// Package gorm provides GORM-based database operations for engram.
 package gorm
 
 import (
@@ -8,7 +8,7 @@ import (
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 
-	"github.com/thebtf/claude-mnemonic-plus/pkg/models"
+	"github.com/thebtf/engram/pkg/models"
 )
 
 // RelationStore provides relation-related database operations using GORM.

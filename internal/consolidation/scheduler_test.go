@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/thebtf/claude-mnemonic-plus/internal/scoring"
-	"github.com/thebtf/claude-mnemonic-plus/pkg/models"
+	"github.com/thebtf/engram/internal/scoring"
+	"github.com/thebtf/engram/pkg/models"
 	"github.com/rs/zerolog"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/suite"

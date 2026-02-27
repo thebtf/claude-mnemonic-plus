@@ -1,4 +1,4 @@
-// Package sdk provides SDK agent integration for claude-mnemonic.
+// Package sdk provides SDK agent integration for engram.
 package sdk
 
 import (

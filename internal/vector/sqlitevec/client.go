@@ -1,6 +1,6 @@
 //go:build ignore
 
-// Package sqlitevec provides sqlite-vec based vector database integration for claude-mnemonic.
+// Package sqlitevec provides sqlite-vec based vector database integration for engram.
 package sqlitevec
 
 import (
@@ -14,7 +14,7 @@ import (
 	"time"
 
 	sqlite_vec "github.com/asg017/sqlite-vec-go-bindings/cgo"
-	"github.com/thebtf/claude-mnemonic-plus/internal/embedding"
+	"github.com/thebtf/engram/internal/embedding"
 	"github.com/rs/zerolog/log"
 	"golang.org/x/sync/singleflight"
 )

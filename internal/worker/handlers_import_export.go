@@ -15,9 +15,9 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/thebtf/claude-mnemonic-plus/internal/db/gorm"
-	"github.com/thebtf/claude-mnemonic-plus/pkg/models"
-	"github.com/thebtf/claude-mnemonic-plus/pkg/similarity"
+	"github.com/thebtf/engram/internal/db/gorm"
+	"github.com/thebtf/engram/pkg/models"
+	"github.com/thebtf/engram/pkg/similarity"
 	"github.com/rs/zerolog/log"
 )
 

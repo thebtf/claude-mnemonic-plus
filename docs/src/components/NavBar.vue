@@ -70,7 +70,7 @@ defineProps({
   },
   githubUrl: {
     type: String,
-    default: 'https://github.com/thebtf/claude-mnemonic-plus'
+    default: 'https://github.com/thebtf/engram'
   },
   mobileMenuOpen: Boolean
 })

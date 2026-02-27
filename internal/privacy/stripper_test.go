@@ -80,17 +80,17 @@ func TestStripMemoryTags(t *testing.T) {
 		},
 		{
 			name:     "single memory tag",
-			input:    "Hello <claude-mnemonic-context>memory</claude-mnemonic-context> world",
+			input:    "Hello <engram-context>memory</engram-context> world",
 			expected: "Hello  world",
 		},
 		{
 			name:     "multiline memory tag",
-			input:    "Hello <claude-mnemonic-context>\nmemory\ncontent\n</claude-mnemonic-context> world",
+			input:    "Hello <engram-context>\nmemory\ncontent\n</engram-context> world",
 			expected: "Hello  world",
 		},
 		{
 			name:     "entirely memory context",
-			input:    "<claude-mnemonic-context>all memory</claude-mnemonic-context>",
+			input:    "<engram-context>all memory</engram-context>",
 			expected: "",
 		},
 	}
@@ -116,12 +116,12 @@ func TestStripAllTags(t *testing.T) {
 		},
 		{
 			name:     "both tag types",
-			input:    "Hello <private>secret</private> and <claude-mnemonic-context>memory</claude-mnemonic-context> world",
+			input:    "Hello <private>secret</private> and <engram-context>memory</engram-context> world",
 			expected: "Hello  and  world",
 		},
 		{
 			name:     "interleaved tags",
-			input:    "A <private>B</private> C <claude-mnemonic-context>D</claude-mnemonic-context> E",
+			input:    "A <private>B</private> C <engram-context>D</engram-context> E",
 			expected: "A  C  E",
 		},
 	}
@@ -203,12 +203,12 @@ func TestClean(t *testing.T) {
 		},
 		{
 			name:     "strips memory tags and trims",
-			input:    "  Hello <claude-mnemonic-context>memory</claude-mnemonic-context> world  ",
+			input:    "  Hello <engram-context>memory</engram-context> world  ",
 			expected: "Hello  world",
 		},
 		{
 			name:     "strips both tag types and trims",
-			input:    "\n  Hello <private>secret</private> and <claude-mnemonic-context>memory</claude-mnemonic-context> world  \n",
+			input:    "\n  Hello <private>secret</private> and <engram-context>memory</engram-context> world  \n",
 			expected: "Hello  and  world",
 		},
 		{

@@ -1,8 +1,8 @@
-# Claude Mnemonic - Windows Installation Script
-# Usage: irm https://raw.githubusercontent.com/thebtf/claude-mnemonic-plus/main/scripts/install.ps1 | iex
+# Engram - Windows Installation Script
+# Usage: irm https://raw.githubusercontent.com/thebtf/engram-plus/main/scripts/install.ps1 | iex
 #
 # Or with a specific version:
-# $env:MNEMONIC_VERSION = "v1.0.0"; irm https://raw.githubusercontent.com/thebtf/claude-mnemonic-plus/main/scripts/install.ps1 | iex
+# $env:MNEMONIC_VERSION = "v1.0.0"; irm https://raw.githubusercontent.com/thebtf/engram-plus/main/scripts/install.ps1 | iex
 
 param(
     [string]$Version = $env:MNEMONIC_VERSION,
@@ -12,13 +12,13 @@ param(
 $ErrorActionPreference = "Stop"
 
 # Configuration
-$GitHubRepo = "thebtf/claude-mnemonic-plus"
-$InstallDir = "$env:USERPROFILE\.claude\plugins\marketplaces\claude-mnemonic"
-$CacheDir = "$env:USERPROFILE\.claude\plugins\cache\claude-mnemonic\claude-mnemonic"
+$GitHubRepo = "thebtf/engram-plus"
+$InstallDir = "$env:USERPROFILE\.claude\plugins\marketplaces\engram"
+$CacheDir = "$env:USERPROFILE\.claude\plugins\cache\engram\engram"
 $PluginsFile = "$env:USERPROFILE\.claude\plugins\installed_plugins.json"
 $SettingsFile = "$env:USERPROFILE\.claude\settings.json"
 $MarketplacesFile = "$env:USERPROFILE\.claude\plugins\known_marketplaces.json"
-$PluginKey = "claude-mnemonic@claude-mnemonic"
+$PluginKey = "engram@engram"
 
 function Write-Info { param($Message) Write-Host "[INFO] $Message" -ForegroundColor Blue }
 function Write-Success { param($Message) Write-Host "[OK] $Message" -ForegroundColor Green }
@@ -46,7 +46,7 @@ function Get-LatestVersion {
             Write-Host "  3. Use a GitHub token (set `$env:GITHUB_TOKEN)"
             Write-Host "  4. Clone and build from source:"
             Write-Host "     git clone https://github.com/$GitHubRepo.git" -ForegroundColor Cyan
-            Write-Host "     cd claude-mnemonic; make build; make install" -ForegroundColor Cyan
+            Write-Host "     cd engram; make build; make install" -ForegroundColor Cyan
             exit 1
         }
         Write-Error "Failed to fetch latest version from GitHub: $_"
@@ -55,19 +55,19 @@ function Get-LatestVersion {
 
 function Stop-ExistingWorker {
     Write-Info "Stopping existing worker (if running)..."
-    Get-Process | Where-Object { $_.ProcessName -like "*worker*" -and $_.Path -like "*claude-mnemonic*" } | Stop-Process -Force -ErrorAction SilentlyContinue
+    Get-Process | Where-Object { $_.ProcessName -like "*worker*" -and $_.Path -like "*engram*" } | Stop-Process -Force -ErrorAction SilentlyContinue
     Start-Sleep -Seconds 1
 }
 
 function Install-Release {
     param([string]$Version)
 
-    $TempDir = New-Item -ItemType Directory -Path "$env:TEMP\claude-mnemonic-$(Get-Random)" -Force
+    $TempDir = New-Item -ItemType Directory -Path "$env:TEMP\engram-$(Get-Random)" -Force
 
     try {
         # Construct download URL
         $VersionClean = $Version -replace "^v", ""
-        $ArchiveName = "claude-mnemonic_${VersionClean}_windows_amd64.zip"
+        $ArchiveName = "engram_${VersionClean}_windows_amd64.zip"
         $DownloadUrl = "https://github.com/$GitHubRepo/releases/download/$Version/$ArchiveName"
 
         Write-Info "Downloading $ArchiveName..."
@@ -183,7 +183,7 @@ function Register-Plugin {
             installLocation = $InstallDir
             lastUpdated = $Timestamp
         }
-        $Marketplaces | Add-Member -NotePropertyName "claude-mnemonic" -NotePropertyValue $MarketplaceEntry -Force
+        $Marketplaces | Add-Member -NotePropertyName "engram" -NotePropertyValue $MarketplaceEntry -Force
         $Marketplaces | ConvertTo-Json -Depth 10 | Out-File -Encoding UTF8 $MarketplacesFile
         Write-Success "Marketplace registered in known_marketplaces.json"
 
@@ -207,7 +207,7 @@ function Register-Plugin {
                 env     = @{}
             }
 
-            $Settings.mcpServers | Add-Member -NotePropertyName "claude-mnemonic" -NotePropertyValue $McpEntry -Force
+            $Settings.mcpServers | Add-Member -NotePropertyName "engram" -NotePropertyValue $McpEntry -Force
 
             $Settings | ConvertTo-Json -Depth 10 | Out-File -Encoding UTF8 $SettingsFile
             Write-Success "MCP server registered successfully"
@@ -286,7 +286,7 @@ function Test-OptionalDependencies {
 function Uninstall-ClaudeMnemonic {
     param([switch]$KeepData)
 
-    Write-Info "Uninstalling Claude Mnemonic..."
+    Write-Info "Uninstalling Engram..."
 
     Stop-ExistingWorker
 
@@ -307,18 +307,18 @@ function Uninstall-ClaudeMnemonic {
                 $Settings.enabledPlugins.PSObject.Properties.Remove($PluginKey)
             }
             # Remove statusline if it's ours
-            if ($Settings.statusLine -and $Settings.statusLine.command -match "claude-mnemonic") {
+            if ($Settings.statusLine -and $Settings.statusLine.command -match "engram") {
                 $Settings.PSObject.Properties.Remove("statusLine")
             }
             # Remove MCP server entry
             if ($Settings.mcpServers) {
-                $Settings.mcpServers.PSObject.Properties.Remove("claude-mnemonic")
+                $Settings.mcpServers.PSObject.Properties.Remove("engram")
             }
             $Settings | ConvertTo-Json -Depth 10 | Out-File -Encoding UTF8 $SettingsFile
         }
         if (Test-Path $MarketplacesFile) {
             $Marketplaces = Get-Content $MarketplacesFile -Raw | ConvertFrom-Json
-            $Marketplaces.PSObject.Properties.Remove("claude-mnemonic")
+            $Marketplaces.PSObject.Properties.Remove("engram")
             $Marketplaces | ConvertTo-Json -Depth 10 | Out-File -Encoding UTF8 $MarketplacesFile
         }
     } catch {
@@ -326,7 +326,7 @@ function Uninstall-ClaudeMnemonic {
     }
 
     # Handle data directory
-    $DataDir = "$env:USERPROFILE\.claude-mnemonic"
+    $DataDir = "$env:USERPROFILE\.engram"
     if (Test-Path $DataDir) {
         if ($KeepData) {
             Write-Warn "Keeping data directory: $DataDir"
@@ -336,13 +336,13 @@ function Uninstall-ClaudeMnemonic {
         }
     }
 
-    Write-Success "Claude Mnemonic uninstalled successfully"
+    Write-Success "Engram uninstalled successfully"
 }
 
 # Main
 Write-Host ""
 Write-Host "================================================================" -ForegroundColor Cyan
-Write-Host "         Claude Mnemonic - Windows Installation Script          " -ForegroundColor Cyan
+Write-Host "         Engram - Windows Installation Script          " -ForegroundColor Cyan
 Write-Host "       Persistent Memory System for Claude Code                 " -ForegroundColor Cyan
 Write-Host "================================================================" -ForegroundColor Cyan
 Write-Host ""

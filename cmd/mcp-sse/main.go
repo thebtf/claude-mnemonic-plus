@@ -1,4 +1,4 @@
-// Package main provides a standalone MCP SSE server entry point for claude-mnemonic.
+// Package main provides a standalone MCP SSE server entry point for engram.
 // NOTE: The default deployment integrates MCP SSE into the worker (single port).
 // This standalone binary exists for backward compatibility or custom deployments.
 package main
@@ -15,18 +15,18 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/thebtf/claude-mnemonic-plus/internal/collections"
-	"github.com/thebtf/claude-mnemonic-plus/internal/config"
-	"github.com/thebtf/claude-mnemonic-plus/internal/db/gorm"
-	"github.com/thebtf/claude-mnemonic-plus/internal/embedding"
-	"github.com/thebtf/claude-mnemonic-plus/internal/mcp"
-	"github.com/thebtf/claude-mnemonic-plus/internal/scoring"
-	"github.com/thebtf/claude-mnemonic-plus/internal/search"
-	"github.com/thebtf/claude-mnemonic-plus/internal/sessions"
-	"github.com/thebtf/claude-mnemonic-plus/internal/vector"
-	"github.com/thebtf/claude-mnemonic-plus/internal/vector/pgvector"
-	"github.com/thebtf/claude-mnemonic-plus/internal/watcher"
-	"github.com/thebtf/claude-mnemonic-plus/pkg/models"
+	"github.com/thebtf/engram/internal/collections"
+	"github.com/thebtf/engram/internal/config"
+	"github.com/thebtf/engram/internal/db/gorm"
+	"github.com/thebtf/engram/internal/embedding"
+	"github.com/thebtf/engram/internal/mcp"
+	"github.com/thebtf/engram/internal/scoring"
+	"github.com/thebtf/engram/internal/search"
+	"github.com/thebtf/engram/internal/sessions"
+	"github.com/thebtf/engram/internal/vector"
+	"github.com/thebtf/engram/internal/vector/pgvector"
+	"github.com/thebtf/engram/internal/watcher"
+	"github.com/thebtf/engram/pkg/models"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 )
@@ -48,7 +48,7 @@ func main() {
 	log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stderr, NoColor: true})
 
 	listenPort := *port
-	if envPort := os.Getenv("CLAUDE_MNEMONIC_MCP_SSE_PORT"); envPort != "" {
+	if envPort := os.Getenv("ENGRAM_MCP_SSE_PORT"); envPort != "" {
 		if parsed, err := strconv.Atoi(envPort); err == nil && parsed > 0 {
 			listenPort = parsed
 		}

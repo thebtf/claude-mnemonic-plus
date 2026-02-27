@@ -1,11 +1,11 @@
-// Package sdk provides SDK agent integration for claude-mnemonic.
+// Package sdk provides SDK agent integration for engram.
 package sdk
 
 import (
 	"regexp"
 	"strings"
 
-	"github.com/thebtf/claude-mnemonic-plus/pkg/models"
+	"github.com/thebtf/engram/pkg/models"
 	"github.com/rs/zerolog/log"
 )
 

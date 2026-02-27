@@ -7,7 +7,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/thebtf/claude-mnemonic-plus/internal/db/gorm"
+	"github.com/thebtf/engram/internal/db/gorm"
 	_ "github.com/mattn/go-sqlite3"
 )
 
@@ -22,7 +22,7 @@ func testStore(t *testing.T) (*gorm.Store, func()) {
 		t.Skip("FTS5 not available in this SQLite build")
 	}
 
-	tmpDir, err := os.MkdirTemp("", "claude-mnemonic-test-*")
+	tmpDir, err := os.MkdirTemp("", "engram-test-*")
 	if err != nil {
 		t.Fatalf("create temp dir: %v", err)
 	}

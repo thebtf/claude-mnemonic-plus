@@ -1,9 +1,9 @@
-// Package worker provides the main worker service for claude-mnemonic.
+// Package worker provides the main worker service for engram.
 package worker
 
 import (
-	"github.com/thebtf/claude-mnemonic-plus/pkg/models"
-	"github.com/thebtf/claude-mnemonic-plus/pkg/similarity"
+	"github.com/thebtf/engram/pkg/models"
+	"github.com/thebtf/engram/pkg/similarity"
 )
 
 // clusterObservations groups similar observations and returns only one representative per cluster.

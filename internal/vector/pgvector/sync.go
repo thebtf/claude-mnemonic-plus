@@ -1,12 +1,12 @@
-// Package pgvector provides PostgreSQL+pgvector based vector storage for claude-mnemonic.
+// Package pgvector provides PostgreSQL+pgvector based vector storage for engram.
 package pgvector
 
 import (
 	"context"
 	"fmt"
 
-	"github.com/thebtf/claude-mnemonic-plus/internal/vector"
-	"github.com/thebtf/claude-mnemonic-plus/pkg/models"
+	"github.com/thebtf/engram/internal/vector"
+	"github.com/thebtf/engram/pkg/models"
 	"github.com/rs/zerolog/log"
 )
 

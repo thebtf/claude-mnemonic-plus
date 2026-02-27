@@ -1,20 +1,20 @@
 #!/bin/bash
-# Claude Mnemonic - Remote Installation Script
-# Usage: curl -sSL https://raw.githubusercontent.com/thebtf/claude-mnemonic-plus/main/scripts/install.sh | bash
+# Engram - Remote Installation Script
+# Usage: curl -sSL https://raw.githubusercontent.com/thebtf/engram-plus/main/scripts/install.sh | bash
 #
 # Or with a specific version:
-# curl -sSL https://raw.githubusercontent.com/thebtf/claude-mnemonic-plus/main/scripts/install.sh | bash -s -- v1.0.0
+# curl -sSL https://raw.githubusercontent.com/thebtf/engram-plus/main/scripts/install.sh | bash -s -- v1.0.0
 
 set -e
 
 # Configuration
-GITHUB_REPO="thebtf/claude-mnemonic-plus"
-INSTALL_DIR="$HOME/.claude/plugins/marketplaces/claude-mnemonic"
-CACHE_DIR="$HOME/.claude/plugins/cache/claude-mnemonic/claude-mnemonic"
+GITHUB_REPO="thebtf/engram-plus"
+INSTALL_DIR="$HOME/.claude/plugins/marketplaces/engram"
+CACHE_DIR="$HOME/.claude/plugins/cache/engram/engram"
 PLUGINS_FILE="$HOME/.claude/plugins/installed_plugins.json"
 SETTINGS_FILE="$HOME/.claude/settings.json"
 MARKETPLACES_FILE="$HOME/.claude/plugins/known_marketplaces.json"
-PLUGIN_KEY="claude-mnemonic@claude-mnemonic"
+PLUGIN_KEY="engram@engram"
 
 # Colors for output
 RED='\033[0;31m'
@@ -104,7 +104,7 @@ You have a few options:
   3. Use a GitHub token (set GITHUB_TOKEN environment variable)
   4. Clone and build from source:
      git clone https://github.com/${GITHUB_REPO}.git
-     cd claude-mnemonic && make build && make install"
+     cd engram && make build && make install"
     fi
 
     # Check for other API errors
@@ -138,7 +138,7 @@ download_release() {
     if [[ "$platform" == windows_* ]]; then
         archive_ext="zip"
     fi
-    local archive_name="claude-mnemonic_${version#v}_${platform}.${archive_ext}"
+    local archive_name="engram_${version#v}_${platform}.${archive_ext}"
     local download_url="https://github.com/${GITHUB_REPO}/releases/download/${version}/${archive_name}"
 
     info "Downloading ${archive_name}..."
@@ -160,7 +160,7 @@ download_release() {
 
     # Stop existing worker if running
     info "Stopping existing worker (if running)..."
-    pkill -9 -f 'claude-mnemonic.*worker' 2>/dev/null || true
+    pkill -9 -f 'engram.*worker' 2>/dev/null || true
     pkill -9 -f '\.claude/plugins/.*/worker' 2>/dev/null || true
     # Kill process on port 37777 (use lsof on macOS, ss/fuser on Linux)
     if command -v lsof &> /dev/null; then
@@ -292,7 +292,7 @@ EOF
 EOF
 )
 
-    jq --arg key "claude-mnemonic" --argjson entry "$marketplace_entry" \
+    jq --arg key "engram" --argjson entry "$marketplace_entry" \
         '.[$key] = $entry' "$MARKETPLACES_FILE" > "${MARKETPLACES_FILE}.tmp" \
         && mv "${MARKETPLACES_FILE}.tmp" "$MARKETPLACES_FILE"
 
@@ -317,7 +317,7 @@ EOF
         mcp_entry=$(echo "$mcp_entry" | sed "s|MCP_BINARY_PLACEHOLDER|$mcp_binary|g")
 
         # Add or update mcpServers field
-        if jq --arg key "claude-mnemonic" --argjson entry "$mcp_entry" \
+        if jq --arg key "engram" --argjson entry "$mcp_entry" \
             '.mcpServers //= {} | .mcpServers[$key] = $entry' "$SETTINGS_FILE" > "${SETTINGS_FILE}.tmp"; then
             mv "${SETTINGS_FILE}.tmp" "$SETTINGS_FILE"
             success "MCP server registered successfully"
@@ -339,14 +339,14 @@ start_worker() {
     fi
 
     info "Starting worker service..."
-    nohup "$worker_path" > /tmp/claude-mnemonic-worker.log 2>&1 &
+    nohup "$worker_path" > /tmp/engram-worker.log 2>&1 &
 
     sleep 2
 
     if curl -sS http://localhost:37777/health > /dev/null 2>&1; then
         success "Worker started successfully at http://localhost:37777"
     else
-        warn "Worker may not have started properly. Check /tmp/claude-mnemonic-worker.log"
+        warn "Worker may not have started properly. Check /tmp/engram-worker.log"
     fi
 }
 
@@ -413,7 +413,7 @@ main() {
 
     echo ""
     echo "╔═══════════════════════════════════════════════════════════╗"
-    echo "║           Claude Mnemonic - Installation Script           ║"
+    echo "║           Engram - Installation Script           ║"
     echo "║     Persistent Memory System for Claude Code CLI          ║"
     echo "╚═══════════════════════════════════════════════════════════╝"
     echo ""
@@ -460,7 +460,7 @@ main() {
     echo "║                  Installation Complete!                   ║"
     echo "╠═══════════════════════════════════════════════════════════╣"
     echo "║  Dashboard: http://localhost:37777                        ║"
-    echo "║  Logs: /tmp/claude-mnemonic-worker.log                    ║"
+    echo "║  Logs: /tmp/engram-worker.log                    ║"
     echo "║                                                           ║"
     echo "║  Start a new Claude Code CLI session to activate memory.  ║"
     echo "╚═══════════════════════════════════════════════════════════╝"
@@ -481,12 +481,12 @@ if [[ "${1:-}" == "--uninstall" ]]; then
 
     echo ""
     echo "╔═══════════════════════════════════════════════════════════╗"
-    echo "║         Claude Mnemonic - Uninstallation                  ║"
+    echo "║         Engram - Uninstallation                  ║"
     echo "╚═══════════════════════════════════════════════════════════╝"
     echo ""
 
     info "Stopping worker processes..."
-    pkill -9 -f 'claude-mnemonic.*worker' 2>/dev/null || true
+    pkill -9 -f 'engram.*worker' 2>/dev/null || true
     pkill -9 -f '\.claude/plugins/.*/worker' 2>/dev/null || true
     # Kill process on port 37777 (use lsof on macOS, ss/fuser on Linux)
     if command -v lsof &> /dev/null; then
@@ -512,11 +512,11 @@ if [[ "${1:-}" == "--uninstall" ]]; then
         if [[ -f "$SETTINGS_FILE" ]]; then
             # Remove plugin from enabled plugins, remove statusline if it's ours, and remove MCP server entry
             jq 'del(.enabledPlugins["'"$PLUGIN_KEY"'"]) |
-                if .statusLine.command | test("claude-mnemonic") then del(.statusLine) else . end |
-                del(.mcpServers["claude-mnemonic"])' "$SETTINGS_FILE" > "${SETTINGS_FILE}.tmp" && mv "${SETTINGS_FILE}.tmp" "$SETTINGS_FILE"
+                if .statusLine.command | test("engram") then del(.statusLine) else . end |
+                del(.mcpServers["engram"])' "$SETTINGS_FILE" > "${SETTINGS_FILE}.tmp" && mv "${SETTINGS_FILE}.tmp" "$SETTINGS_FILE"
         fi
         if [[ -f "$MARKETPLACES_FILE" ]]; then
-            jq 'del(.["claude-mnemonic"])' "$MARKETPLACES_FILE" > "${MARKETPLACES_FILE}.tmp" && mv "${MARKETPLACES_FILE}.tmp" "$MARKETPLACES_FILE"
+            jq 'del(.["engram"])' "$MARKETPLACES_FILE" > "${MARKETPLACES_FILE}.tmp" && mv "${MARKETPLACES_FILE}.tmp" "$MARKETPLACES_FILE"
         fi
         success "Configuration cleaned up"
     else
@@ -524,7 +524,7 @@ if [[ "${1:-}" == "--uninstall" ]]; then
     fi
 
     # Handle data directory
-    DATA_DIR="$HOME/.claude-mnemonic"
+    DATA_DIR="$HOME/.engram"
     if [[ -d "$DATA_DIR" ]]; then
         if [[ "$KEEP_DATA" == "true" ]]; then
             warn "Keeping data directory: $DATA_DIR"
@@ -536,7 +536,7 @@ if [[ "${1:-}" == "--uninstall" ]]; then
     fi
 
     echo ""
-    success "Claude Mnemonic uninstalled successfully"
+    success "Engram uninstalled successfully"
     exit 0
 fi
 

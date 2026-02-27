@@ -8,9 +8,9 @@ import (
 	"sort"
 	"time"
 
-	"github.com/thebtf/claude-mnemonic-plus/internal/graph"
-	"github.com/thebtf/claude-mnemonic-plus/internal/vector/sqlitevec"
-	"github.com/thebtf/claude-mnemonic-plus/pkg/models"
+	"github.com/thebtf/engram/internal/graph"
+	"github.com/thebtf/engram/internal/vector/sqlitevec"
+	"github.com/thebtf/engram/pkg/models"
 	"github.com/rs/zerolog/log"
 )
 

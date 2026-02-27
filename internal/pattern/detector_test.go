@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/thebtf/claude-mnemonic-plus/internal/db/gorm"
-	"github.com/thebtf/claude-mnemonic-plus/pkg/models"
+	"github.com/thebtf/engram/internal/db/gorm"
+	"github.com/thebtf/engram/pkg/models"
 )
 
 func TestNewDetector(t *testing.T) {

@@ -1,4 +1,4 @@
-// Package worker provides the main worker service for claude-mnemonic.
+// Package worker provides the main worker service for engram.
 package worker
 
 import (
@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/thebtf/claude-mnemonic-plus/pkg/models"
+	"github.com/thebtf/engram/pkg/models"
 	"github.com/rs/zerolog/log"
 )
 

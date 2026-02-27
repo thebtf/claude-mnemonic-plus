@@ -10,7 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	gormdb "github.com/thebtf/claude-mnemonic-plus/internal/db/gorm"
+	gormdb "github.com/thebtf/engram/internal/db/gorm"
 	"github.com/rs/zerolog"
 )
 

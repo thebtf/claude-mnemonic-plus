@@ -1,4 +1,4 @@
-// Package sdk provides SDK agent integration for claude-mnemonic.
+// Package sdk provides SDK agent integration for engram.
 package sdk
 
 import (
@@ -17,10 +17,10 @@ import (
 
 	json "github.com/goccy/go-json"
 
-	"github.com/thebtf/claude-mnemonic-plus/internal/config"
-	"github.com/thebtf/claude-mnemonic-plus/internal/db/gorm"
-	"github.com/thebtf/claude-mnemonic-plus/pkg/models"
-	"github.com/thebtf/claude-mnemonic-plus/pkg/similarity"
+	"github.com/thebtf/engram/internal/config"
+	"github.com/thebtf/engram/internal/db/gorm"
+	"github.com/thebtf/engram/pkg/models"
+	"github.com/thebtf/engram/pkg/similarity"
 	"github.com/rs/zerolog/log"
 )
 
@@ -642,7 +642,7 @@ func (p *Processor) callClaudeCLI(ctx context.Context, prompt string) (string, e
 	cmd.Dir = "/tmp"
 
 	// Disable any plugin hooks by setting an env var that our hooks can check
-	cmd.Env = append(os.Environ(), "CLAUDE_MNEMONIC_INTERNAL=1")
+	cmd.Env = append(os.Environ(), "ENGRAM_INTERNAL=1")
 
 	// Capture output
 	var stdout, stderr bytes.Buffer

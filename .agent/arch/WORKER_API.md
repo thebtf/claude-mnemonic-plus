@@ -6,7 +6,7 @@
 
 The worker (`cmd/worker/main.go`, `internal/worker/`) is an HTTP server providing the REST API, SSE events, dashboard, and background consolidation scheduler. It receives hook events from Claude Code and serves as the primary write path for observations.
 
-**Default port:** 37777 (configurable via `CLAUDE_MNEMONIC_WORKER_PORT`).
+**Default port:** 37777 (configurable via `ENGRAM_WORKER_PORT`).
 
 ## Core Behavior
 
@@ -100,7 +100,7 @@ internal/worker/sse/broadcaster.go:
 
 **MUST NEVER be violated:**
 
-1. **INV-001**: Worker binds to CLAUDE_MNEMONIC_WORKER_HOST (default 0.0.0.0) — not hardcoded
+1. **INV-001**: Worker binds to ENGRAM_WORKER_HOST (default 0.0.0.0) — not hardcoded
 2. **INV-002**: TokenAuth uses constant-time comparison — prevents timing attacks
 3. **INV-003**: Health endpoints are always accessible (no auth required)
 4. **INV-004**: Rebuild is rate-limited to once per 5 minutes — prevents resource exhaustion
@@ -126,12 +126,12 @@ internal/worker/sse/broadcaster.go:
 
 **Symptom:** Worker not accessible from other machines.
 **Root Cause:** Default host is 0.0.0.0 (all interfaces), but firewall may block.
-**Correct Handling:** Check firewall rules. Worker host is configurable via `CLAUDE_MNEMONIC_WORKER_HOST`.
+**Correct Handling:** Check firewall rules. Worker host is configurable via `ENGRAM_WORKER_HOST`.
 
 ### GOTCHA-002: Token in Config vs Environment
 
 **Symptom:** Auth fails even with correct token.
-**Root Cause:** Token is read from env (`CLAUDE_MNEMONIC_API_TOKEN`), not from config file.
+**Root Cause:** Token is read from env (`ENGRAM_API_TOKEN`), not from config file.
 **Correct Handling:** Set token via environment variable. config.GetWorkerToken() reads env.
 
 ### GOTCHA-003: SSE Connection Limits
@@ -166,9 +166,9 @@ internal/worker/sse/broadcaster.go:
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| CLAUDE_MNEMONIC_WORKER_PORT | 37777 | HTTP port |
-| CLAUDE_MNEMONIC_WORKER_HOST | 0.0.0.0 | Bind address |
-| CLAUDE_MNEMONIC_API_TOKEN | (none) | Bearer token (optional) |
+| ENGRAM_WORKER_PORT | 37777 | HTTP port |
+| ENGRAM_WORKER_HOST | 0.0.0.0 | Bind address |
+| ENGRAM_API_TOKEN | (none) | Bearer token (optional) |
 
 ## Historical Decisions
 

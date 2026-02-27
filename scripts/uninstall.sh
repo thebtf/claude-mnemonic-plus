@@ -1,21 +1,21 @@
 #!/bin/bash
-# Claude Mnemonic - Uninstallation Script
-# Usage: curl -sSL https://raw.githubusercontent.com/thebtf/claude-mnemonic-plus/main/scripts/uninstall.sh | bash
+# Engram - Uninstallation Script
+# Usage: curl -sSL https://raw.githubusercontent.com/thebtf/engram-plus/main/scripts/uninstall.sh | bash
 #
 # Options:
-#   --keep-data    Keep the data directory (~/.claude-mnemonic/)
+#   --keep-data    Keep the data directory (~/.engram/)
 #   --purge        Remove everything including data (default)
 
 set -e
 
 # Configuration
-INSTALL_DIR="$HOME/.claude/plugins/marketplaces/claude-mnemonic"
-CACHE_DIR="$HOME/.claude/plugins/cache/claude-mnemonic"
-DATA_DIR="$HOME/.claude-mnemonic"
+INSTALL_DIR="$HOME/.claude/plugins/marketplaces/engram"
+CACHE_DIR="$HOME/.claude/plugins/cache/engram"
+DATA_DIR="$HOME/.engram"
 PLUGINS_FILE="$HOME/.claude/plugins/installed_plugins.json"
 SETTINGS_FILE="$HOME/.claude/settings.json"
 MARKETPLACES_FILE="$HOME/.claude/plugins/known_marketplaces.json"
-PLUGIN_KEY="claude-mnemonic@claude-mnemonic"
+PLUGIN_KEY="engram@engram"
 
 # Colors for output
 RED='\033[0;31m'
@@ -43,13 +43,13 @@ done
 
 echo ""
 echo "╔═══════════════════════════════════════════════════════════╗"
-echo "║         Claude Mnemonic - Uninstallation Script           ║"
+echo "║         Engram - Uninstallation Script           ║"
 echo "╚═══════════════════════════════════════════════════════════╝"
 echo ""
 
 # Stop worker
 info "Stopping worker processes..."
-pkill -9 -f 'claude-mnemonic.*worker' 2>/dev/null || true
+pkill -9 -f 'engram.*worker' 2>/dev/null || true
 pkill -9 -f '\.claude/plugins/.*/worker' 2>/dev/null || true
 # Kill process on port 37777 (use lsof on macOS, ss/fuser on Linux)
 if command -v lsof &> /dev/null; then
@@ -87,17 +87,17 @@ if command -v jq &> /dev/null; then
 
     if [[ -f "$SETTINGS_FILE" ]]; then
         # Remove plugin from enabled plugins and remove statusline if it's ours
-        jq 'del(.enabledPlugins["'"$PLUGIN_KEY"'"]) | if .statusLine.command | test("claude-mnemonic") then del(.statusLine) else . end' "$SETTINGS_FILE" > "${SETTINGS_FILE}.tmp" && mv "${SETTINGS_FILE}.tmp" "$SETTINGS_FILE"
+        jq 'del(.enabledPlugins["'"$PLUGIN_KEY"'"]) | if .statusLine.command | test("engram") then del(.statusLine) else . end' "$SETTINGS_FILE" > "${SETTINGS_FILE}.tmp" && mv "${SETTINGS_FILE}.tmp" "$SETTINGS_FILE"
         success "Removed from settings.json (including statusline)"
     fi
 
     if [[ -f "$MARKETPLACES_FILE" ]]; then
-        jq 'del(.["claude-mnemonic"])' "$MARKETPLACES_FILE" > "${MARKETPLACES_FILE}.tmp" && mv "${MARKETPLACES_FILE}.tmp" "$MARKETPLACES_FILE"
+        jq 'del(.["engram"])' "$MARKETPLACES_FILE" > "${MARKETPLACES_FILE}.tmp" && mv "${MARKETPLACES_FILE}.tmp" "$MARKETPLACES_FILE"
         success "Removed from known_marketplaces.json"
     fi
 else
     warn "jq not found - Claude Code configuration files were not cleaned up"
-    warn "You may need to manually remove claude-mnemonic entries from:"
+    warn "You may need to manually remove engram entries from:"
     warn "  - $PLUGINS_FILE"
     warn "  - $SETTINGS_FILE"
     warn "  - $MARKETPLACES_FILE"
@@ -127,4 +127,4 @@ if [[ "$KEEP_DATA" == "true" ]]; then
     echo ""
 fi
 
-success "Claude Mnemonic has been uninstalled"
+success "Engram has been uninstalled"

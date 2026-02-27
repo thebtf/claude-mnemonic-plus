@@ -8,7 +8,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/thebtf/claude-mnemonic-plus/internal/worker"
+	"github.com/thebtf/engram/internal/worker"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 )
@@ -22,7 +22,7 @@ func main() {
 
 	log.Info().
 		Str("version", Version).
-		Msg("Starting claude-mnemonic worker")
+		Msg("Starting engram server")
 
 	// Create service with version
 	svc, err := worker.NewService(Version)

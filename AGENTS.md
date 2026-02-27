@@ -8,10 +8,9 @@ STACKS: [GO]
 
 ## PROJECT OVERVIEW
 
-Fork of [claude-mnemonic](https://github.com/lukaszraczylo/claude-mnemonic) — a memory/observation system for Claude Code.
-Captures observations from Claude conversations, stores them in SQLite with vector search (sqlite-vec),
-provides an MCP server (`nia`) and a worker HTTP API. Hooks integrate with Claude Code lifecycle events.
-Goal of this fork: extend functionality (the "plus" variant).
+Shared memory infrastructure for Claude Code workstations.
+Originally forked from [claude-mnemonic](https://github.com/lukaszraczylo/claude-mnemonic),
+now an independent project with PostgreSQL+pgvector backend, Docker deployment, and multi-workstation support.
 
 ## RULES
 

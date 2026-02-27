@@ -3,7 +3,7 @@
 
 version: 2
 
-project_name: claude-mnemonic
+project_name: engram
 
 before:
   hooks:
@@ -18,10 +18,10 @@ before:
     - bash scripts/generate-plugin-config.sh
 
 builds:
-  # Worker service
-  - id: worker
+  # Server (Worker + MCP SSE)
+  - id: engram-server
     main: ./cmd/worker
-    binary: worker
+    binary: engram-server
     env:
       - CGO_ENABLED=1
     tags:
@@ -31,7 +31,7 @@ builds:
     ldflags:
       - -s -w
       - -X main.Version={{.Version}}
-      - -X github.com/thebtf/claude-mnemonic-plus/pkg/hooks.Version={{.Version}}
+      - -X github.com/thebtf/engram/pkg/hooks.Version={{.Version}}
     goos:
       - darwin
       - linux
@@ -47,10 +47,10 @@ builds:
       - goos: windows
         goarch: arm64
 
-  # MCP server
-  - id: mcp-server
+  # MCP stdio server
+  - id: engram-mcp
     main: ./cmd/mcp
-    binary: mcp-server
+    binary: engram-mcp
     env:
       - CGO_ENABLED=1
     tags:
@@ -60,7 +60,7 @@ builds:
     ldflags:
       - -s -w
       - -X main.Version={{.Version}}
-      - -X github.com/thebtf/claude-mnemonic-plus/pkg/hooks.Version={{.Version}}
+      - -X github.com/thebtf/engram/pkg/hooks.Version={{.Version}}
     goos:
       - darwin
       - linux
@@ -89,7 +89,7 @@ builds:
     ldflags:
       - -s -w
       - -X main.Version={{.Version}}
-      - -X github.com/thebtf/claude-mnemonic-plus/pkg/hooks.Version={{.Version}}
+      - -X github.com/thebtf/engram/pkg/hooks.Version={{.Version}}
     goos:
       - darwin
       - linux
@@ -118,7 +118,7 @@ builds:
     ldflags:
       - -s -w
       - -X main.Version={{.Version}}
-      - -X github.com/thebtf/claude-mnemonic-plus/pkg/hooks.Version={{.Version}}
+      - -X github.com/thebtf/engram/pkg/hooks.Version={{.Version}}
     goos:
       - darwin
       - linux
@@ -147,7 +147,7 @@ builds:
     ldflags:
       - -s -w
       - -X main.Version={{.Version}}
-      - -X github.com/thebtf/claude-mnemonic-plus/pkg/hooks.Version={{.Version}}
+      - -X github.com/thebtf/engram/pkg/hooks.Version={{.Version}}
     goos:
       - darwin
       - linux
@@ -176,7 +176,7 @@ builds:
     ldflags:
       - -s -w
       - -X main.Version={{.Version}}
-      - -X github.com/thebtf/claude-mnemonic-plus/pkg/hooks.Version={{.Version}}
+      - -X github.com/thebtf/engram/pkg/hooks.Version={{.Version}}
     goos:
       - darwin
       - linux
@@ -205,7 +205,7 @@ builds:
     ldflags:
       - -s -w
       - -X main.Version={{.Version}}
-      - -X github.com/thebtf/claude-mnemonic-plus/pkg/hooks.Version={{.Version}}
+      - -X github.com/thebtf/engram/pkg/hooks.Version={{.Version}}
     goos:
       - darwin
       - linux
@@ -234,7 +234,7 @@ builds:
     ldflags:
       - -s -w
       - -X main.Version={{.Version}}
-      - -X github.com/thebtf/claude-mnemonic-plus/pkg/hooks.Version={{.Version}}
+      - -X github.com/thebtf/engram/pkg/hooks.Version={{.Version}}
     goos:
       - darwin
       - linux
@@ -289,20 +289,20 @@ changelog:
 
 release:
   github:
-    owner: lukaszraczylo
-    name: claude-mnemonic
+    owner: thebtf
+    name: engram
   draft: false
   prerelease: auto
   name_template: "v{{.Version}}"
   header: |
-    ## Claude Mnemonic v{{.Version}}
+    ## Engram v{{.Version}}
 
-    Persistent memory system for Claude Code.
+    Shared memory infrastructure for Claude Code workstations.
 
     ### Installation
 
     ```bash
-    curl -sSL https://raw.githubusercontent.com/thebtf/claude-mnemonic-plus/main/scripts/install.sh | bash
+    curl -sSL https://raw.githubusercontent.com/thebtf/engram/main/scripts/install.sh | bash
     ```
 
 signs:

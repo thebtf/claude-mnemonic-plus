@@ -1,6 +1,6 @@
-# Claude Mnemonic Plus — Server Stack
+# Engram — Server Stack
 #
-# Provides: PostgreSQL + pgvector, Worker (API + MCP SSE on single port)
+# Provides: PostgreSQL + pgvector, Engram Server (API + MCP SSE on single port)
 # Client (hooks + MCP proxy) runs locally on each workstation.
 #
 # Usage:
@@ -13,15 +13,15 @@ services:
   postgres:
     image: pgvector/pgvector:pg17
     environment:
-      POSTGRES_DB: claude_mnemonic
-      POSTGRES_USER: mnemonic
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-mnemonic}
+      POSTGRES_DB: engram
+      POSTGRES_USER: engram
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-engram}
     volumes:
       - pgdata:/var/lib/postgresql/data
     ports:
       - "${POSTGRES_PORT:-5432}:5432"
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U mnemonic -d claude_mnemonic"]
+      test: ["CMD-SHELL", "pg_isready -U engram -d engram"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -35,15 +35,15 @@ services:
     ports:
       - "${WORKER_PORT:-37777}:37777"
     environment:
-      DATABASE_DSN: "postgres://mnemonic:${POSTGRES_PASSWORD:-mnemonic}@postgres:5432/claude_mnemonic?sslmode=disable"
-      CLAUDE_MNEMONIC_WORKER_HOST: "0.0.0.0"
-      CLAUDE_MNEMONIC_WORKER_PORT: "37777"
-      CLAUDE_MNEMONIC_API_TOKEN: "${API_TOKEN:-}"
-      CLAUDE_MNEMONIC_EMBEDDING_PROVIDER: "${EMBEDDING_PROVIDER:-openai}"
-      CLAUDE_MNEMONIC_EMBEDDING_BASE_URL: "${EMBEDDING_BASE_URL:-}"
-      CLAUDE_MNEMONIC_EMBEDDING_API_KEY: "${EMBEDDING_API_KEY:-}"
-      CLAUDE_MNEMONIC_EMBEDDING_MODEL_NAME: "${EMBEDDING_MODEL_NAME:-}"
-      CLAUDE_MNEMONIC_EMBEDDING_DIMENSIONS: "${EMBEDDING_DIMENSIONS:-4096}"
+      DATABASE_DSN: "postgres://engram:${POSTGRES_PASSWORD:-engram}@postgres:5432/engram?sslmode=disable"
+      ENGRAM_WORKER_HOST: "0.0.0.0"
+      ENGRAM_WORKER_PORT: "37777"
+      ENGRAM_API_TOKEN: "${API_TOKEN:-}"
+      ENGRAM_EMBEDDING_PROVIDER: "${EMBEDDING_PROVIDER:-openai}"
+      ENGRAM_EMBEDDING_BASE_URL: "${EMBEDDING_BASE_URL:-}"
+      ENGRAM_EMBEDDING_API_KEY: "${EMBEDDING_API_KEY:-}"
+      ENGRAM_EMBEDDING_MODEL_NAME: "${EMBEDDING_MODEL_NAME:-}"
+      ENGRAM_EMBEDDING_DIMENSIONS: "${EMBEDDING_DIMENSIONS:-4096}"
     depends_on:
       postgres:
         condition: service_healthy

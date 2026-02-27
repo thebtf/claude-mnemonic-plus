@@ -1,4 +1,4 @@
-// Package session provides session lifecycle management for claude-mnemonic.
+// Package session provides session lifecycle management for engram.
 package session
 
 import (

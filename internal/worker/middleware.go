@@ -1,4 +1,4 @@
-// Package worker provides the main worker service for claude-mnemonic.
+// Package worker provides the main worker service for engram.
 package worker
 
 import (
@@ -90,7 +90,7 @@ func MaxBodySize(maxBytes int64) func(http.Handler) http.Handler {
 }
 
 // TokenAuth provides token-based authentication for the worker HTTP API.
-// The token is supplied via CLAUDE_MNEMONIC_API_TOKEN and must be provided in
+// The token is supplied via ENGRAM_API_TOKEN and must be provided in
 // the X-Auth-Token header or Authorization: Bearer header.
 type TokenAuth struct {
 	ExemptPaths map[string]bool

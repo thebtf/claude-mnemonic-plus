@@ -9,9 +9,9 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/thebtf/claude-mnemonic-plus/internal/privacy"
-	"github.com/thebtf/claude-mnemonic-plus/internal/worker/session"
-	"github.com/thebtf/claude-mnemonic-plus/pkg/models"
+	"github.com/thebtf/engram/internal/privacy"
+	"github.com/thebtf/engram/internal/worker/session"
+	"github.com/thebtf/engram/pkg/models"
 	"github.com/rs/zerolog/log"
 )
 

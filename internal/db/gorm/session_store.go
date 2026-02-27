@@ -1,4 +1,4 @@
-// Package gorm provides GORM-based database operations for claude-mnemonic.
+// Package gorm provides GORM-based database operations for engram.
 package gorm
 
 import (
@@ -10,7 +10,7 @@ import (
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 
-	"github.com/thebtf/claude-mnemonic-plus/pkg/models"
+	"github.com/thebtf/engram/pkg/models"
 )
 
 // SessionStore provides session-related database operations using GORM.
@@ -24,7 +24,7 @@ func NewSessionStore(store *Store) *SessionStore {
 }
 
 // CreateSDKSession creates a new SDK session (idempotent - returns existing ID if exists).
-// This is the KEY to how claude-mnemonic stays unified across hooks.
+// This is the KEY to how engram stays unified across hooks.
 func (s *SessionStore) CreateSDKSession(ctx context.Context, claudeSessionID, project, userPrompt string) (int64, error) {
 	now := time.Now()
 

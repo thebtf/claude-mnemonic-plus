@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/thebtf/claude-mnemonic-plus/pkg/models"
+	"github.com/thebtf/engram/pkg/models"
 	"github.com/stretchr/testify/assert"
 )
 

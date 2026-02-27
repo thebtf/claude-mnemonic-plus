@@ -1,19 +1,19 @@
-# Claude Mnemonic Plus
+# Engram
 
 **Give Claude Code a memory that actually remembers — now with shared brain infrastructure.**
 
 [![Go](https://img.shields.io/badge/Go-1.24+-00ADD8?style=flat-square&logo=go)](https://go.dev)
 [![PostgreSQL](https://img.shields.io/badge/PostgreSQL-15+-336791?style=flat-square&logo=postgresql)](https://www.postgresql.org)
 [![Docker](https://img.shields.io/badge/Docker-ready-2496ED?style=flat-square&logo=docker)](https://www.docker.com)
-[![License](https://img.shields.io/github/license/thebtf/claude-mnemonic-plus?style=flat-square)](LICENSE)
+[![License](https://img.shields.io/github/license/thebtf/engram?style=flat-square)](LICENSE)
 
 ---
 
-Fork of [claude-mnemonic](https://github.com/thebtf/claude-mnemonic-plus) extended with PostgreSQL+pgvector backend, hybrid search, memory consolidation lifecycle, session indexing, and MCP SSE transport for multi-workstation shared knowledge.
+Fork of [engram](https://github.com/thebtf/engram) extended with PostgreSQL+pgvector backend, hybrid search, memory consolidation lifecycle, session indexing, and MCP SSE transport for multi-workstation shared knowledge.
 
 ## How It Works
 
-Claude Mnemonic Plus uses a **client-server architecture**. The heavy lifting (database, search, embedding, consolidation) runs on a server — your workstations only need lightweight hooks and an MCP proxy.
+Engram uses a **client-server architecture**. The heavy lifting (database, search, embedding, consolidation) runs on a server — your workstations only need lightweight hooks and an MCP proxy.
 
 ```
   Workstation A                 Workstation B
@@ -58,8 +58,8 @@ Claude Mnemonic Plus uses a **client-server architecture**. The heavy lifting (d
 #### Docker Compose (recommended)
 
 ```bash
-git clone https://github.com/thebtf/claude-mnemonic-plus.git
-cd claude-mnemonic-plus
+git clone https://github.com/thebtf/engram.git
+cd engram
 
 # Optional: configure in .env file
 echo 'POSTGRES_PASSWORD=your-secure-password' > .env
@@ -87,14 +87,14 @@ If you already have PostgreSQL with pgvector, just run the server container:
 docker compose up -d server
 
 # Or override DATABASE_DSN to point to your existing PostgreSQL:
-DATABASE_DSN="postgres://user:pass@your-pg-host:5432/claude_mnemonic?sslmode=disable" \
+DATABASE_DSN="postgres://user:pass@your-pg-host:5432/engram?sslmode=disable" \
   docker compose up -d server
 ```
 
 Make sure pgvector extension is enabled:
 
 ```sql
-\c claude_mnemonic
+\c engram
 CREATE EXTENSION IF NOT EXISTS vector;
 ```
 
@@ -103,13 +103,13 @@ CREATE EXTENSION IF NOT EXISTS vector;
 Install via Docker template:
 
 1. **Add container** in Unraid Docker tab
-2. Set **Repository**: `ghcr.io/thebtf/claude-mnemonic-plus:latest` (or build locally)
+2. Set **Repository**: `ghcr.io/thebtf/engram:latest` (or build locally)
 3. Map port **37777** (worker + MCP SSE)
 4. Add path mapping for PostgreSQL data or point `DATABASE_DSN` to your existing PostgreSQL instance
 5. Set environment variables:
-   - `DATABASE_DSN` = `postgres://user:pass@your-pg:5432/claude_mnemonic?sslmode=disable`
-   - `CLAUDE_MNEMONIC_API_TOKEN` = your token (optional but recommended)
-   - `CLAUDE_MNEMONIC_EMBEDDING_PROVIDER` = `onnx` (default) or `openai`
+   - `DATABASE_DSN` = `postgres://user:pass@your-pg:5432/engram?sslmode=disable`
+   - `ENGRAM_API_TOKEN` = your token (optional but recommended)
+   - `ENGRAM_EMBEDDING_PROVIDER` = `onnx` (default) or `openai`
 
 > **Tip:** If you run PostgreSQL as a separate Unraid container (e.g., the official `postgres` or `pgvector/pgvector` image), use its container IP or Unraid bridge network hostname in `DATABASE_DSN`.
 
@@ -120,7 +120,7 @@ The client runs on each workstation where you use Claude Code. It needs only the
 #### Automatic Install (macOS / Linux)
 
 ```bash
-curl -sSL https://raw.githubusercontent.com/thebtf/claude-mnemonic-plus/main/scripts/install.sh | bash
+curl -sSL https://raw.githubusercontent.com/thebtf/engram/main/scripts/install.sh | bash
 ```
 
 This downloads pre-built binaries, registers hooks and MCP with Claude Code, and starts the local components.
@@ -129,8 +129,8 @@ After install, configure the server connection:
 
 ```bash
 # Point hooks to your remote worker
-export CLAUDE_MNEMONIC_WORKER_HOST=your-server
-export CLAUDE_MNEMONIC_WORKER_PORT=37777
+export ENGRAM_WORKER_HOST=your-server
+export ENGRAM_WORKER_PORT=37777
 
 # Point MCP to your remote SSE server
 # (configured automatically if you edit ~/.claude/settings.json — see Manual Setup)
@@ -140,8 +140,8 @@ export CLAUDE_MNEMONIC_WORKER_PORT=37777
 
 ```powershell
 # Clone and build client binaries
-git clone https://github.com/thebtf/claude-mnemonic-plus.git
-cd claude-mnemonic-plus
+git clone https://github.com/thebtf/engram.git
+cd engram
 
 $env:CGO_ENABLED = "1"
 go build -tags fts5 -ldflags "-s -w" -o bin\mcp-stdio-proxy.exe .\cmd\mcp-stdio-proxy
@@ -154,7 +154,7 @@ go build -tags fts5 -ldflags "-s -w" -o bin\hooks\stop.exe .\cmd\hooks\stop
 go build -tags fts5 -ldflags "-s -w" -o bin\hooks\statusline.exe .\cmd\hooks\statusline
 
 # Install to Claude Code plugin directory
-$PluginDir = "$env:USERPROFILE\.claude\plugins\marketplaces\claude-mnemonic"
+$PluginDir = "$env:USERPROFILE\.claude\plugins\marketplaces\engram"
 New-Item -ItemType Directory -Force -Path "$PluginDir\hooks"
 New-Item -ItemType Directory -Force -Path "$PluginDir\.claude-plugin"
 New-Item -ItemType Directory -Force -Path "$PluginDir\commands"
@@ -179,7 +179,7 @@ Add to `~/.claude/settings.json` (macOS/Linux) or `%USERPROFILE%\.claude\setting
 ```json
 {
   "mcpServers": {
-    "claude-mnemonic": {
+    "engram": {
       "command": "/path/to/mcp-stdio-proxy",
       "args": ["--url", "http://your-server:37777"],
       "env": {}
@@ -197,11 +197,11 @@ If running everything locally (server + client on same machine):
 ```json
 {
   "mcpServers": {
-    "claude-mnemonic": {
+    "engram": {
       "command": "/path/to/mcp-server",
       "args": ["--project", "${CLAUDE_PROJECT}"],
       "env": {
-        "DATABASE_DSN": "postgres://user:pass@localhost:5432/claude_mnemonic?sslmode=disable"
+        "DATABASE_DSN": "postgres://user:pass@localhost:5432/engram?sslmode=disable"
       }
     }
   }
@@ -233,9 +233,9 @@ If running everything locally (server + client on same machine):
 
 ## Configuration
 
-All variables use the `CLAUDE_MNEMONIC_` prefix. Environment variables override config file values.
+All variables use the `ENGRAM_` prefix. Environment variables override config file values.
 
-Config file location: `~/.claude-mnemonic/settings.json`
+Config file location: `~/.engram/settings.json`
 
 ### Server Settings
 
@@ -414,8 +414,8 @@ Each workstation generates a unique ID automatically. Multiple workstations shar
 For development or running everything on a single machine without Docker:
 
 ```bash
-git clone https://github.com/thebtf/claude-mnemonic-plus.git
-cd claude-mnemonic-plus
+git clone https://github.com/thebtf/engram.git
+cd engram
 make build      # Build all binaries
 make install    # Install plugin, register MCP, start worker
 ```
@@ -480,7 +480,7 @@ docker compose down       # Stop and remove containers (keep data)
 
 ```bash
 # Via install script:
-curl -sSL https://raw.githubusercontent.com/thebtf/claude-mnemonic-plus/main/scripts/install.sh | bash -s -- --uninstall
+curl -sSL https://raw.githubusercontent.com/thebtf/engram/main/scripts/install.sh | bash -s -- --uninstall
 
 # Or via make (if built from source):
 make uninstall
@@ -489,14 +489,14 @@ make uninstall
 ### Client (Windows PowerShell)
 
 ```powershell
-$PluginDir = "$env:USERPROFILE\.claude\plugins\marketplaces\claude-mnemonic"
+$PluginDir = "$env:USERPROFILE\.claude\plugins\marketplaces\engram"
 Remove-Item -Recurse -Force $PluginDir -ErrorAction SilentlyContinue
 
 # Remove MCP from settings
 $SettingsFile = "$env:USERPROFILE\.claude\settings.json"
 if (Test-Path $SettingsFile) {
     $s = Get-Content $SettingsFile | ConvertFrom-Json
-    $s.mcpServers.PSObject.Properties.Remove('claude-mnemonic')
+    $s.mcpServers.PSObject.Properties.Remove('engram')
     $s | ConvertTo-Json -Depth 10 | Set-Content $SettingsFile
 }
 ```
@@ -522,4 +522,4 @@ MIT
 
 ---
 
-**Upstream:** [lukaszraczylo/claude-mnemonic](https://github.com/lukaszraczylo/claude-mnemonic)
+**Originally based on:** [claude-mnemonic](https://github.com/lukaszraczylo/claude-mnemonic) by Lukasz Raczylo

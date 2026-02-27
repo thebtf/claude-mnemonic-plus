@@ -1,7 +1,7 @@
-// Package sqlitevec provides sqlite-vec based vector database integration for claude-mnemonic.
+// Package sqlitevec provides sqlite-vec based vector database integration for engram.
 package sqlitevec
 
-import "github.com/thebtf/claude-mnemonic-plus/internal/vector"
+import "github.com/thebtf/engram/internal/vector"
 
 // Type aliases for backward compatibility — canonical types are now in the vector package.
 type (

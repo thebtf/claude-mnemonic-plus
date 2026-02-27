@@ -1,4 +1,4 @@
-// Package hooks provides hook utilities for claude-mnemonic.
+// Package hooks provides hook utilities for engram.
 package hooks
 
 import (
@@ -14,7 +14,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/thebtf/claude-mnemonic-plus/internal/config"
+	"github.com/thebtf/engram/internal/config"
 )
 
 // Version is set at build time via ldflags
@@ -33,7 +33,7 @@ const (
 
 // GetWorkerPort returns the worker port from environment or default.
 func GetWorkerPort() int {
-	if port := os.Getenv("CLAUDE_MNEMONIC_WORKER_PORT"); port != "" {
+	if port := os.Getenv("ENGRAM_WORKER_PORT"); port != "" {
 		if p, err := strconv.Atoi(port); err == nil && p > 0 {
 			return p
 		}
@@ -67,9 +67,9 @@ func EnsureWorkerRunning() (int, error) {
 				if versionsCompatible(runningVersion, Version) {
 					return port, nil
 				}
-				fmt.Fprintf(os.Stderr, "[claude-mnemonic] Worker version mismatch (running: %s, expected: %s), restarting...\n", runningVersion, Version)
+				fmt.Fprintf(os.Stderr, "[engram] Worker version mismatch (running: %s, expected: %s), restarting...\n", runningVersion, Version)
 				if err := KillProcessOnPort(port); err != nil {
-					fmt.Fprintf(os.Stderr, "[claude-mnemonic] Warning: failed to kill old worker: %v\n", err)
+					fmt.Fprintf(os.Stderr, "[engram] Warning: failed to kill old worker: %v\n", err)
 				}
 				time.Sleep(500 * time.Millisecond)
 			} else {
@@ -88,7 +88,7 @@ func EnsureWorkerRunning() (int, error) {
 		// Try to kill it
 		if err := KillProcessOnPort(port); err != nil {
 			// Log but continue - maybe it will die on its own
-			fmt.Fprintf(os.Stderr, "[claude-mnemonic] Warning: failed to kill unhealthy process on port %d: %v\n", port, err)
+			fmt.Fprintf(os.Stderr, "[engram] Warning: failed to kill unhealthy process on port %d: %v\n", port, err)
 		}
 		// Wait a moment for port to be released
 		time.Sleep(500 * time.Millisecond)
@@ -210,8 +210,8 @@ func findWorkerBinary() string {
 	locations := []string{
 		"./worker",
 		"./bin/worker",
-		filepath.Join(home, ".claude/plugins/cache/claude-mnemonic/claude-mnemonic/1.0.0/worker"),
-		filepath.Join(home, ".claude/plugins/marketplaces/claude-mnemonic/worker"),
+		filepath.Join(home, ".claude/plugins/cache/engram/engram/1.0.0/worker"),
+		filepath.Join(home, ".claude/plugins/marketplaces/engram/worker"),
 	}
 
 	for _, loc := range locations {
@@ -221,7 +221,7 @@ func findWorkerBinary() string {
 	}
 
 	// Try PATH
-	if path, err := exec.LookPath("claude-mnemonic-worker"); err == nil {
+	if path, err := exec.LookPath("engram-worker"); err == nil {
 		return path
 	}
 

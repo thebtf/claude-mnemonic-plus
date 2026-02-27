@@ -1,4 +1,4 @@
-// Package search provides unified search capabilities for claude-mnemonic.
+// Package search provides unified search capabilities for engram.
 package search
 
 import (
@@ -12,9 +12,9 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/thebtf/claude-mnemonic-plus/internal/db/gorm"
-	"github.com/thebtf/claude-mnemonic-plus/internal/vector"
-	"github.com/thebtf/claude-mnemonic-plus/pkg/models"
+	"github.com/thebtf/engram/internal/db/gorm"
+	"github.com/thebtf/engram/internal/vector"
+	"github.com/thebtf/engram/pkg/models"
 	"github.com/rs/zerolog/log"
 	"golang.org/x/sync/singleflight"
 )

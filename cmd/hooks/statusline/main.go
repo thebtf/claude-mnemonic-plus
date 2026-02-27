@@ -1,5 +1,5 @@
 // Package main provides the statusline hook for Claude Code.
-// This binary outputs a status line showing claude-mnemonic metrics.
+// This binary outputs a status line showing engram metrics.
 package main
 
 import (
@@ -10,7 +10,7 @@ import (
 	"os"
 	"time"
 
-	"github.com/thebtf/claude-mnemonic-plus/pkg/hooks"
+	"github.com/thebtf/engram/pkg/hooks"
 )
 
 // StatusInput is the JSON input from Claude Code's statusline feature.
@@ -135,14 +135,14 @@ func getWorkerStats(port int, project string) *WorkerStats {
 func formatStatusLine(stats *WorkerStats, input StatusInput) string {
 	// Check if colors are enabled (default: yes, unless TERM is dumb or NO_COLOR is set)
 	useColors := os.Getenv("NO_COLOR") == "" && os.Getenv("TERM") != "dumb"
-	if os.Getenv("CLAUDE_MNEMONIC_STATUSLINE_COLORS") == "false" {
+	if os.Getenv("ENGRAM_STATUSLINE_COLORS") == "false" {
 		useColors = false
-	} else if os.Getenv("CLAUDE_MNEMONIC_STATUSLINE_COLORS") == "true" {
+	} else if os.Getenv("ENGRAM_STATUSLINE_COLORS") == "true" {
 		useColors = true
 	}
 
 	// Check format preference
-	format := os.Getenv("CLAUDE_MNEMONIC_STATUSLINE_FORMAT")
+	format := os.Getenv("ENGRAM_STATUSLINE_FORMAT")
 	if format == "" {
 		format = "default"
 	}

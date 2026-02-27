@@ -1,6 +1,6 @@
-# Restart Claude Mnemonic Worker
+# Restart Engram Worker
 
-Restart the claude-mnemonic worker process. Use this command when experiencing issues with the memory system.
+Restart the engram worker process. Use this command when experiencing issues with the memory system.
 
 ## Instructions
 
@@ -18,4 +18,4 @@ Restart the claude-mnemonic worker process. Use this command when experiencing i
 
 4. Report the result to the user, including the version number from the response.
 
-If the restart fails, suggest the user check `/tmp/claude-mnemonic-worker.log` for errors.
+If the restart fails, suggest the user check `/tmp/engram-worker.log` for errors.

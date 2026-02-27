@@ -1,4 +1,4 @@
-// Package mcp provides the MCP (Model Context Protocol) server for claude-mnemonic.
+// Package mcp provides the MCP (Model Context Protocol) server for engram.
 package mcp
 
 import (
@@ -376,7 +376,7 @@ func TestHandleInitialize(t *testing.T) {
 
 	serverInfo, ok := result["serverInfo"].(map[string]any)
 	require.True(t, ok)
-	assert.Equal(t, "claude-mnemonic", serverInfo["name"])
+	assert.Equal(t, "engram", serverInfo["name"])
 	assert.Equal(t, "1.2.3", serverInfo["version"])
 }
 

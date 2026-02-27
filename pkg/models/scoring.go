@@ -1,4 +1,4 @@
-// Package models contains domain models for claude-mnemonic.
+// Package models contains domain models for engram.
 package models
 
 // ConceptWeight represents a configurable weight for a concept.

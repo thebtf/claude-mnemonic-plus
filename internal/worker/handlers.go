@@ -1,4 +1,4 @@
-// Package worker provides the main worker service for claude-mnemonic.
+// Package worker provides the main worker service for engram.
 // This file contains shared handler utilities and health/status endpoints.
 // Domain-specific handlers are split into:
 //   - handlers_sessions.go: Session lifecycle (init, start, observation, summarize)
@@ -14,7 +14,7 @@ import (
 	"net/http"
 	"strconv"
 
-	"github.com/thebtf/claude-mnemonic-plus/internal/embedding"
+	"github.com/thebtf/engram/internal/embedding"
 	"github.com/rs/zerolog/log"
 )
 
@@ -271,7 +271,7 @@ func (s *Service) handleListModels(w http.ResponseWriter, _ *http.Request) {
 			ID:      m.Version,
 			Object:  "model",
 			Created: 0,
-			OwnedBy: "claude-mnemonic",
+			OwnedBy: "engram",
 		})
 	}
 

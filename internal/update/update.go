@@ -1,4 +1,4 @@
-// Package update provides self-update functionality for claude-mnemonic.
+// Package update provides self-update functionality for engram.
 package update
 
 import (
@@ -24,7 +24,7 @@ import (
 )
 
 const (
-	GitHubRepo       = "thebtf/claude-mnemonic-plus"
+	GitHubRepo       = "thebtf/engram"
 	ReleasesAPI      = "https://api.github.com/repos/" + GitHubRepo + "/releases/latest"
 	CheckInterval    = 24 * time.Hour
 	MaxExtractedSize = 250 * 1024 * 1024 // 250MB max per extracted file
@@ -152,7 +152,7 @@ func (u *Updater) CheckForUpdate(ctx context.Context) (*UpdateInfo, error) {
 		return nil, err
 	}
 	req.Header.Set("Accept", "application/vnd.github.v3+json")
-	req.Header.Set("User-Agent", "claude-mnemonic/"+u.currentVersion)
+	req.Header.Set("User-Agent", "engram/"+u.currentVersion)
 
 	resp, err := u.httpClient.Do(req)
 	if err != nil {
@@ -189,7 +189,7 @@ func (u *Updater) CheckForUpdate(ctx context.Context) (*UpdateInfo, error) {
 	if info.Available {
 		// Find download URLs for current platform
 		platform := getPlatform()
-		archiveName := fmt.Sprintf("claude-mnemonic_%s_%s.tar.gz", info.LatestVersion, platform)
+		archiveName := fmt.Sprintf("engram_%s_%s.tar.gz", info.LatestVersion, platform)
 
 		for _, asset := range release.Assets {
 			switch {
@@ -223,7 +223,7 @@ func (u *Updater) ApplyUpdate(ctx context.Context, info *UpdateInfo) error {
 		return fmt.Errorf("no update available or download URL missing")
 	}
 
-	tmpDir, err := os.MkdirTemp("", "claude-mnemonic-update-*")
+	tmpDir, err := os.MkdirTemp("", "engram-update-*")
 	if err != nil {
 		u.setError(err)
 		return fmt.Errorf("failed to create temp directory: %w", err)
@@ -316,7 +316,7 @@ func (u *Updater) downloadFile(ctx context.Context, url, destPath string) error 
 	if err != nil {
 		return err
 	}
-	req.Header.Set("User-Agent", "claude-mnemonic/"+u.currentVersion)
+	req.Header.Set("User-Agent", "engram/"+u.currentVersion)
 
 	resp, err := u.httpClient.Do(req)
 	if err != nil {
@@ -349,7 +349,7 @@ func (u *Updater) verifySigstoreBundle(ctx context.Context, checksumsPath, bundl
 	// Certificate identity matches GitHub Actions workflow for this repo
 	cmd := exec.CommandContext(ctx, "cosign", "verify-blob",
 		"--bundle", bundlePath,
-		"--certificate-identity-regexp", "https://github.com/thebtf/claude-mnemonic-plus/.*",
+		"--certificate-identity-regexp", "https://github.com/thebtf/engram/.*",
 		"--certificate-oidc-issuer", "https://token.actions.githubusercontent.com",
 		checksumsPath,
 	)
@@ -383,7 +383,7 @@ func (u *Updater) verifyChecksum(archivePath, checksumsPath, version string) err
 
 	// Find expected checksum for our archive
 	platform := getPlatform()
-	expectedName := fmt.Sprintf("claude-mnemonic_%s_%s.tar.gz", version, platform)
+	expectedName := fmt.Sprintf("engram_%s_%s.tar.gz", version, platform)
 
 	for _, line := range strings.Split(string(data), "\n") {
 		parts := strings.Fields(line)
@@ -538,8 +538,8 @@ func (u *Updater) getInstallDirectories() []string {
 		return dirs
 	}
 
-	// Look for cache directories under ~/.claude/plugins/cache/claude-mnemonic/claude-mnemonic/
-	cacheBase := filepath.Join(home, ".claude/plugins/cache/claude-mnemonic/claude-mnemonic")
+	// Look for cache directories under ~/.claude/plugins/cache/engram/engram/
+	cacheBase := filepath.Join(home, ".claude/plugins/cache/engram/engram")
 	entries, err := os.ReadDir(cacheBase)
 	if err != nil {
 		return dirs
@@ -641,7 +641,7 @@ func (u *Updater) Restart() error {
 	cmd.Stdout = nil                         // Detach stdout
 	cmd.Stderr = nil                         // Detach stderr
 	cmd.Stdin = nil                          // Detach stdin
-	cmd.Env = append(os.Environ(), "CLAUDE_MNEMONIC_RESTART=1")
+	cmd.Env = append(os.Environ(), "ENGRAM_RESTART=1")
 
 	// Start in background - don't wait
 	if err := cmd.Start(); err != nil {

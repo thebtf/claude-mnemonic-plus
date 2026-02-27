@@ -26,7 +26,7 @@
       badge="The missing piece for Claude Code"
       title-before="Yesterday's context."
       title-highlight="Today's session."
-      subtitle="Stop re-explaining your codebase. Claude Mnemonic captures bug fixes, architecture decisions, and coding patterns - then brings them back exactly when you need them."
+      subtitle="Stop re-explaining your codebase. Engram captures bug fixes, architecture decisions, and coding patterns - then brings them back exactly when you need them."
     />
 
     <!-- Dashboard Preview -->
@@ -35,8 +35,8 @@
         <div class="relative rounded-xl overflow-hidden border border-slate-700/50 shadow-2xl shadow-amber-500/5">
           <div class="absolute inset-0 bg-gradient-to-t from-slate-950 via-transparent to-transparent pointer-events-none z-10"></div>
           <img
-            src="/claude-mnemonic.jpg"
-            alt="Claude Mnemonic Dashboard"
+            src="/engram.jpg"
+            alt="Engram Dashboard"
             class="w-full h-auto"
           />
         </div>
@@ -196,7 +196,7 @@
           <CodeBlock :code="installCommands.macos">
             <span class="text-slate-500"># That's it. Seriously.</span>
             <br>
-            <span class="text-amber-400">curl -sSL https://raw.githubusercontent.com/thebtf/claude-mnemonic-plus/main/scripts/install.sh | bash</span>
+            <span class="text-amber-400">curl -sSL https://raw.githubusercontent.com/thebtf/engram/main/scripts/install.sh | bash</span>
           </CodeBlock>
         </div>
 
@@ -204,7 +204,7 @@
           <CodeBlock :code="installCommands.windows">
             <span class="text-slate-500"># PowerShell (as Administrator)</span>
             <br>
-            <span class="text-amber-400">irm https://raw.githubusercontent.com/thebtf/claude-mnemonic-plus/main/scripts/install.ps1 | iex</span>
+            <span class="text-amber-400">irm https://raw.githubusercontent.com/thebtf/engram/main/scripts/install.ps1 | iex</span>
           </CodeBlock>
         </div>
 
@@ -212,9 +212,9 @@
           <CodeBlock :code="installCommands.source">
             <span class="text-slate-500"># For contributors and tinkerers</span>
             <br>
-            <span class="text-amber-400">git clone https://github.com/thebtf/claude-mnemonic-plus.git</span>
+            <span class="text-amber-400">git clone https://github.com/thebtf/engram.git</span>
             <br>
-            <span class="text-amber-400">cd claude-mnemonic</span>
+            <span class="text-amber-400">cd engram</span>
             <br>
             <span class="text-amber-400">make build && make install</span>
             <br><br>
@@ -268,13 +268,13 @@
           <div class="glass rounded-2xl p-5 sm:p-6">
             <div class="flex items-center gap-2 mb-4">
               <i class="fas fa-cog text-amber-500"></i>
-              <span class="text-white font-semibold text-sm sm:text-base">~/.claude-mnemonic/settings.json</span>
+              <span class="text-white font-semibold text-sm sm:text-base">~/.engram/settings.json</span>
             </div>
             <pre class="text-xs sm:text-sm font-mono overflow-x-auto"><code><span class="text-slate-500">{</span>
-  <span class="text-emerald-400">"CLAUDE_MNEMONIC_WORKER_PORT"</span><span class="text-slate-500">:</span> <span class="text-amber-400">37777</span><span class="text-slate-500">,</span>
-  <span class="text-emerald-400">"CLAUDE_MNEMONIC_CONTEXT_OBSERVATIONS"</span><span class="text-slate-500">:</span> <span class="text-amber-400">100</span><span class="text-slate-500">,</span>
-  <span class="text-emerald-400">"CLAUDE_MNEMONIC_CONTEXT_FULL_COUNT"</span><span class="text-slate-500">:</span> <span class="text-amber-400">25</span><span class="text-slate-500">,</span>
-  <span class="text-emerald-400">"CLAUDE_MNEMONIC_MODEL"</span><span class="text-slate-500">:</span> <span class="text-sky-400">"haiku"</span>
+  <span class="text-emerald-400">"ENGRAM_WORKER_PORT"</span><span class="text-slate-500">:</span> <span class="text-amber-400">37777</span><span class="text-slate-500">,</span>
+  <span class="text-emerald-400">"ENGRAM_CONTEXT_OBSERVATIONS"</span><span class="text-slate-500">:</span> <span class="text-amber-400">100</span><span class="text-slate-500">,</span>
+  <span class="text-emerald-400">"ENGRAM_CONTEXT_FULL_COUNT"</span><span class="text-slate-500">:</span> <span class="text-amber-400">25</span><span class="text-slate-500">,</span>
+  <span class="text-emerald-400">"ENGRAM_MODEL"</span><span class="text-slate-500">:</span> <span class="text-sky-400">"haiku"</span>
 <span class="text-slate-500">}</span></code></pre>
           </div>
 
@@ -295,7 +295,7 @@
         </div>
 
         <p class="text-center text-slate-500 mt-6 sm:mt-8 text-xs sm:text-sm">
-          All settings can also be set via environment variables. See <a href="https://github.com/thebtf/claude-mnemonic-plus#configuration" target="_blank" class="text-amber-400 hover:underline">full documentation</a> for all options.
+          All settings can also be set via environment variables. See <a href="https://github.com/thebtf/engram#configuration" target="_blank" class="text-amber-400 hover:underline">full documentation</a> for all options.
         </p>
       </div>
     </section>
@@ -448,20 +448,20 @@ const installTabs = [
 ]
 
 const installCommands = {
-  macos: `curl -sSL https://raw.githubusercontent.com/thebtf/claude-mnemonic-plus/main/scripts/install.sh | bash`,
-  windows: `irm https://raw.githubusercontent.com/thebtf/claude-mnemonic-plus/main/scripts/install.ps1 | iex`,
-  source: `git clone https://github.com/thebtf/claude-mnemonic-plus.git\ncd claude-mnemonic\nmake build && make install`,
+  macos: `curl -sSL https://raw.githubusercontent.com/thebtf/engram/main/scripts/install.sh | bash`,
+  windows: `irm https://raw.githubusercontent.com/thebtf/engram/main/scripts/install.ps1 | iex`,
+  source: `git clone https://github.com/thebtf/engram.git\ncd engram\nmake build && make install`,
 }
 
 const configOptions = [
-  { name: 'CLAUDE_MNEMONIC_WORKER_PORT', description: 'HTTP port for the worker service (default: 37777)', icon: 'fas fa-network-wired' },
-  { name: 'CLAUDE_MNEMONIC_CONTEXT_OBSERVATIONS', description: 'Maximum observations injected per session (default: 100)', icon: 'fas fa-layer-group' },
-  { name: 'CLAUDE_MNEMONIC_RERANKING_ENABLED', description: 'Enable cross-encoder reranking for improved search relevance (default: true)', icon: 'fas fa-sort-amount-down' },
-  { name: 'CLAUDE_MNEMONIC_CONTEXT_RELEVANCE_THRESHOLD', description: 'Minimum similarity score for inclusion, 0.0-1.0 (default: 0.3)', icon: 'fas fa-filter' },
-  { name: 'CLAUDE_MNEMONIC_VECTOR_STORAGE_STRATEGY', description: 'Storage strategy: "hub" (default), "always", or "on_demand"', icon: 'fas fa-database' },
-  { name: 'CLAUDE_MNEMONIC_GRAPH_ENABLED', description: 'Enable graph-based search with observation relationships (default: true)', icon: 'fas fa-project-diagram' },
-  { name: 'CLAUDE_MNEMONIC_GRAPH_MAX_HOPS', description: 'Maximum graph traversal depth for search expansion (default: 2)', icon: 'fas fa-route' },
-  { name: 'CLAUDE_MNEMONIC_GRAPH_REBUILD_INTERVAL_MIN', description: 'How often to rebuild the observation graph in minutes (default: 60)', icon: 'fas fa-clock' },
+  { name: 'ENGRAM_WORKER_PORT', description: 'HTTP port for the worker service (default: 37777)', icon: 'fas fa-network-wired' },
+  { name: 'ENGRAM_CONTEXT_OBSERVATIONS', description: 'Maximum observations injected per session (default: 100)', icon: 'fas fa-layer-group' },
+  { name: 'ENGRAM_RERANKING_ENABLED', description: 'Enable cross-encoder reranking for improved search relevance (default: true)', icon: 'fas fa-sort-amount-down' },
+  { name: 'ENGRAM_CONTEXT_RELEVANCE_THRESHOLD', description: 'Minimum similarity score for inclusion, 0.0-1.0 (default: 0.3)', icon: 'fas fa-filter' },
+  { name: 'ENGRAM_VECTOR_STORAGE_STRATEGY', description: 'Storage strategy: "hub" (default), "always", or "on_demand"', icon: 'fas fa-database' },
+  { name: 'ENGRAM_GRAPH_ENABLED', description: 'Enable graph-based search with observation relationships (default: true)', icon: 'fas fa-project-diagram' },
+  { name: 'ENGRAM_GRAPH_MAX_HOPS', description: 'Maximum graph traversal depth for search expansion (default: 2)', icon: 'fas fa-route' },
+  { name: 'ENGRAM_GRAPH_REBUILD_INTERVAL_MIN', description: 'How often to rebuild the observation graph in minutes (default: 60)', icon: 'fas fa-clock' },
 ]
 
 const requiredDeps = [

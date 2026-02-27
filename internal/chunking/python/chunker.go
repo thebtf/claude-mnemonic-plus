@@ -10,7 +10,7 @@ import (
 	sitter "github.com/smacker/go-tree-sitter"
 	"github.com/smacker/go-tree-sitter/python"
 
-	"github.com/thebtf/claude-mnemonic-plus/internal/chunking"
+	"github.com/thebtf/engram/internal/chunking"
 )
 
 // Chunker implements AST-aware chunking for Python files.

@@ -9,7 +9,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/thebtf/claude-mnemonic-plus/internal/embedding"
+	"github.com/thebtf/engram/internal/embedding"
 	"github.com/rs/zerolog/log"
 )
 

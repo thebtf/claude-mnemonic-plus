@@ -9,7 +9,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/thebtf/claude-mnemonic-plus/internal/chunking"
+	"github.com/thebtf/engram/internal/chunking"
 )
 
 // =============================================================================

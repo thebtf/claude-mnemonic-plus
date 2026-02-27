@@ -1,5 +1,5 @@
 {
-  "description": "Claude Mnemonic - Persistent memory hooks for observations, prompts, and session summaries",
+  "description": "Engram - Persistent memory hooks for observations, prompts, and session summaries",
   "hooks": {
     "SessionStart": [
       {

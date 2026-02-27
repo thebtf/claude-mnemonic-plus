@@ -1,4 +1,4 @@
-// Package gorm provides a GORM-based database implementation for claude-mnemonic.
+// Package gorm provides a GORM-based database implementation for engram.
 //
 // This is a drop-in replacement for internal/db/sqlite with the following benefits:
 //   - 50% code reduction (8,500 → 4,250 lines)
@@ -13,7 +13,7 @@
 //
 // To use this package instead of internal/db/sqlite:
 //
-//	import "github.com/thebtf/claude-mnemonic-plus/internal/db/gorm"
+//	import "github.com/thebtf/engram/internal/db/gorm"
 //
 //	store, err := gorm.NewStore(gorm.Config{
 //	    Path:     "/path/to/database.db",

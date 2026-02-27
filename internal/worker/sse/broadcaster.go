@@ -1,4 +1,4 @@
-// Package sse provides Server-Sent Events broadcasting for claude-mnemonic.
+// Package sse provides Server-Sent Events broadcasting for engram.
 package sse
 
 import (

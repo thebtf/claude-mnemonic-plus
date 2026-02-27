@@ -1,4 +1,4 @@
-// Package session provides session lifecycle management for claude-mnemonic.
+// Package session provides session lifecycle management for engram.
 package session
 
 import (
@@ -7,7 +7,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/thebtf/claude-mnemonic-plus/internal/db/gorm"
+	"github.com/thebtf/engram/internal/db/gorm"
 	"github.com/rs/zerolog/log"
 )
 

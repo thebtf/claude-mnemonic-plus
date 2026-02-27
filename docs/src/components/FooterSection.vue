@@ -17,10 +17,10 @@ defineProps({
   links: {
     type: Array,
     default: () => [
-      { label: 'GitHub', href: 'https://github.com/thebtf/claude-mnemonic-plus' },
-      { label: 'Releases', href: 'https://github.com/thebtf/claude-mnemonic-plus/releases' },
-      { label: 'Issues', href: 'https://github.com/thebtf/claude-mnemonic-plus/issues' },
-      { label: 'MIT License', href: 'https://github.com/thebtf/claude-mnemonic-plus/blob/main/LICENSE' },
+      { label: 'GitHub', href: 'https://github.com/thebtf/engram' },
+      { label: 'Releases', href: 'https://github.com/thebtf/engram/releases' },
+      { label: 'Issues', href: 'https://github.com/thebtf/engram/issues' },
+      { label: 'MIT License', href: 'https://github.com/thebtf/engram/blob/main/LICENSE' },
     ]
   },
   copyright: {
