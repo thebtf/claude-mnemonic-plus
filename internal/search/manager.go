@@ -715,17 +715,19 @@ func (m *Manager) UnifiedSearch(ctx context.Context, params SearchParams) (*Unif
 
 // executeSearch performs the actual search without caching/coalescing.
 func (m *Manager) executeSearch(ctx context.Context, params SearchParams) (*UnifiedSearchResult, error) {
-	// If query is provided and vector client is available, use vector search
+	// Use hybrid search (FTS + vector with RRF fusion) when a query and vector client are available.
 	if params.Query != "" && m.vectorClient != nil && m.vectorClient.IsConnected() {
-		return m.vectorSearch(ctx, params)
+		return m.hybridSearch(ctx, params)
 	}
 
-	// Otherwise fall back to structured filter search
+	// Fall back to structured filter search when no query or vector unavailable.
 	return m.filterSearch(ctx, params)
 }
 
-// vectorSearch performs semantic search via sqlite-vec.
-func (m *Manager) vectorSearch(ctx context.Context, params SearchParams) (*UnifiedSearchResult, error) {
+// hybridSearch combines FTS (tsvector) and pgvector results using RRF fusion.
+// Strong-signal short-circuit: if top BM25 score >= 0.85 and gap to #2 >= 0.15,
+// skip vector search entirely for lower latency.
+func (m *Manager) hybridSearch(ctx context.Context, params SearchParams) (*UnifiedSearchResult, error) {
 	start := time.Now()
 	defer func() {
 		latency := time.Since(start).Nanoseconds()
@@ -733,7 +735,31 @@ func (m *Manager) vectorSearch(ctx context.Context, params SearchParams) (*Unifi
 		atomic.AddInt64(&m.metrics.VectorLatencyNs, latency)
 	}()
 
-	// Build where filter based on search type
+	// --- FTS path (observations only, runs first for short-circuit check) ---
+	var ftsList []ScoredID
+	var ftsResultsCache []gorm.ScoredObservation
+	if m.observationStore != nil && (params.Type == "" || params.Type == "observations") {
+		ftsResults, err := m.observationStore.SearchObservationsFTSScored(ctx, params.Query, params.Project, params.Limit*2)
+		if err == nil && len(ftsResults) > 0 {
+			ftsResultsCache = ftsResults
+			ftsList = make([]ScoredID, len(ftsResults))
+			for i, r := range ftsResults {
+				ftsList[i] = ScoredID{
+					ID:      r.Observation.ID,
+					DocType: "observation",
+					Score:   BM25Normalize(r.Score),
+				}
+			}
+			// Strong-signal short-circuit: skip vector if BM25 is highly confident.
+			if len(ftsList) >= 2 &&
+				ftsList[0].Score >= 0.85 &&
+				(ftsList[0].Score-ftsList[1].Score) >= 0.15 {
+				return m.buildResultFromFTS(ftsResultsCache, params)
+			}
+		}
+	}
+
+	// --- Vector path ---
 	var docType vector.DocType
 	switch params.Type {
 	case "observations":
@@ -745,30 +771,78 @@ func (m *Manager) vectorSearch(ctx context.Context, params SearchParams) (*Unifi
 	}
 	where := vector.BuildWhereFilter(docType, params.Project)
 
-	// Query sqlite-vec
 	vectorResults, err := m.vectorClient.Query(ctx, params.Query, params.Limit*2, where)
 	if err != nil {
 		atomic.AddInt64(&m.metrics.SearchErrors, 1)
-		// Fall back to filter search on error
+		if len(ftsList) > 0 {
+			return m.buildResultFromFTS(ftsResultsCache, params)
+		}
 		return m.filterSearch(ctx, params)
 	}
 
-	// Extract IDs grouped by document type using shared helper
-	extracted := vector.ExtractIDsByDocType(vectorResults)
-	obsIDs := extracted.ObservationIDs
-	summaryIDs := extracted.SummaryIDs
-	promptIDs := extracted.PromptIDs
+	// Build vector scored list.
+	vectorList := make([]ScoredID, 0, len(vectorResults))
+	for _, r := range vectorResults {
+		var id int64
+		if sid, ok := r.Metadata["sqlite_id"].(float64); ok {
+			id = int64(sid)
+		} else if sid, ok := r.Metadata["sqlite_id"].(int64); ok {
+			id = sid
+		}
+		if id == 0 {
+			continue
+		}
+		dt := "observation"
+		if docType != "" {
+			switch docType {
+			case vector.DocTypeSessionSummary:
+				dt = "session"
+			case vector.DocTypeUserPrompt:
+				dt = "prompt"
+			}
+		} else if dts, ok := r.Metadata["doc_type"].(string); ok {
+			switch dts {
+			case "session_summary":
+				dt = "session"
+			case "user_prompt":
+				dt = "prompt"
+			}
+		}
+		vectorList = append(vectorList, ScoredID{
+			ID:      id,
+			DocType: dt,
+			Score:   r.Similarity,
+		})
+	}
 
-	// Fetch full records from SQLite
+	// --- RRF fusion ---
+	fused := RRF(ftsList, vectorList)
+	if len(fused) > params.Limit {
+		fused = fused[:params.Limit]
+	}
+
+	// Collect IDs by type.
+	var obsIDs, summaryIDs, promptIDs []int64
+	for _, item := range fused {
+		switch item.DocType {
+		case "observation":
+			obsIDs = append(obsIDs, item.ID)
+		case "session":
+			summaryIDs = append(summaryIDs, item.ID)
+		case "prompt":
+			promptIDs = append(promptIDs, item.ID)
+		}
+	}
+
+	// Fetch full records.
 	var results []SearchResult
 
 	if len(obsIDs) > 0 && (params.Type == "" || params.Type == "observations") {
 		obs, err := m.observationStore.GetObservationsByIDs(ctx, obsIDs, params.OrderBy, 0)
 		if err != nil {
-			log.Warn().Err(err).Int("count", len(obsIDs)).Msg("Failed to fetch observations by IDs in vector search")
+			log.Warn().Err(err).Msg("hybridSearch: failed to fetch observations by IDs")
 		} else {
 			for _, o := range obs {
-				// Skip superseded observations when requested
 				if params.ExcludeSuperseded && o.IsSuperseded {
 					continue
 				}
@@ -780,7 +854,7 @@ func (m *Manager) vectorSearch(ctx context.Context, params SearchParams) (*Unifi
 	if len(summaryIDs) > 0 && (params.Type == "" || params.Type == "sessions") {
 		summaries, err := m.summaryStore.GetSummariesByIDs(ctx, summaryIDs, params.OrderBy, 0)
 		if err != nil {
-			log.Warn().Err(err).Int("count", len(summaryIDs)).Msg("Failed to fetch summaries by IDs in vector search")
+			log.Warn().Err(err).Msg("hybridSearch: failed to fetch summaries by IDs")
 		} else {
 			for _, s := range summaries {
 				results = append(results, m.summaryToResult(s, params.Format))
@@ -791,7 +865,7 @@ func (m *Manager) vectorSearch(ctx context.Context, params SearchParams) (*Unifi
 	if len(promptIDs) > 0 && (params.Type == "" || params.Type == "prompts") {
 		prompts, err := m.promptStore.GetPromptsByIDs(ctx, promptIDs, params.OrderBy, 0)
 		if err != nil {
-			log.Warn().Err(err).Int("count", len(promptIDs)).Msg("Failed to fetch prompts by IDs in vector search")
+			log.Warn().Err(err).Msg("hybridSearch: failed to fetch prompts by IDs")
 		} else {
 			for _, p := range prompts {
 				results = append(results, m.promptToResult(p, params.Format))
@@ -799,11 +873,27 @@ func (m *Manager) vectorSearch(ctx context.Context, params SearchParams) (*Unifi
 		}
 	}
 
-	// Apply limit
+	return &UnifiedSearchResult{
+		Results:    results,
+		TotalCount: len(results),
+		Query:      params.Query,
+	}, nil
+}
+
+// buildResultFromFTS constructs a UnifiedSearchResult from pre-fetched FTS observations.
+func (m *Manager) buildResultFromFTS(ftsResults []gorm.ScoredObservation, params SearchParams) (*UnifiedSearchResult, error) {
+	results := make([]SearchResult, 0, len(ftsResults))
+	for _, r := range ftsResults {
+		if params.ExcludeSuperseded && r.Observation.IsSuperseded {
+			continue
+		}
+		result := m.observationToResult(r.Observation, params.Format)
+		result.Score = BM25Normalize(r.Score)
+		results = append(results, result)
+	}
 	if len(results) > params.Limit {
 		results = results[:params.Limit]
 	}
-
 	return &UnifiedSearchResult{
 		Results:    results,
 		TotalCount: len(results),

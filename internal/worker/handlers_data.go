@@ -447,8 +447,9 @@ func (s *Service) handleVectorHealth(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Check cache effectiveness
-	cacheHitRate := stats.EmbeddingCache.HitRate()
-	if cacheHitRate < 20 && (stats.EmbeddingCache.EmbeddingHits+stats.EmbeddingCache.EmbeddingMisses) > 100 {
+	cacheStats := s.vectorClient.GetCacheStats()
+	cacheHitRate := cacheStats.HitRate()
+	if cacheHitRate < 20 && (cacheStats.EmbeddingHits+cacheStats.EmbeddingMisses) > 100 {
 		healthScore -= 10
 		warnings = append(warnings, formatWarning("Low cache hit rate: %.1f%%", cacheHitRate))
 	}

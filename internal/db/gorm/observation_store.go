@@ -635,6 +635,85 @@ func (s *ObservationStore) SearchObservationsFTS(ctx context.Context, query, pro
 	return observations, nil
 }
 
+// ScoredObservation pairs an observation with its raw BM25 relevance score.
+// Score is a raw PostgreSQL ts_rank value; callers normalize with BM25Normalize.
+type ScoredObservation struct {
+	Observation *models.Observation
+	Score       float64
+}
+
+// SearchObservationsFTSScored performs full-text search and returns ts_rank scores.
+// Falls back to empty slice (not error) if FTS produces no results.
+func (s *ObservationStore) SearchObservationsFTSScored(ctx context.Context, query, project string, limit int) ([]ScoredObservation, error) {
+	keywords := extractKeywords(query)
+	if len(keywords) == 0 {
+		return nil, nil
+	}
+
+	ftsQuery := `
+		SELECT o.id, o.sdk_session_id, o.project, COALESCE(o.scope, 'project') as scope, o.type,
+		       o.title, o.subtitle, o.facts, o.narrative, o.concepts, o.files_read, o.files_modified,
+		       o.file_mtimes, o.prompt_number, o.discovery_tokens, o.created_at, o.created_at_epoch,
+		       COALESCE(o.importance_score, 1.0) as importance_score,
+		       COALESCE(o.user_feedback, 0) as user_feedback,
+		       COALESCE(o.retrieval_count, 0) as retrieval_count,
+		       o.last_retrieved_at_epoch, o.score_updated_at_epoch,
+		       COALESCE(o.is_superseded, 0) as is_superseded,
+		       ts_rank(o.search_vector, websearch_to_tsquery('english', $1)) AS rank_score
+		FROM observations o
+		WHERE o.search_vector @@ websearch_to_tsquery('english', $1)
+		  AND (o.project = $2 OR o.scope = 'global')
+		ORDER BY rank_score DESC
+		LIMIT $3
+	`
+
+	rows, err := s.rawDB.QueryContext(ctx, ftsQuery, query, project, limit)
+	if err != nil {
+		return nil, nil // FTS unavailable; caller falls back to vector-only
+	}
+	defer rows.Close()
+
+	var results []ScoredObservation
+	for rows.Next() {
+		var factsJSON, conceptsJSON, filesReadJSON, filesModifiedJSON, fileMtimesJSON []byte
+		var isSuperseded int
+		var rankScore float64
+		var obs models.Observation
+
+		if err := rows.Scan(
+			&obs.ID, &obs.SDKSessionID, &obs.Project, &obs.Scope, &obs.Type,
+			&obs.Title, &obs.Subtitle, &factsJSON, &obs.Narrative, &conceptsJSON,
+			&filesReadJSON, &filesModifiedJSON, &fileMtimesJSON,
+			&obs.PromptNumber, &obs.DiscoveryTokens, &obs.CreatedAt, &obs.CreatedAtEpoch,
+			&obs.ImportanceScore, &obs.UserFeedback, &obs.RetrievalCount,
+			&obs.LastRetrievedAt, &obs.ScoreUpdatedAt, &isSuperseded,
+			&rankScore,
+		); err != nil {
+			return nil, fmt.Errorf("scan fts scored row: %w", err)
+		}
+
+		if len(factsJSON) > 0 {
+			_ = json.Unmarshal(factsJSON, &obs.Facts)
+		}
+		if len(conceptsJSON) > 0 {
+			_ = json.Unmarshal(conceptsJSON, &obs.Concepts)
+		}
+		if len(filesReadJSON) > 0 {
+			_ = json.Unmarshal(filesReadJSON, &obs.FilesRead)
+		}
+		if len(filesModifiedJSON) > 0 {
+			_ = json.Unmarshal(filesModifiedJSON, &obs.FilesModified)
+		}
+		if len(fileMtimesJSON) > 0 {
+			_ = json.Unmarshal(fileMtimesJSON, &obs.FileMtimes)
+		}
+		obs.IsSuperseded = isSuperseded != 0
+
+		results = append(results, ScoredObservation{Observation: &obs, Score: rankScore})
+	}
+	return results, rows.Err()
+}
+
 // searchObservationsLike performs fallback LIKE search on observations using GORM.
 // Limits to 2 keywords to prevent expensive OR queries that SQLite optimizes poorly.
 // This is a fallback path when FTS returns no results, so we prioritize performance.

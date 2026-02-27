@@ -954,26 +954,16 @@ func TestDetector_GetPatternInsight_NotFound(t *testing.T) {
 func setupTestStore(t *testing.T) *gorm.Store {
 	t.Helper()
 
-	// Create temp database file
-	tmpFile, err := os.CreateTemp("", "pattern_test_*.db")
-	if err != nil {
-		t.Fatalf("Failed to create temp file: %v", err)
+	dsn := os.Getenv("DATABASE_DSN")
+	if dsn == "" {
+		t.Skip("DATABASE_DSN not set, skipping integration test")
 	}
-	tmpFile.Close()
-
-	t.Cleanup(func() {
-		os.Remove(tmpFile.Name())
-	})
 
 	store, err := gorm.NewStore(gorm.Config{
-		Path:     tmpFile.Name(),
-		MaxConns: 1,
+		DSN:      dsn,
+		MaxConns: 2,
 	})
 	if err != nil {
-		// Check if this is an FTS5 related error
-		if containsString(err.Error(), "fts5") || containsString(err.Error(), "no such module") {
-			t.Skip("FTS5 not available in this SQLite build")
-		}
 		t.Fatalf("Failed to create store: %v", err)
 	}
 

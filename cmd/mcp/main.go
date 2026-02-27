@@ -29,7 +29,7 @@ var Version = "dev"
 func main() {
 	// Parse flags
 	project := flag.String("project", "", "Project name (required)")
-	dataDir := flag.String("data-dir", "", "Data directory (default: ~/.claude-mnemonic)")
+	_ = flag.String("data-dir", "", "Data directory (deprecated, ignored — uses DATABASE_DSN)")
 	debug := flag.Bool("debug", false, "Enable debug logging")
 	flag.Parse()
 
