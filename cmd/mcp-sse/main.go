@@ -1,11 +1,15 @@
-// Package main provides the MCP server entry point for claude-mnemonic.
+// Package main provides the MCP SSE server entry point for claude-mnemonic.
 package main
 
 import (
 	"context"
+	"crypto/subtle"
 	"flag"
+	"fmt"
+	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"syscall"
 	"time"
 
@@ -30,8 +34,7 @@ var Version = "dev"
 
 func main() {
 	// Parse flags
-	project := flag.String("project", "", "Project name (required)")
-	_ = flag.String("data-dir", "", "Data directory (deprecated, ignored — uses DATABASE_DSN)")
+	port := flag.Int("port", 37778, "HTTP port for MCP SSE")
 	debug := flag.Bool("debug", false, "Enable debug logging")
 	flag.Parse()
 
@@ -42,8 +45,11 @@ func main() {
 	}
 	log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stderr, NoColor: true})
 
-	if *project == "" {
-		log.Fatal().Msg("--project is required")
+	listenPort := *port
+	if envPort := os.Getenv("CLAUDE_MNEMONIC_MCP_SSE_PORT"); envPort != "" {
+		if parsed, err := strconv.Atoi(envPort); err == nil && parsed > 0 {
+			listenPort = parsed
+		}
 	}
 
 	// Ensure data directory and settings exist
@@ -72,7 +78,7 @@ func main() {
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 	go func() {
 		<-sigCh
-		log.Info().Msg("Shutting down MCP server")
+		log.Info().Msg("Shutting down MCP SSE server")
 		cancel()
 	}()
 
@@ -141,8 +147,7 @@ func main() {
 	// Start file watchers
 	startWatchers(ctx)
 
-	// Create and run MCP server with all dependencies
-	// Note: maintenanceService is nil because it runs in the worker process
+	// Create MCP server and SSE HTTP handler
 	server := mcp.NewServer(
 		searchMgr,
 		Version,
@@ -157,10 +162,79 @@ func main() {
 		collectionRegistry,
 		sessionIdxStore,
 	)
-	log.Info().Str("project", *project).Str("version", Version).Msg("Starting MCP server")
 
-	if err := server.Run(ctx); err != nil {
-		log.Fatal().Err(err).Msg("MCP server error")
+	sseHandler := mcp.NewSSEHandler(server)
+	var handler http.Handler = sseHandler
+	token := config.GetWorkerToken()
+	if token != "" {
+		handler = tokenAuthMiddleware(token)(handler)
+	}
+
+	mux := http.NewServeMux()
+	mux.Handle("/sse", handler)
+	mux.Handle("/message", handler)
+
+	addr := fmt.Sprintf(":%d", listenPort)
+	httpServer := &http.Server{
+		Addr:    addr,
+		Handler: mux,
+	}
+
+	httpErrCh := make(chan error, 1)
+	go func() {
+		httpErrCh <- httpServer.ListenAndServe()
+	}()
+
+	log.Info().
+		Int("port", listenPort).
+		Bool("tokenAuthEnabled", token != "").
+		Msg("Starting MCP SSE server")
+
+	select {
+	case err := <-httpErrCh:
+		if err != nil && err != http.ErrServerClosed {
+			log.Fatal().Err(err).Msg("MCP SSE server error")
+		}
+	case <-ctx.Done():
+		shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer shutdownCancel()
+
+		if err := httpServer.Shutdown(shutdownCtx); err != nil {
+			log.Error().Err(err).Msg("MCP SSE server shutdown failed")
+		}
+
+		sseHandler.Close()
+	}
+}
+
+func tokenAuthMiddleware(token string) func(http.Handler) http.Handler {
+	if token == "" {
+		return func(next http.Handler) http.Handler {
+			return next
+		}
+	}
+
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.Method == http.MethodOptions {
+				next.ServeHTTP(w, r)
+				return
+			}
+
+			providedToken := r.Header.Get("X-Auth-Token")
+			if providedToken == "" {
+				if authHeader := r.Header.Get("Authorization"); len(authHeader) >= 7 && authHeader[:7] == "Bearer " {
+					providedToken = authHeader[7:]
+				}
+			}
+
+			if subtle.ConstantTimeCompare([]byte(providedToken), []byte(token)) != 1 {
+				http.Error(w, "unauthorized", http.StatusUnauthorized)
+				return
+			}
+
+			next.ServeHTTP(w, r)
+		})
 	}
 }
 
