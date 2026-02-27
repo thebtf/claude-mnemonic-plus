@@ -526,4 +526,4 @@ MIT
 
 ---
 
-**Upstream:** [lukaszraczylo/claude-mnemonic](https://github.com/thebtf/claude-mnemonic-plus)
+**Upstream:** [lukaszraczylo/claude-mnemonic](https://github.com/lukaszraczylo/claude-mnemonic)

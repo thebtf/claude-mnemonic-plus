@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/go-gormigrate/gormigrate/v2"
-	"github.com/thebtf/claude-mnemonic-plus/internal/config"
 	"github.com/rs/zerolog/log"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
@@ -15,8 +14,9 @@ import (
 
 // runMigrations runs all database migrations using gormigrate.
 func runMigrations(db *gorm.DB, sqlDB *sql.DB, embeddingDims int) error {
-	if config.GetEmbeddingProvider() == "builtin" {
-		embeddingDims = 384
+	// Validate embedding dimensions before using in DDL statements.
+	if embeddingDims <= 0 {
+		return fmt.Errorf("invalid embedding dimensions: %d (must be positive)", embeddingDims)
 	}
 
 	// Keep sqlDB parameter intentionally for migration signature compatibility.
@@ -741,7 +741,8 @@ func runMigrations(db *gorm.DB, sqlDB *sql.DB, embeddingDims int) error {
 				return nil
 			},
 			Rollback: func(tx *gorm.DB) error {
-				return nil
+				// Intentionally irreversible: TRUNCATE destroys data, restore from backup to revert.
+				return fmt.Errorf("migration 020 is irreversible: dimension change truncated vectors; restore from backup")
 			},
 		},
 		// Migration 021: Fix patterns indexes — use status column instead of non-existent is_deprecated.
@@ -766,9 +767,10 @@ func runMigrations(db *gorm.DB, sqlDB *sql.DB, embeddingDims int) error {
 				return nil
 			},
 			Rollback: func(tx *gorm.DB) error {
-				_ = tx.Exec(`DROP INDEX IF EXISTS idx_patterns_frequency`).Error
-				_ = tx.Exec(`DROP INDEX IF EXISTS idx_patterns_type_project`).Error
-				return nil
+				if err := tx.Exec(`DROP INDEX IF EXISTS idx_patterns_frequency`).Error; err != nil {
+					return fmt.Errorf("migration 021 rollback: %w", err)
+				}
+				return tx.Exec(`DROP INDEX IF EXISTS idx_patterns_type_project`).Error
 			},
 		},
 	})
