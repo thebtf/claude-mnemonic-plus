@@ -1,4 +1,6 @@
-// Package main provides the MCP SSE server entry point for claude-mnemonic.
+// Package main provides a standalone MCP SSE server entry point for claude-mnemonic.
+// NOTE: The default deployment integrates MCP SSE into the worker (single port).
+// This standalone binary exists for backward compatibility or custom deployments.
 package main
 
 import (

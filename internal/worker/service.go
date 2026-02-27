@@ -12,14 +12,18 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
+	"github.com/thebtf/claude-mnemonic-plus/internal/collections"
 	"github.com/thebtf/claude-mnemonic-plus/internal/config"
 	"github.com/thebtf/claude-mnemonic-plus/internal/consolidation"
 	"github.com/thebtf/claude-mnemonic-plus/internal/db/gorm"
 	"github.com/thebtf/claude-mnemonic-plus/internal/embedding"
+	"github.com/thebtf/claude-mnemonic-plus/internal/mcp"
 	"github.com/thebtf/claude-mnemonic-plus/internal/pattern"
 	"github.com/thebtf/claude-mnemonic-plus/internal/reranking"
 	"github.com/thebtf/claude-mnemonic-plus/internal/scoring"
+	"github.com/thebtf/claude-mnemonic-plus/internal/search"
 	"github.com/thebtf/claude-mnemonic-plus/internal/search/expansion"
+	"github.com/thebtf/claude-mnemonic-plus/internal/sessions"
 	"github.com/thebtf/claude-mnemonic-plus/internal/update"
 	"github.com/thebtf/claude-mnemonic-plus/internal/vector"
 	"github.com/thebtf/claude-mnemonic-plus/internal/vector/pgvector"
@@ -126,6 +130,10 @@ type Service struct {
 	scoreCalculator        *scoring.Calculator
 	recalculator           *scoring.Recalculator
 	consolidationScheduler *consolidation.Scheduler
+	mcpSSEHandler          *mcp.SSEHandler
+	searchMgr              *search.Manager
+	collectionRegistry     *collections.Registry
+	sessionIdxStore        *sessions.Store
 	router                 *chi.Mux
 	store                  *gorm.Store
 	retrievalStats         map[string]*RetrievalStats
@@ -570,6 +578,62 @@ func (s *Service) initializeAsync() {
 		patternDetector.Start()
 		log.Info().Msg("Pattern recognition engine started")
 	}
+
+	// Initialize collection registry
+	collectionRegistry, colErr := collections.Load(config.GetCollectionConfigPath())
+	if colErr != nil {
+		log.Warn().Err(colErr).Msg("Failed to load collection config, collections disabled")
+		collectionRegistry = &collections.Registry{}
+	}
+
+	// Initialize session index store and background indexer
+	sessionIdxStore := sessions.NewStore(store)
+	wsID := config.GetWorkstationID()
+	if wsID == "" {
+		wsID = sessions.WorkstationID()
+	}
+	sessionsDir := config.GetSessionsDir()
+	sessionIndexer := sessions.NewIndexer(sessionIdxStore, sessionsDir, wsID, log.Logger)
+	s.wg.Add(1)
+	go func() {
+		defer s.wg.Done()
+		count, idxErr := sessionIndexer.IndexAll(s.ctx)
+		if idxErr != nil {
+			log.Warn().Err(idxErr).Msg("Session indexing failed")
+		} else if count > 0 {
+			log.Info().Int("indexed", count).Msg("Session indexing complete")
+		}
+	}()
+
+	// Initialize search manager for MCP tools
+	searchMgr := search.NewManager(observationStore, summaryStore, promptStore, vectorClient)
+
+	// Initialize MCP server and SSE handler (serves /sse and /message on the worker port)
+	mcpServer := mcp.NewServer(
+		searchMgr,
+		s.version,
+		observationStore,
+		patternStore,
+		relationStore,
+		sessionStore,
+		vectorClient,
+		scoreCalculator,
+		recalculator,
+		nil, // maintenanceService
+		collectionRegistry,
+		sessionIdxStore,
+		consolidationScheduler,
+	)
+	mcpSSEHandler := mcp.NewSSEHandler(mcpServer)
+
+	s.initMu.Lock()
+	s.searchMgr = searchMgr
+	s.collectionRegistry = collectionRegistry
+	s.sessionIdxStore = sessionIdxStore
+	s.mcpSSEHandler = mcpSSEHandler
+	s.initMu.Unlock()
+
+	log.Info().Msg("MCP SSE handler integrated into worker")
 
 	// Mark as ready
 	s.ready.Store(true)
@@ -1237,8 +1301,15 @@ func (s *Service) setupRoutes() {
 	// Selfcheck endpoint (works before DB is ready - checks all components)
 	s.router.Get("/api/selfcheck", s.handleSelfCheck)
 
-	// SSE endpoint (works before DB is ready)
+	// Dashboard SSE endpoint (works before DB is ready)
 	s.router.Get("/api/events", s.sseBroadcaster.HandleSSE)
+
+	// MCP SSE routes (require DB ready, no timeout — long-lived SSE connections)
+	s.router.Group(func(r chi.Router) {
+		r.Use(s.requireReady)
+		r.Handle("/sse", http.HandlerFunc(s.handleMCPSSE))
+		r.Handle("/message", http.HandlerFunc(s.handleMCPSSE))
+	})
 
 	// OpenAI-compatible model list endpoint. Intentionally outside requireReady group:
 	// the model registry is populated at init() time (before DB is ready), so this
@@ -1324,6 +1395,20 @@ func (s *Service) setupRoutes() {
 		// Bulk status operations
 		r.Post("/api/observations/bulk-status", s.handleBulkStatusUpdate)
 	})
+}
+
+// handleMCPSSE delegates /sse and /message requests to the integrated MCP SSE handler.
+func (s *Service) handleMCPSSE(w http.ResponseWriter, r *http.Request) {
+	s.initMu.RLock()
+	handler := s.mcpSSEHandler
+	s.initMu.RUnlock()
+
+	if handler == nil {
+		http.Error(w, "MCP SSE not ready", http.StatusServiceUnavailable)
+		return
+	}
+
+	handler.ServeHTTP(w, r)
 }
 
 // recordRetrievalStats atomically updates retrieval statistics for a project.
@@ -1711,6 +1796,14 @@ func (s *Service) Shutdown(ctx context.Context) error {
 		if err := s.server.Shutdown(ctx); err != nil {
 			collectError("http_server", err)
 		}
+	}
+
+	// Phase 1b: Close MCP SSE sessions
+	s.initMu.RLock()
+	sseHandler := s.mcpSSEHandler
+	s.initMu.RUnlock()
+	if sseHandler != nil {
+		sseHandler.Close()
 	}
 
 	// Phase 2: Stop file watchers (prevent new DB recreation)

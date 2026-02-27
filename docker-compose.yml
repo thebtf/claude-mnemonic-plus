@@ -1,6 +1,6 @@
 # Claude Mnemonic Plus — Server Stack
 #
-# Provides: PostgreSQL + pgvector, Worker API, MCP SSE Server
+# Provides: PostgreSQL + pgvector, Worker (API + MCP SSE on single port)
 # Client (hooks + MCP proxy) runs locally on each workstation.
 #
 # Usage:
@@ -27,20 +27,17 @@ services:
       retries: 5
     restart: unless-stopped
 
-  # Combined worker + mcp-sse (default entrypoint runs both).
-  # To run separately, use: command: ["worker"] or command: ["mcp-sse"]
+  # Worker with integrated MCP SSE (single port, single process)
   server:
     build:
       context: .
       target: server
     ports:
       - "${WORKER_PORT:-37777}:37777"
-      - "${MCP_SSE_PORT:-37778}:37778"
     environment:
       DATABASE_DSN: "postgres://mnemonic:${POSTGRES_PASSWORD:-mnemonic}@postgres:5432/claude_mnemonic?sslmode=disable"
       CLAUDE_MNEMONIC_WORKER_HOST: "0.0.0.0"
       CLAUDE_MNEMONIC_WORKER_PORT: "37777"
-      CLAUDE_MNEMONIC_MCP_SSE_PORT: "37778"
       CLAUDE_MNEMONIC_API_TOKEN: "${API_TOKEN:-}"
       CLAUDE_MNEMONIC_EMBEDDING_PROVIDER: "${EMBEDDING_PROVIDER:-openai}"
       CLAUDE_MNEMONIC_EMBEDDING_BASE_URL: "${EMBEDDING_BASE_URL:-}"

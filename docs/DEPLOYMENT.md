@@ -2,21 +2,22 @@
 
 Claude Mnemonic Plus uses a **client-server architecture**:
 
-- **Server** (Docker on remote host): Worker API + MCP SSE + PostgreSQL
+- **Server** (Docker on remote host): Worker (API + MCP SSE) + PostgreSQL
 - **Client** (local workstation): hooks + MCP stdio proxy
 
 ```
   ┌─── Workstation A ────────────────┐      ┌─── Server (Docker) ──────────────┐
   │                                  │      │                                  │
-  │  Claude Code                     │      │  ┌──────────┐  ┌─────────────┐  │
-  │    ├── hooks ──POST───────────────────→  │  │  Worker   │  │  MCP SSE    │  │
-  │    └── mcp-stdio-proxy ──SSE──────────→  │  │  :37777   │  │  :37778     │  │
-  │                                  │      │  └────┬─────┘  └──────┬──────┘  │
-  │                                  │      │       │               │         │
-  ├─── Workstation B ────────────────┤      │  ┌────▼───────────────▼──────┐  │
-  │  (same setup, shared brain)      │      │  │  PostgreSQL + pgvector    │  │
-  └──────────────────────────────────┘      │  │  :5432                    │  │
-                                            │  └───────────────────────────┘  │
+  │  Claude Code                     │      │  ┌──────────────────────────┐    │
+  │    ├── hooks ──POST──────────────────→  │  │  Worker :37777           │    │
+  │    └── mcp-stdio-proxy ──SSE─────────→  │  │  /api/* (hooks+dashboard)│    │
+  │                                  │      │  │  /sse, /message (MCP)    │    │
+  ├─── Workstation B ────────────────┤      │  └────────────┬─────────────┘    │
+  │  (same setup, shared brain)      │      │               │                  │
+  └──────────────────────────────────┘      │  ┌────────────▼─────────────┐    │
+                                            │  │  PostgreSQL + pgvector    │    │
+                                            │  │  :5432                    │    │
+                                            │  └──────────────────────────┘    │
                                             └──────────────────────────────────┘
 ```
 
@@ -50,8 +51,7 @@ Services started:
 | Service | Port | Purpose |
 |---------|------|---------|
 | `postgres` | 5432 | PostgreSQL 17 + pgvector |
-| `worker` | 37777 | Hook receiver + dashboard |
-| `mcp-sse` | 37778 | MCP tools via SSE transport |
+| `server` | 37777 | Worker API + MCP SSE (hooks, dashboard, nia tools) |
 
 Verify:
 ```bash
@@ -92,25 +92,15 @@ docker run -d --name cmplus-postgres \
 # 2. Build the server image
 docker build --target server -t cmplus-server .
 
-# 3. Start worker
-docker run -d --name cmplus-worker \
+# 3. Start server (worker + MCP SSE on single port)
+docker run -d --name cmplus-server \
   -e DATABASE_DSN="postgres://mnemonic:change-me@host.docker.internal:5432/claude_mnemonic?sslmode=disable" \
   -e CLAUDE_MNEMONIC_API_TOKEN="your-secret-token" \
   -e CLAUDE_MNEMONIC_EMBEDDING_PROVIDER=openai \
   -e CLAUDE_MNEMONIC_EMBEDDING_BASE_URL=http://host.docker.internal:4000/v1 \
   -e CLAUDE_MNEMONIC_EMBEDDING_DIMENSIONS=4096 \
   -p 37777:37777 \
-  cmplus-server worker
-
-# 4. Start MCP SSE
-docker run -d --name cmplus-mcp-sse \
-  -e DATABASE_DSN="postgres://mnemonic:change-me@host.docker.internal:5432/claude_mnemonic?sslmode=disable" \
-  -e CLAUDE_MNEMONIC_API_TOKEN="your-secret-token" \
-  -e CLAUDE_MNEMONIC_EMBEDDING_PROVIDER=openai \
-  -e CLAUDE_MNEMONIC_EMBEDDING_BASE_URL=http://host.docker.internal:4000/v1 \
-  -e CLAUDE_MNEMONIC_EMBEDDING_DIMENSIONS=4096 \
-  -p 37778:37778 \
-  cmplus-server mcp-sse
+  cmplus-server
 ```
 
 ---
@@ -146,7 +136,7 @@ Add/update the MCP server entry to use the stdio proxy:
     "claude-mnemonic": {
       "command": "<install-dir>/mcp-stdio-proxy",
       "args": [
-        "--url", "http://your-server:37778",
+        "--url", "http://your-server:37777",
         "--token", "your-secret-token"
       ]
     }
@@ -181,7 +171,7 @@ export CLAUDE_MNEMONIC_API_TOKEN=your-secret-token
      "mcpServers": {
        "claude-mnemonic": {
          "command": "/full/path/to/mcp-stdio-proxy",
-         "args": ["--url", "http://your-server:37778", "--token", "your-token"]
+         "args": ["--url", "http://your-server:37777", "--token", "your-token"]
        }
      }
    }
@@ -245,9 +235,8 @@ CLAUDE_MNEMONIC_EMBEDDING_PROVIDER=builtin
 |----------|---------|-------------|
 | `DATABASE_DSN` | (required) | PostgreSQL connection string |
 | `CLAUDE_MNEMONIC_WORKER_HOST` | `0.0.0.0` | Worker bind address |
-| `CLAUDE_MNEMONIC_WORKER_PORT` | `37777` | Worker HTTP port |
-| `CLAUDE_MNEMONIC_MCP_SSE_PORT` | `37778` | MCP SSE port |
-| `CLAUDE_MNEMONIC_API_TOKEN` | (empty) | Auth token (shared by worker + MCP SSE) |
+| `CLAUDE_MNEMONIC_WORKER_PORT` | `37777` | Worker HTTP port (API + MCP SSE) |
+| `CLAUDE_MNEMONIC_API_TOKEN` | (empty) | Auth token for all endpoints |
 | `CLAUDE_MNEMONIC_EMBEDDING_PROVIDER` | `builtin` | `builtin` or `openai` |
 | `CLAUDE_MNEMONIC_EMBEDDING_BASE_URL` | `https://api.openai.com/v1` | Embedding API URL |
 | `CLAUDE_MNEMONIC_EMBEDDING_API_KEY` | (empty) | Embedding API key |
@@ -269,11 +258,11 @@ CLAUDE_MNEMONIC_EMBEDDING_PROVIDER=builtin
 ## Health Checks
 
 ```bash
-# Worker health
+# Server health
 curl http://your-server:37777/health
 
 # MCP SSE (with token)
-curl -H "Authorization: Bearer your-token" http://your-server:37778/sse
+curl -H "Authorization: Bearer your-token" http://your-server:37777/sse
 ```
 
 ---

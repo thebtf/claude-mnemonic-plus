@@ -31,7 +31,7 @@ Claude Mnemonic Plus uses a **client-server architecture**. The heavy lifting (d
             │   Server (Docker)   │
             │  ┌───────────────┐  │
             │  │ Worker :37777 │  │
-            │  │ MCP SSE:37778 │  │
+            │  │ (API+MCP SSE) │  │
             │  └───────┬───────┘  │
             │          │          │
             │  ┌───────▼───────┐  │
@@ -43,8 +43,7 @@ Claude Mnemonic Plus uses a **client-server architecture**. The heavy lifting (d
 
 **Server** (Docker on remote host / Unraid / NAS):
 - PostgreSQL 15+ with pgvector extension
-- Worker — HTTP API, dashboard, consolidation scheduler (:37777)
-- MCP SSE Server — remote MCP access (:37778)
+- Worker — HTTP API, dashboard, MCP SSE, consolidation scheduler (:37777)
 
 **Client** (each workstation):
 - Hooks — capture observations from Claude Code sessions, POST to remote worker
@@ -69,10 +68,9 @@ echo 'API_TOKEN=your-api-token' >> .env
 docker compose up -d
 ```
 
-This starts three containers:
+This starts two containers:
 - **postgres** — PostgreSQL 17 with pgvector (data persisted in Docker volume)
-- **worker** — HTTP API + dashboard at `http://your-server:37777`
-- **mcp-sse** — MCP SSE server at `http://your-server:37778`
+- **server** — Worker (HTTP API + MCP SSE + dashboard) at `http://your-server:37777`
 
 Verify:
 
@@ -82,15 +80,15 @@ curl http://your-server:37777/health
 
 #### Existing PostgreSQL
 
-If you already have PostgreSQL with pgvector, just run the worker and MCP SSE containers:
+If you already have PostgreSQL with pgvector, just run the server container:
 
 ```bash
 # Pull and run directly
-docker compose up -d worker mcp-sse
+docker compose up -d server
 
 # Or override DATABASE_DSN to point to your existing PostgreSQL:
 DATABASE_DSN="postgres://user:pass@your-pg-host:5432/claude_mnemonic?sslmode=disable" \
-  docker compose up -d worker mcp-sse
+  docker compose up -d server
 ```
 
 Make sure pgvector extension is enabled:
@@ -106,7 +104,7 @@ Install via Docker template:
 
 1. **Add container** in Unraid Docker tab
 2. Set **Repository**: `ghcr.io/thebtf/claude-mnemonic-plus:latest` (or build locally)
-3. Map port **37777** (worker) and **37778** (MCP SSE)
+3. Map port **37777** (worker + MCP SSE)
 4. Add path mapping for PostgreSQL data or point `DATABASE_DSN` to your existing PostgreSQL instance
 5. Set environment variables:
    - `DATABASE_DSN` = `postgres://user:pass@your-pg:5432/claude_mnemonic?sslmode=disable`
@@ -183,7 +181,7 @@ Add to `~/.claude/settings.json` (macOS/Linux) or `%USERPROFILE%\.claude\setting
   "mcpServers": {
     "claude-mnemonic": {
       "command": "/path/to/mcp-stdio-proxy",
-      "args": ["--sse-url", "http://your-server:37778"],
+      "args": ["--url", "http://your-server:37777"],
       "env": {}
     }
   }
@@ -256,7 +254,6 @@ Config file location: `~/.claude-mnemonic/settings.json`
 | `RERANKING_ENABLED` | `true` | Enable cross-encoder reranking |
 | `RERANKING_CANDIDATES` | `100` | Candidate results before reranking |
 | `RERANKING_RESULTS` | `10` | Final results after reranking |
-| `MCP_SSE_PORT` | `37778` | MCP SSE HTTP server port |
 
 ### Client Settings
 
@@ -277,7 +274,6 @@ POSTGRES_PASSWORD=your-secure-password
 POSTGRES_PORT=5432
 API_TOKEN=your-api-token
 WORKER_PORT=37777
-MCP_SSE_PORT=37778
 EMBEDDING_PROVIDER=onnx
 # For OpenAI-compatible embeddings:
 # EMBEDDING_PROVIDER=openai

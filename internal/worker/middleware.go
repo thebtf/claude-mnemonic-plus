@@ -26,11 +26,11 @@ var allowedOrigins = map[string]bool{
 	"http://localhost":       true,
 	"http://localhost:3000":  true,
 	"http://localhost:5173":  true, // Vite dev server
-	"http://localhost:37778": true, // Dashboard UI
+	"http://localhost:37777": true, // Worker dashboard
 	"http://127.0.0.1":       true,
 	"http://127.0.0.1:3000":  true,
 	"http://127.0.0.1:5173":  true,
-	"http://127.0.0.1:37778": true,
+	"http://127.0.0.1:37777": true,
 }
 
 // SecurityHeaders middleware adds essential security headers to all responses.

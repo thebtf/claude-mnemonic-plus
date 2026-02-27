@@ -46,10 +46,10 @@ func TestSecurityHeaders_CORS(t *testing.T) {
 		expectCORS     bool
 	}{
 		{
-			name:           "localhost:37778 origin allowed",
-			origin:         "http://localhost:37778",
+			name:           "localhost:37777 origin allowed",
+			origin:         "http://localhost:37777",
 			expectCORS:     true,
-			expectedOrigin: "http://localhost:37778",
+			expectedOrigin: "http://localhost:37777",
 		},
 		{
 			name:           "127.0.0.1:5173 origin allowed",

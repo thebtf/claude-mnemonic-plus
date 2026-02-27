@@ -15,9 +15,8 @@ RUN go mod download
 
 COPY . .
 
-# Build server-side binaries: worker + MCP SSE server
+# Build server binary (worker with integrated MCP SSE)
 RUN CGO_ENABLED=1 go build -tags fts5 -ldflags "-s -w" -o /out/worker ./cmd/worker
-RUN CGO_ENABLED=1 go build -tags fts5 -ldflags "-s -w" -o /out/mcp-sse ./cmd/mcp-sse
 
 # Build client-side binaries: MCP stdio proxy + hooks
 RUN CGO_ENABLED=1 go build -tags fts5 -ldflags "-s -w" -o /out/mcp-stdio-proxy ./cmd/mcp-stdio-proxy
@@ -39,23 +38,16 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=builder /out/worker /usr/local/bin/worker
-COPY --from=builder /out/mcp-sse /usr/local/bin/mcp-sse
-COPY deploy/entrypoint-server.sh /usr/local/bin/entrypoint.sh
-RUN chmod +x /usr/local/bin/entrypoint.sh
 
 ENV CLAUDE_MNEMONIC_WORKER_HOST=0.0.0.0
 ENV CLAUDE_MNEMONIC_WORKER_PORT=37777
-ENV CLAUDE_MNEMONIC_MCP_SSE_PORT=37778
 
 EXPOSE 37777
-EXPOSE 37778
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
     CMD curl -f http://localhost:37777/health || exit 1
 
-# Default: run both worker + mcp-sse via combined entrypoint.
-# Override CMD to run a single service: CMD ["worker"] or CMD ["mcp-sse"]
-ENTRYPOINT ["entrypoint.sh"]
+ENTRYPOINT ["worker"]
 
 # --- Client image: hooks + MCP proxy (for extracting binaries) ---
 FROM debian:bookworm-slim AS client
