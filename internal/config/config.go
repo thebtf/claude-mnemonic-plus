@@ -82,6 +82,7 @@ type Config struct {
 	CleanupStaleObservations  bool     `json:"cleanup_stale_observations"`
 	WorkerHost                string   // env-only
 	WorkerToken               string   // env-only
+	CollectionConfigPath      string   // env-only
 }
 
 var (
@@ -342,6 +343,9 @@ func Load() (*Config, error) {
 			cfg.DatabaseMaxConns = n
 		}
 	}
+	if v := strings.TrimSpace(os.Getenv("COLLECTION_CONFIG")); v != "" {
+		cfg.CollectionConfigPath = v
+	}
 
 	return cfg, nil
 }
@@ -442,6 +446,16 @@ func GetEmbeddingModelName() string {
 		return cfg.EmbeddingModelName
 	}
 	return "text-embedding-3-small"
+}
+
+// GetCollectionConfigPath returns the path to the collections YAML config.
+// Falls back to ~/.config/claude-mnemonic/collections.yml if env is unset.
+func GetCollectionConfigPath() string {
+	if v := strings.TrimSpace(os.Getenv("COLLECTION_CONFIG")); v != "" {
+		return v
+	}
+	home, _ := os.UserHomeDir()
+	return filepath.Join(home, ".config", "claude-mnemonic", "collections.yml")
 }
 
 // GetEmbeddingDimensions returns the embedding vector dimensions for external providers.

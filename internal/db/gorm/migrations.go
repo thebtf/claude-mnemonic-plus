@@ -538,6 +538,75 @@ func runMigrations(db *gorm.DB, sqlDB *sql.DB) error {
 				return nil
 			},
 		},
+
+		// Migration 017: Content-addressable storage for collections
+		{
+			ID: "017_content_addressable_storage",
+			Migrate: func(tx *gorm.DB) error {
+				sqls := []string{
+					// Content table (hash -> document body)
+					`CREATE TABLE IF NOT EXISTS content (
+                hash       TEXT PRIMARY KEY,
+                doc        TEXT NOT NULL,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )`,
+					// Documents table (collection x path -> content hash)
+					`CREATE TABLE IF NOT EXISTS documents (
+                id         BIGSERIAL PRIMARY KEY,
+                collection TEXT NOT NULL,
+                path       TEXT NOT NULL,
+                title      TEXT,
+                hash       TEXT REFERENCES content(hash) ON DELETE SET NULL,
+                active     BOOLEAN NOT NULL DEFAULT true,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                UNIQUE(collection, path)
+            )`,
+					`CREATE INDEX IF NOT EXISTS idx_documents_collection ON documents(collection)`,
+					`CREATE INDEX IF NOT EXISTS idx_documents_hash ON documents(hash)`,
+					`CREATE INDEX IF NOT EXISTS idx_documents_active ON documents(active) WHERE active = true`,
+					// FTS tsvector on documents for BM25 search
+					`ALTER TABLE documents
+             ADD COLUMN IF NOT EXISTS search_vector tsvector
+             GENERATED ALWAYS AS (
+               to_tsvector('english',
+                 COALESCE(path, '') || ' ' ||
+                 COALESCE(title, '')
+               )
+             ) STORED`,
+					`CREATE INDEX IF NOT EXISTS idx_documents_fts ON documents USING GIN(search_vector)`,
+					// Content chunks table (hash x seq -> embedding)
+					// Vector dimension 384 matches default BGE model
+					`CREATE TABLE IF NOT EXISTS content_chunks (
+                hash       TEXT NOT NULL REFERENCES content(hash) ON DELETE CASCADE,
+                seq        INTEGER NOT NULL,
+                pos        INTEGER NOT NULL,
+                model      TEXT NOT NULL,
+                embedding  vector(384),
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                PRIMARY KEY (hash, seq)
+            )`,
+					`CREATE INDEX IF NOT EXISTS idx_content_chunks_hash ON content_chunks(hash)`,
+					`CREATE INDEX IF NOT EXISTS idx_content_chunks_embedding_hnsw
+             ON content_chunks USING hnsw (embedding vector_cosine_ops)
+             WITH (m = 16, ef_construction = 64)`,
+				}
+				for _, s := range sqls {
+					if err := tx.Exec(s).Error; err != nil {
+						return fmt.Errorf("migration 017: %w", err)
+					}
+				}
+				return nil
+			},
+			Rollback: func(tx *gorm.DB) error {
+				for _, t := range []string{"content_chunks", "documents", "content"} {
+					if err := tx.Exec("DROP TABLE IF EXISTS " + t + " CASCADE").Error; err != nil {
+						return err
+					}
+				}
+				return nil
+			},
+		},
 	})
 
 	if err := m.Migrate(); err != nil {

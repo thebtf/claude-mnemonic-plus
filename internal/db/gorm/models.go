@@ -266,3 +266,40 @@ func (c *ConceptWeight) BeforeCreate(tx *gorm.DB) error {
 	}
 	return nil
 }
+
+// Content holds deduplicated document bodies keyed by SHA-256 hash.
+type Content struct {
+	Hash      string    `gorm:"primaryKey;type:text" json:"hash"`
+	Doc       string    `gorm:"type:text;not null" json:"doc"`
+	CreatedAt time.Time `gorm:"autoCreateTime" json:"created_at"`
+}
+
+// TableName returns the table name for Content.
+func (Content) TableName() string { return "content" }
+
+// Document represents an ingested file in a collection.
+type Document struct {
+	ID         int64          `gorm:"primaryKey;autoIncrement" json:"id"`
+	Collection string         `gorm:"type:text;not null;uniqueIndex:idx_doc_collection_path" json:"collection"`
+	Path       string         `gorm:"type:text;not null;uniqueIndex:idx_doc_collection_path" json:"path"`
+	Title      sql.NullString `gorm:"type:text" json:"title"`
+	Hash       sql.NullString `gorm:"type:text" json:"hash"`
+	Active     bool           `gorm:"default:true" json:"active"`
+	CreatedAt  time.Time      `gorm:"autoCreateTime" json:"created_at"`
+	UpdatedAt  time.Time      `gorm:"autoUpdateTime" json:"updated_at"`
+}
+
+// TableName returns the table name for Document.
+func (Document) TableName() string { return "documents" }
+
+// ContentChunk holds per-chunk embeddings for a content hash.
+type ContentChunk struct {
+	Hash      string    `gorm:"type:text;not null;primaryKey" json:"hash"`
+	Seq       int       `gorm:"primaryKey" json:"seq"`
+	Pos       int       `gorm:"not null" json:"pos"`
+	Model     string    `gorm:"type:text;not null" json:"model"`
+	CreatedAt time.Time `gorm:"autoCreateTime" json:"created_at"`
+}
+
+// TableName returns the table name for ContentChunk.
+func (ContentChunk) TableName() string { return "content_chunks" }
