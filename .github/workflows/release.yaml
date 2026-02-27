@@ -1,121 +1,182 @@
 name: Release
 
 on:
-    push:
-        branches:
-            - main
-        paths-ignore:
-            - "**.md"
-            - "docs/**"
-    workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
 
 permissions:
-    id-token: write
-    contents: write
-    packages: write
+  id-token: write
+  contents: write
+  packages: write
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
 
 jobs:
-    release:
-        uses: lukaszraczylo/shared-actions/.github/workflows/go-release-cgo.yaml@main
+  release:
+    runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/goreleaser/goreleaser-cross:v1.25.7
+    outputs:
+      version: ${{ steps.goreleaser.outputs.version }}
+      version_tag: ${{ steps.goreleaser.outputs.version_tag }}
+    steps:
+      - uses: actions/checkout@v4
         with:
-            go-version: ">=1.24"
-            node-enabled: true
-            node-version: "20"
-            node-build-script: "cd ui && npm ci && npm run build"
-            node-cache-dependency-path: "ui/package-lock.json"
-            node-output-path: "ui/dist"
-            node-embed-path: "internal/worker/static"
-            lfs: true
-        secrets: inherit
+          fetch-depth: 0
+          lfs: true
 
-    commit-marketplace:
-        needs: release
-        runs-on: ubuntu-latest
-        steps:
-            - uses: actions/checkout@v4
-              with:
-                  ref: main
+      - name: Fetch tags
+        run: git fetch --force --tags
 
-            - name: Download checksums
-              run: |
-                  VERSION="${{ needs.release.outputs.version_tag }}"
-                  curl -sSL -o checksums.txt \
-                    "https://github.com/thebtf/engram/releases/download/${VERSION}/checksums.txt"
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: "ui/package-lock.json"
 
-            - name: Generate marketplace.json with checksums
-              run: |
-                  VERSION="${{ needs.release.outputs.version }}"
-                  VERSION_TAG="${{ needs.release.outputs.version_tag }}"
-                  TODAY=$(date -u +%Y-%m-%d)
+      - name: Install cosign
+        uses: sigstore/cosign-installer@v3
 
-                  # Extract checksums from checksums.txt
-                  SHA_DARWIN_ARM64=$(grep "darwin_arm64" checksums.txt | awk '{print $1}')
-                  SHA_LINUX_AMD64=$(grep "linux_amd64" checksums.txt | awk '{print $1}')
-                  SHA_WINDOWS_AMD64=$(grep "windows_amd64" checksums.txt | awk '{print $1}')
+      - name: Run GoReleaser
+        id: goreleaser
+        run: |
+          goreleaser release --clean
+          # Extract version from goreleaser artifacts
+          VERSION_TAG="${GITHUB_REF_NAME}"
+          VERSION="${VERSION_TAG#v}"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "version_tag=${VERSION_TAG}" >> "$GITHUB_OUTPUT"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-                  # Generate marketplace.json
-                  cat > marketplace.json << EOF
-                  {
-                    "\$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
-                    "name": "engram",
-                    "version": "1.0.0",
-                    "description": "Persistent memory system for Claude Code - stores observations, session summaries, and user prompts with semantic search",
-                    "owner": {
-                      "name": "thebtf",
-                      "email": "thebtf@users.noreply.github.com",
-                      "url": "https://github.com/thebtf"
-                    },
-                    "repository": "https://github.com/thebtf/engram",
-                    "plugins": [
-                      {
-                        "name": "engram",
-                        "description": "Persistent memory system for Claude Code - Go implementation with SQLite and ChromaDB vector search",
-                        "version": "${VERSION}",
-                        "author": {
-                          "name": "thebtf",
-                          "url": "https://github.com/thebtf"
+  docker:
+    needs: release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: Build and push server image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: server
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  marketplace:
+    needs: release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Download checksums
+        run: |
+          VERSION_TAG="${{ needs.release.outputs.version_tag }}"
+          curl -sSL -o checksums.txt \
+            "https://github.com/${{ github.repository }}/releases/download/${VERSION_TAG}/checksums.txt"
+
+      - name: Generate marketplace.json
+        run: |
+          VERSION="${{ needs.release.outputs.version }}"
+          VERSION_TAG="${{ needs.release.outputs.version_tag }}"
+          TODAY=$(date -u +%Y-%m-%d)
+
+          SHA_DARWIN_ARM64=$(grep "darwin_arm64" checksums.txt | awk '{print $1}')
+          SHA_LINUX_AMD64=$(grep "linux_amd64" checksums.txt | awk '{print $1}')
+          SHA_WINDOWS_AMD64=$(grep "windows_amd64" checksums.txt | awk '{print $1}')
+
+          cat > marketplace.json << EOF
+          {
+            "\$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+            "name": "engram",
+            "version": "1.0.0",
+            "description": "Shared memory infrastructure for Claude Code workstations",
+            "owner": {
+              "name": "thebtf",
+              "email": "thebtf@users.noreply.github.com",
+              "url": "https://github.com/thebtf"
+            },
+            "repository": "https://github.com/thebtf/engram",
+            "plugins": [
+              {
+                "name": "engram",
+                "description": "Persistent memory with PostgreSQL+pgvector, hybrid search, and MCP tools",
+                "version": "${VERSION}",
+                "author": {
+                  "name": "thebtf",
+                  "url": "https://github.com/thebtf"
+                },
+                "category": "productivity",
+                "tags": ["memory", "persistence", "search", "context", "pgvector"],
+                "license": "MIT",
+                "homepage": "https://github.com/thebtf/engram",
+                "releases": {
+                  "latest": "${VERSION}",
+                  "versions": {
+                    "${VERSION}": {
+                      "releaseDate": "${TODAY}",
+                      "downloads": {
+                        "darwin-arm64": {
+                          "url": "https://github.com/thebtf/engram/releases/download/${VERSION_TAG}/engram_${VERSION}_darwin_arm64.tar.gz",
+                          "format": "tar.gz",
+                          "sha256": "${SHA_DARWIN_ARM64}"
                         },
-                        "category": "productivity",
-                        "tags": ["memory", "persistence", "search", "context"],
-                        "license": "MIT",
-                        "homepage": "https://github.com/thebtf/engram",
-                        "releases": {
-                          "latest": "${VERSION}",
-                          "versions": {
-                            "${VERSION}": {
-                              "releaseDate": "${TODAY}",
-                              "downloads": {
-                                "darwin-arm64": {
-                                  "url": "https://github.com/thebtf/engram/releases/download/${VERSION_TAG}/engram_${VERSION}_darwin_arm64.tar.gz",
-                                  "format": "tar.gz",
-                                  "sha256": "${SHA_DARWIN_ARM64}"
-                                },
-                                "linux-amd64": {
-                                  "url": "https://github.com/thebtf/engram/releases/download/${VERSION_TAG}/engram_${VERSION}_linux_amd64.tar.gz",
-                                  "format": "tar.gz",
-                                  "sha256": "${SHA_LINUX_AMD64}"
-                                },
-                                "windows-amd64": {
-                                  "url": "https://github.com/thebtf/engram/releases/download/${VERSION_TAG}/engram_${VERSION}_windows_amd64.zip",
-                                  "format": "zip",
-                                  "sha256": "${SHA_WINDOWS_AMD64}"
-                                }
-                              }
-                            }
-                          }
+                        "linux-amd64": {
+                          "url": "https://github.com/thebtf/engram/releases/download/${VERSION_TAG}/engram_${VERSION}_linux_amd64.tar.gz",
+                          "format": "tar.gz",
+                          "sha256": "${SHA_LINUX_AMD64}"
+                        },
+                        "windows-amd64": {
+                          "url": "https://github.com/thebtf/engram/releases/download/${VERSION_TAG}/engram_${VERSION}_windows_amd64.zip",
+                          "format": "zip",
+                          "sha256": "${SHA_WINDOWS_AMD64}"
                         }
                       }
-                    ]
+                    }
                   }
-                  EOF
+                }
+              }
+            ]
+          }
+          EOF
 
-                  echo "Generated marketplace.json:"
-                  cat marketplace.json
+          echo "Generated marketplace.json:"
+          cat marketplace.json
 
-            - name: Commit and push
-              run: |
-                  git config user.name "github-actions[bot]"
-                  git config user.email "github-actions[bot]@users.noreply.github.com"
-                  git add marketplace.json
-                  git diff --staged --quiet || git commit -m "chore: update marketplace for ${{ needs.release.outputs.version_tag }}"
-                  git push
+      - name: Commit and push
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add marketplace.json
+          git diff --staged --quiet || git commit -m "chore: update marketplace for ${{ needs.release.outputs.version_tag }}"
+          git push
