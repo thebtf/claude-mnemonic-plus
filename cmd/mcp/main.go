@@ -16,6 +16,7 @@ import (
 	"github.com/lukaszraczylo/claude-mnemonic/internal/mcp"
 	"github.com/lukaszraczylo/claude-mnemonic/internal/scoring"
 	"github.com/lukaszraczylo/claude-mnemonic/internal/search"
+	"github.com/lukaszraczylo/claude-mnemonic/internal/sessions"
 	"github.com/lukaszraczylo/claude-mnemonic/internal/vector"
 	"github.com/lukaszraczylo/claude-mnemonic/internal/vector/pgvector"
 	"github.com/lukaszraczylo/claude-mnemonic/internal/watcher"
@@ -94,6 +95,24 @@ func main() {
 	relationStore := gorm.NewRelationStore(store)
 	sessionStore := gorm.NewSessionStore(store)
 
+	// Initialize session indexer
+	sessionIdxStore := sessions.NewStore(store)
+	wsID := config.GetWorkstationID()
+	if wsID == "" {
+		wsID = sessions.WorkstationID()
+	}
+	sessionsDir := config.GetSessionsDir()
+	sessionIndexer := sessions.NewIndexer(sessionIdxStore, sessionsDir, wsID, log.Logger)
+
+	go func() {
+		count, err := sessionIndexer.IndexAll(ctx)
+		if err != nil {
+			log.Warn().Err(err).Msg("Session indexing failed")
+		} else if count > 0 {
+			log.Info().Int("indexed", count).Msg("Session indexing complete")
+		}
+	}()
+
 	// Initialize embedding service and vector client
 	var vectorClient vector.Client
 	embedSvc, err := embedding.NewService()
@@ -136,6 +155,7 @@ func main() {
 		recalculator,
 		nil, // maintenanceService - handled by worker
 		collectionRegistry,
+		sessionIdxStore,
 	)
 	log.Info().Str("project", *project).Str("version", Version).Msg("Starting MCP server")
 

@@ -83,6 +83,8 @@ type Config struct {
 	WorkerHost                string   // env-only
 	WorkerToken               string   // env-only
 	CollectionConfigPath      string   // env-only
+	SessionsDir               string   // env-only: SESSIONS_DIR
+	WorkstationID             string   // env-only: WORKSTATION_ID
 }
 
 var (
@@ -346,6 +348,12 @@ func Load() (*Config, error) {
 	if v := strings.TrimSpace(os.Getenv("COLLECTION_CONFIG")); v != "" {
 		cfg.CollectionConfigPath = v
 	}
+	if v := strings.TrimSpace(os.Getenv("SESSIONS_DIR")); v != "" {
+		cfg.SessionsDir = v
+	}
+	if v := strings.TrimSpace(os.Getenv("WORKSTATION_ID")); v != "" {
+		cfg.WorkstationID = v
+	}
 
 	return cfg, nil
 }
@@ -456,6 +464,22 @@ func GetCollectionConfigPath() string {
 	}
 	home, _ := os.UserHomeDir()
 	return filepath.Join(home, ".config", "claude-mnemonic", "collections.yml")
+}
+
+// GetSessionsDir returns the sessions directory.
+// Falls back to ~/.claude/projects/ if not set.
+func GetSessionsDir() string {
+	if v := os.Getenv("SESSIONS_DIR"); v != "" {
+		return v
+	}
+	home, _ := os.UserHomeDir()
+	return filepath.Join(home, ".claude", "projects")
+}
+
+// GetWorkstationID returns the workstation identifier from environment.
+// Returns empty string if not set; caller should fall back to sessions.WorkstationID().
+func GetWorkstationID() string {
+	return strings.TrimSpace(os.Getenv("WORKSTATION_ID"))
 }
 
 // GetEmbeddingDimensions returns the embedding vector dimensions for external providers.

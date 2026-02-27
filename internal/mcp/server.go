@@ -16,6 +16,7 @@ import (
 	"github.com/lukaszraczylo/claude-mnemonic/internal/maintenance"
 	"github.com/lukaszraczylo/claude-mnemonic/internal/scoring"
 	"github.com/lukaszraczylo/claude-mnemonic/internal/search"
+	"github.com/lukaszraczylo/claude-mnemonic/internal/sessions"
 	"github.com/lukaszraczylo/claude-mnemonic/internal/vector"
 	"github.com/lukaszraczylo/claude-mnemonic/pkg/models"
 	"github.com/rs/zerolog/log"
@@ -36,6 +37,7 @@ type Server struct {
 	recalculator       *scoring.Recalculator
 	maintenanceService *maintenance.Service
 	collectionRegistry *collections.Registry
+	sessionIdxStore    *sessions.Store
 	version            string
 }
 
@@ -52,6 +54,7 @@ func NewServer(
 	recalculator *scoring.Recalculator,
 	maintenanceService *maintenance.Service,
 	collectionRegistry *collections.Registry,
+	sessionIdxStore *sessions.Store,
 ) *Server {
 	return &Server{
 		searchMgr:          searchMgr,
@@ -67,6 +70,7 @@ func NewServer(
 		recalculator:       recalculator,
 		maintenanceService: maintenanceService,
 		collectionRegistry: collectionRegistry,
+		sessionIdxStore:    sessionIdxStore,
 	}
 }
 
@@ -748,6 +752,31 @@ func (s *Server) handleToolsList(req *Request) *Response {
 				},
 			},
 		},
+		{
+			Name:        "search_sessions",
+			Description: "Full-text search across indexed Claude Code sessions.",
+			InputSchema: map[string]any{
+				"type":     "object",
+				"required": []string{"query"},
+				"properties": map[string]any{
+					"query": map[string]any{"type": "string", "description": "Search query for session content"},
+					"limit": map[string]any{"type": "number", "default": 10, "minimum": 1, "maximum": 50},
+				},
+			},
+		},
+		{
+			Name:        "list_sessions",
+			Description: "List indexed Claude Code sessions with optional workstation/project filters.",
+			InputSchema: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"workstation_id": map[string]any{"type": "string", "description": "Filter by workstation ID"},
+					"project_id":     map[string]any{"type": "string", "description": "Filter by project ID"},
+					"limit":          map[string]any{"type": "number", "default": 20, "minimum": 1, "maximum": 100},
+					"offset":         map[string]any{"type": "number", "default": 0, "minimum": 0},
+				},
+			},
+		},
 	}
 
 	return &Response{
@@ -857,6 +886,10 @@ func (s *Server) callTool(ctx context.Context, name string, args json.RawMessage
 		return s.handleGetObservationScoringBreakdown(ctx, args)
 	case "analyze_observation_importance":
 		return s.handleAnalyzeObservationImportance(ctx, args)
+	case "search_sessions":
+		return s.handleSearchSessions(ctx, args)
+	case "list_sessions":
+		return s.handleListSessions(ctx, args)
 	}
 
 	// Original search-based tools
@@ -3318,4 +3351,134 @@ func (s *Server) handleAnalyzeObservationImportance(ctx context.Context, args js
 		return "", fmt.Errorf("marshal response: %w", err)
 	}
 	return string(output), nil
+}
+
+// handleSearchSessions handles full-text search across indexed sessions.
+func (s *Server) handleSearchSessions(ctx context.Context, args json.RawMessage) (string, error) {
+	if s.sessionIdxStore == nil {
+		return "", fmt.Errorf("session indexing not configured")
+	}
+
+	var params struct {
+		Query string `json:"query"`
+		Limit int    `json:"limit"`
+	}
+	if err := json.Unmarshal(args, &params); err != nil {
+		return "", fmt.Errorf("invalid arguments: %w", err)
+	}
+	if params.Query == "" {
+		return "", fmt.Errorf("query is required")
+	}
+	if params.Limit <= 0 {
+		params.Limit = 10
+	}
+
+	results, err := s.sessionIdxStore.SearchSessions(ctx, params.Query, params.Limit)
+	if err != nil {
+		return "", fmt.Errorf("search sessions: %w", err)
+	}
+
+	type sessionResult struct {
+		ID            string  `json:"id"`
+		WorkstationID string  `json:"workstation_id"`
+		ProjectPath   string  `json:"project_path,omitempty"`
+		ExchangeCount int     `json:"exchange_count"`
+		Rank          float64 `json:"rank"`
+		Snippet       string  `json:"snippet,omitempty"`
+	}
+
+	out := make([]sessionResult, 0, len(results))
+	for _, r := range results {
+		sr := sessionResult{
+			ID:            r.Session.ID,
+			WorkstationID: r.Session.WorkstationID,
+			ExchangeCount: r.Session.ExchangeCount,
+			Rank:          r.Rank,
+		}
+		if r.Session.ProjectPath.Valid {
+			sr.ProjectPath = r.Session.ProjectPath.String
+		}
+		if r.Session.Content.Valid && len(r.Session.Content.String) > 0 {
+			snippet := r.Session.Content.String
+			if len(snippet) > 200 {
+				snippet = snippet[:200]
+			}
+			sr.Snippet = snippet
+		}
+		out = append(out, sr)
+	}
+
+	data, err := json.Marshal(out)
+	if err != nil {
+		return "", fmt.Errorf("marshal results: %w", err)
+	}
+	return string(data), nil
+}
+
+// handleListSessions lists indexed Claude Code sessions.
+func (s *Server) handleListSessions(ctx context.Context, args json.RawMessage) (string, error) {
+	if s.sessionIdxStore == nil {
+		return "", fmt.Errorf("session indexing not configured")
+	}
+
+	var params struct {
+		WorkstationID string `json:"workstation_id"`
+		ProjectID     string `json:"project_id"`
+		Limit         int    `json:"limit"`
+		Offset        int    `json:"offset"`
+	}
+	if err := json.Unmarshal(args, &params); err != nil {
+		return "", fmt.Errorf("invalid arguments: %w", err)
+	}
+	if params.Limit <= 0 {
+		params.Limit = 20
+	}
+
+	opts := sessions.ListOptions{
+		WorkstationID: params.WorkstationID,
+		ProjectID:     params.ProjectID,
+		Limit:         params.Limit,
+		Offset:        params.Offset,
+	}
+
+	list, err := s.sessionIdxStore.ListSessions(ctx, opts)
+	if err != nil {
+		return "", fmt.Errorf("list sessions: %w", err)
+	}
+
+	type sessionItem struct {
+		ID            string `json:"id"`
+		WorkstationID string `json:"workstation_id"`
+		ProjectID     string `json:"project_id"`
+		ProjectPath   string `json:"project_path,omitempty"`
+		ExchangeCount int    `json:"exchange_count"`
+		GitBranch     string `json:"git_branch,omitempty"`
+		LastMsgAt     string `json:"last_msg_at,omitempty"`
+	}
+
+	out := make([]sessionItem, 0, len(list))
+	for _, sess := range list {
+		item := sessionItem{
+			ID:            sess.ID,
+			WorkstationID: sess.WorkstationID,
+			ProjectID:     sess.ProjectID,
+			ExchangeCount: sess.ExchangeCount,
+		}
+		if sess.ProjectPath.Valid {
+			item.ProjectPath = sess.ProjectPath.String
+		}
+		if sess.GitBranch.Valid {
+			item.GitBranch = sess.GitBranch.String
+		}
+		if sess.LastMsgAt.Valid {
+			item.LastMsgAt = sess.LastMsgAt.Time.UTC().Format(time.RFC3339)
+		}
+		out = append(out, item)
+	}
+
+	data, err := json.Marshal(out)
+	if err != nil {
+		return "", fmt.Errorf("marshal results: %w", err)
+	}
+	return string(data), nil
 }
