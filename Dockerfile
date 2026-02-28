@@ -15,6 +15,9 @@ RUN go mod download
 
 COPY . .
 
+# Download ONNX Runtime libraries for linux-amd64 (required for go:embed)
+RUN bash scripts/download-onnx-libs.sh linux-amd64
+
 # Build server binary (worker with integrated MCP SSE)
 RUN CGO_ENABLED=1 go build -tags fts5 -ldflags "-s -w" -o /out/engram-server ./cmd/worker
 
