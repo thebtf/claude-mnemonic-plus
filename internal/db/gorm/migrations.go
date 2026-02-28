@@ -720,14 +720,9 @@ func runMigrations(db *gorm.DB, embeddingDims int) error {
 
 				log.Warn().Msgf("Embedding dimension changed from %d to %d, truncating vectors and content_chunks", current, embeddingDims)
 
-				// pgvector HNSW supports max 2000 dimensions; use IVFFlat for larger vectors.
-				vectorsIdx := "CREATE INDEX idx_vectors_embedding_hnsw ON vectors USING hnsw (embedding vector_cosine_ops) WITH (m = 16, ef_construction = 64)"
-				chunksIdx := "CREATE INDEX idx_content_chunks_embedding_hnsw ON content_chunks USING hnsw (embedding vector_cosine_ops) WITH (m = 16, ef_construction = 64)"
-				if embeddingDims > 2000 {
-					vectorsIdx = "CREATE INDEX idx_vectors_embedding_ivfflat ON vectors USING ivfflat (embedding vector_cosine_ops) WITH (lists = 100)"
-					chunksIdx = "CREATE INDEX idx_content_chunks_embedding_ivfflat ON content_chunks USING ivfflat (embedding vector_cosine_ops) WITH (lists = 100)"
-				}
-
+				// pgvector indexes (both HNSW and IVFFlat) support max 2000 dimensions.
+				// For >2000 dims, skip index creation — sequential scan is fine for
+				// typical Engram workloads (thousands of observations, not millions).
 				sqls := []string{
 					// Drop indexes BEFORE altering column type — PostgreSQL validates
 					// existing indexes against the new vector size during ALTER TABLE.
@@ -735,12 +730,16 @@ func runMigrations(db *gorm.DB, embeddingDims int) error {
 					"DROP INDEX IF EXISTS idx_vectors_embedding_ivfflat",
 					"TRUNCATE vectors",
 					fmt.Sprintf("ALTER TABLE vectors ALTER COLUMN embedding TYPE vector(%d)", embeddingDims),
-					vectorsIdx,
 					"DROP INDEX IF EXISTS idx_content_chunks_embedding_hnsw",
 					"DROP INDEX IF EXISTS idx_content_chunks_embedding_ivfflat",
 					"TRUNCATE content_chunks",
 					fmt.Sprintf("ALTER TABLE content_chunks ALTER COLUMN embedding TYPE vector(%d)", embeddingDims),
-					chunksIdx,
+				}
+				if embeddingDims <= 2000 {
+					sqls = append(sqls,
+						"CREATE INDEX idx_vectors_embedding_hnsw ON vectors USING hnsw (embedding vector_cosine_ops) WITH (m = 16, ef_construction = 64)",
+						"CREATE INDEX idx_content_chunks_embedding_hnsw ON content_chunks USING hnsw (embedding vector_cosine_ops) WITH (m = 16, ef_construction = 64)",
+					)
 				}
 				for _, s := range sqls {
 					if err := tx.Exec(s).Error; err != nil {
