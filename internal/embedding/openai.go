@@ -9,8 +9,10 @@ import (
 	"net/http"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
+	"github.com/rs/zerolog/log"
 	"github.com/thebtf/engram/internal/config"
 )
 
@@ -28,6 +30,7 @@ type openAIModel struct {
 	apiKey     string
 	modelName  string
 	dimensions int
+	dimWarnOnce sync.Once
 }
 
 type openAIEmbedRequest struct {
@@ -161,10 +164,24 @@ func (m *openAIModel) embedRequest(input interface{}) ([][]float32, error) {
 	results := make([][]float32, len(embedResp.Data))
 	for i, d := range embedResp.Data {
 		vec := d.Embedding
-		// Truncate if model ignores the dimensions parameter (MRL truncation).
-		if len(vec) > m.dimensions {
-			vec = vec[:m.dimensions]
-			// L2 normalize after truncation to preserve cosine similarity.
+		if len(vec) != m.dimensions {
+			m.dimWarnOnce.Do(func() {
+				log.Warn().
+					Int("model_dims", len(d.Embedding)).
+					Int("configured_dims", m.dimensions).
+					Str("model", m.modelName).
+					Msg("Embedding dimension mismatch — applying client-side truncation/padding with L2 normalization. Ensure model supports Matryoshka (MRL) for best quality.")
+			})
+			if len(vec) > m.dimensions {
+				// MRL truncation: cut to configured dimensions.
+				vec = vec[:m.dimensions]
+			} else {
+				// Pad with zeros if model returns fewer dimensions.
+				padded := make([]float32, m.dimensions)
+				copy(padded, vec)
+				vec = padded
+			}
+			// L2 normalize after any dimension change to preserve cosine similarity.
 			var norm float32
 			for _, v := range vec {
 				norm += v * v
@@ -175,10 +192,6 @@ func (m *openAIModel) embedRequest(input interface{}) ([][]float32, error) {
 					vec[j] /= norm
 				}
 			}
-		} else if len(vec) < m.dimensions {
-			padded := make([]float32, m.dimensions)
-			copy(padded, vec)
-			vec = padded
 		}
 		results[i] = vec
 	}
