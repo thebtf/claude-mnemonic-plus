@@ -132,7 +132,7 @@ Direct HTTP connection — no proxy binary needed, simplest setup.
 **Claude Code CLI:**
 
 ```bash
-claude mcp add engram --transport http --url http://your-server:37777/mcp \
+claude mcp add engram --transport http http://your-server:37777/mcp \
   --header "Authorization: Bearer your-api-token"
 ```
 
