@@ -83,20 +83,103 @@ DATABASE_DSN="postgres://user:pass@your-pg:5432/engram?sslmode=disable" \
   docker compose up -d server
 ```
 
-### 2. Install the Client
+### 2. Configure MCP
 
-#### Plugin Install (recommended)
+Engram server exposes three MCP transports on the same port:
+
+| Transport | Endpoint | Protocol | Best For |
+|-----------|----------|----------|----------|
+| **Streamable HTTP** | `POST /mcp` | JSON-RPC over HTTP | Direct connection (recommended) |
+| **SSE** | `GET /sse` + `POST /message` | Server-Sent Events | Long-lived streaming |
+| **Stdio Proxy** | local binary | stdio ↔ SSE bridge | Clients that only support stdio |
+
+#### Streamable HTTP (recommended)
+
+Direct HTTP connection — no proxy binary needed, simplest setup.
+
+**User scope** (`~/.claude/settings.json` — all projects):
+
+```json
+{
+  "mcpServers": {
+    "engram": {
+      "type": "url",
+      "url": "http://your-server:37777/mcp",
+      "headers": {
+        "Authorization": "Bearer your-api-token"
+      }
+    }
+  }
+}
+```
+
+**Project scope** (`.claude/settings.json` in project root — single project):
+
+```json
+{
+  "mcpServers": {
+    "engram": {
+      "type": "url",
+      "url": "http://your-server:37777/mcp",
+      "headers": {
+        "Authorization": "Bearer your-api-token"
+      }
+    }
+  }
+}
+```
+
+**Claude Code CLI:**
+
+```bash
+claude mcp add engram --transport http --url http://your-server:37777/mcp \
+  --header "Authorization: Bearer your-api-token"
+```
+
+Add `-s user` for user scope (default is project), `-s global` for global.
+
+#### SSE Transport
+
+Long-lived streaming connection. Use when you need server-initiated events.
+
+```json
+{
+  "mcpServers": {
+    "engram": {
+      "type": "url",
+      "url": "http://your-server:37777/sse",
+      "headers": {
+        "Authorization": "Bearer your-api-token"
+      }
+    }
+  }
+}
+```
+
+#### Stdio Proxy (legacy)
+
+For MCP clients that only support stdio transport. Requires the `mcp-stdio-proxy` binary.
+
+```json
+{
+  "mcpServers": {
+    "engram": {
+      "command": "/path/to/mcp-stdio-proxy",
+      "args": ["--url", "http://your-server:37777", "--token", "your-api-token"]
+    }
+  }
+}
+```
+
+### 3. Install Client Binaries (optional)
+
+Only needed if using the **stdio proxy** or **hooks**. Streamable HTTP / SSE transports work without any client-side binaries.
+
+#### Plugin Install
 
 ```
 /plugin marketplace add thebtf/engram-marketplace
 /plugin install engram
-```
-
-Set environment variables and restart Claude Code:
-
-```bash
-export ENGRAM_URL="http://your-server:37777/mcp"
-export ENGRAM_API_TOKEN="your-api-token"
 ```
 
 #### Script Install (macOS / Linux)
@@ -116,21 +199,6 @@ go build -tags fts5 -ldflags "-s -w" -o bin\hooks\session-start.exe .\cmd\hooks\
 go build -tags fts5 -ldflags "-s -w" -o bin\hooks\user-prompt.exe .\cmd\hooks\user-prompt
 go build -tags fts5 -ldflags "-s -w" -o bin\hooks\post-tool-use.exe .\cmd\hooks\post-tool-use
 go build -tags fts5 -ldflags "-s -w" -o bin\hooks\stop.exe .\cmd\hooks\stop
-```
-
-### 3. Configure MCP
-
-Add to `~/.claude/settings.json`:
-
-```json
-{
-  "mcpServers": {
-    "engram": {
-      "command": "/path/to/mcp-stdio-proxy",
-      "args": ["--url", "http://your-server:37777"]
-    }
-  }
-}
 ```
 
 ---
@@ -295,12 +363,12 @@ All server variables use the `ENGRAM_` prefix. Config file: `~/.engram/settings.
 | `EMBEDDING_DIMENSIONS` | `384` | Embedding vector dimensions |
 | `RERANKING_ENABLED` | `true` | Enable cross-encoder reranking |
 
-### Client
+### Client (hooks only)
+
+These variables are used by the client-side hooks, **not** for MCP transport configuration. MCP connection is configured in `settings.json` (see [Configure MCP](#2-configure-mcp) above).
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `ENGRAM_URL` | — | MCP endpoint (`http://server:37777/mcp`) |
-| `ENGRAM_API_TOKEN` | — | Must match server token |
 | `ENGRAM_WORKER_HOST` | `127.0.0.1` | Worker address for hooks |
 | `ENGRAM_WORKER_PORT` | `37777` | Worker port for hooks |
 | `ENGRAM_SESSIONS_DIR` | `~/.claude/projects/` | Session JSONL directory |
