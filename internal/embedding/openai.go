@@ -25,11 +25,12 @@ const (
 )
 
 type openAIModel struct {
-	client     *http.Client
-	baseURL    string
-	apiKey     string
-	modelName  string
-	dimensions int
+	client      *http.Client
+	baseURL     string
+	apiKey      string
+	modelName   string
+	dimensions  int
+	truncate    bool
 	dimWarnOnce sync.Once
 }
 
@@ -81,6 +82,7 @@ func newOpenAIModel() (EmbeddingModel, error) {
 		apiKey:     apiKey,
 		modelName:  modelName,
 		dimensions: dimensions,
+		truncate:   config.GetEmbeddingTruncate(),
 	}, nil
 }
 
@@ -165,23 +167,28 @@ func (m *openAIModel) embedRequest(input interface{}) ([][]float32, error) {
 	for i, d := range embedResp.Data {
 		vec := d.Embedding
 		if len(vec) != m.dimensions {
+			if !m.truncate {
+				return nil, fmt.Errorf(
+					"embedding dimension mismatch: model %q returned %d dimensions, but ENGRAM_EMBEDDING_DIMENSIONS=%d. "+
+						"Either set ENGRAM_EMBEDDING_DIMENSIONS=%d to match the model, or set ENGRAM_EMBEDDING_TRUNCATE=true "+
+						"to enable client-side MRL truncation (only safe for Matryoshka-trained models)",
+					m.modelName, len(vec), m.dimensions, len(vec))
+			}
 			m.dimWarnOnce.Do(func() {
 				log.Warn().
 					Int("model_dims", len(d.Embedding)).
 					Int("configured_dims", m.dimensions).
 					Str("model", m.modelName).
-					Msg("Embedding dimension mismatch — applying client-side truncation/padding with L2 normalization. Ensure model supports Matryoshka (MRL) for best quality.")
+					Msg("Embedding dimension mismatch — MRL truncation enabled, applying client-side truncation with L2 normalization")
 			})
 			if len(vec) > m.dimensions {
-				// MRL truncation: cut to configured dimensions.
 				vec = vec[:m.dimensions]
 			} else {
-				// Pad with zeros if model returns fewer dimensions.
 				padded := make([]float32, m.dimensions)
 				copy(padded, vec)
 				vec = padded
 			}
-			// L2 normalize after any dimension change to preserve cosine similarity.
+			// L2 normalize after dimension change to preserve cosine similarity.
 			var norm float32
 			for _, v := range vec {
 				norm += v * v

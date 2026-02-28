@@ -497,3 +497,12 @@ func GetEmbeddingDimensions() int {
 	}
 	return 1536
 }
+
+// GetEmbeddingTruncate returns whether client-side MRL truncation is enabled.
+// When true, vectors with more dimensions than configured are truncated and
+// L2-normalized. Requires a Matryoshka-trained model for quality preservation.
+// When false (default), a dimension mismatch causes an error (fail-fast).
+func GetEmbeddingTruncate() bool {
+	v := envFirstOf("ENGRAM_EMBEDDING_TRUNCATE", "EMBEDDING_TRUNCATE")
+	return v == "true" || v == "1" || v == "yes"
+}
