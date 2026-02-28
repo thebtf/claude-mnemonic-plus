@@ -729,15 +729,17 @@ func runMigrations(db *gorm.DB, embeddingDims int) error {
 				}
 
 				sqls := []string{
-					"TRUNCATE vectors",
-					fmt.Sprintf("ALTER TABLE vectors ALTER COLUMN embedding TYPE vector(%d)", embeddingDims),
+					// Drop indexes BEFORE altering column type — PostgreSQL validates
+					// existing indexes against the new vector size during ALTER TABLE.
 					"DROP INDEX IF EXISTS idx_vectors_embedding_hnsw",
 					"DROP INDEX IF EXISTS idx_vectors_embedding_ivfflat",
+					"TRUNCATE vectors",
+					fmt.Sprintf("ALTER TABLE vectors ALTER COLUMN embedding TYPE vector(%d)", embeddingDims),
 					vectorsIdx,
-					"TRUNCATE content_chunks",
-					fmt.Sprintf("ALTER TABLE content_chunks ALTER COLUMN embedding TYPE vector(%d)", embeddingDims),
 					"DROP INDEX IF EXISTS idx_content_chunks_embedding_hnsw",
 					"DROP INDEX IF EXISTS idx_content_chunks_embedding_ivfflat",
+					"TRUNCATE content_chunks",
+					fmt.Sprintf("ALTER TABLE content_chunks ALTER COLUMN embedding TYPE vector(%d)", embeddingDims),
 					chunksIdx,
 				}
 				for _, s := range sqls {
