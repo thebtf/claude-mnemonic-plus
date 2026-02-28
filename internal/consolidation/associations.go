@@ -8,10 +8,14 @@ import (
 	"strings"
 	"time"
 
-	"github.com/thebtf/engram/internal/embedding"
 	"github.com/thebtf/engram/pkg/models"
 	"github.com/rs/zerolog"
 )
+
+// Embedder produces a vector embedding for the given text.
+type Embedder interface {
+	Embed(text string) ([]float32, error)
+}
 
 // AssociationConfig contains parameters for creative association discovery.
 type AssociationConfig struct {
@@ -46,13 +50,13 @@ func DefaultAssociationConfig() AssociationConfig {
 
 // AssociationEngine discovers creative associations between observations.
 type AssociationEngine struct {
-	embedSvc *embedding.Service
+	embedSvc Embedder
 	config   AssociationConfig
 	logger   zerolog.Logger
 }
 
 // NewAssociationEngine creates a new association discovery engine.
-func NewAssociationEngine(embedSvc *embedding.Service, config AssociationConfig, logger zerolog.Logger) *AssociationEngine {
+func NewAssociationEngine(embedSvc Embedder, config AssociationConfig, logger zerolog.Logger) *AssociationEngine {
 	return &AssociationEngine{
 		embedSvc: embedSvc,
 		config:   config,

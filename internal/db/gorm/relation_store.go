@@ -223,6 +223,11 @@ func (s *RelationStore) GetRelationGraph(ctx context.Context, centerID int64, ma
 		Relations: relations,
 	}
 
+	seenRelationIDs := make(map[int64]bool, len(relations))
+	for _, relation := range relations {
+		seenRelationIDs[relation.Relation.ID] = true
+	}
+
 	// If depth > 1, recursively get relations for connected observations
 	if maxDepth > 1 {
 		visited := map[int64]bool{centerID: true}
@@ -250,16 +255,11 @@ func (s *RelationStore) GetRelationGraph(ctx context.Context, centerID int64, ma
 				}
 				for _, r := range moreRelations {
 					// Avoid duplicates
-					exists := false
-					for _, existing := range graph.Relations {
-						if existing.Relation.ID == r.Relation.ID {
-							exists = true
-							break
-						}
+					if seenRelationIDs[r.Relation.ID] {
+						continue
 					}
-					if !exists {
-						graph.Relations = append(graph.Relations, r)
-					}
+					graph.Relations = append(graph.Relations, r)
+					seenRelationIDs[r.Relation.ID] = true
 
 					// Queue next level
 					if !visited[r.Relation.SourceID] {
@@ -298,6 +298,58 @@ func (s *RelationStore) GetRelationCount(ctx context.Context, obsID int64) (int,
 		Count(&count).Error
 
 	return int(count), err
+}
+
+// GetRelationCountsBatch returns relation counts for the requested observations.
+func (s *RelationStore) GetRelationCountsBatch(ctx context.Context, obsIDs []int64) (map[int64]int, error) {
+	counts := make(map[int64]int, len(obsIDs))
+	if len(obsIDs) == 0 {
+		return counts, nil
+	}
+
+	var rows []struct {
+		ObsID int64 `gorm:"column:obs_id"`
+		Cnt   int64 `gorm:"column:cnt"`
+	}
+
+	err := s.db.WithContext(ctx).
+		Raw("SELECT obs_id, COUNT(*) AS cnt FROM (SELECT source_id AS obs_id FROM observation_relations WHERE source_id IN (?) UNION ALL SELECT target_id AS obs_id FROM observation_relations WHERE target_id IN (?)) t GROUP BY obs_id", obsIDs, obsIDs).
+		Scan(&rows).Error
+	if err != nil {
+		return nil, err
+	}
+
+	for _, row := range rows {
+		counts[row.ObsID] = int(row.Cnt)
+	}
+
+	return counts, nil
+}
+
+// GetAvgConfidenceBatch returns average confidence for the requested observations.
+func (s *RelationStore) GetAvgConfidenceBatch(ctx context.Context, obsIDs []int64) (map[int64]float64, error) {
+	avgConfidence := make(map[int64]float64, len(obsIDs))
+	if len(obsIDs) == 0 {
+		return avgConfidence, nil
+	}
+
+	var rows []struct {
+		ObsID   int64   `gorm:"column:obs_id"`
+		AvgConf float64 `gorm:"column:avg_conf"`
+	}
+
+	err := s.db.WithContext(ctx).
+		Raw("SELECT obs_id, AVG(confidence) AS avg_conf FROM (SELECT source_id AS obs_id, confidence FROM observation_relations WHERE source_id IN (?) UNION ALL SELECT target_id AS obs_id, confidence FROM observation_relations WHERE target_id IN (?)) t GROUP BY obs_id", obsIDs, obsIDs).
+		Scan(&rows).Error
+	if err != nil {
+		return nil, err
+	}
+
+	for _, row := range rows {
+		avgConfidence[row.ObsID] = row.AvgConf
+	}
+
+	return avgConfidence, nil
 }
 
 // GetTotalRelationCount returns the total count of all relations.

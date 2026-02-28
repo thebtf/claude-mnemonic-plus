@@ -2,16 +2,16 @@ package consolidation
 
 import (
 	"context"
-	"errors"
 	"database/sql"
+	"errors"
 	"testing"
 	"time"
 
-	"github.com/thebtf/engram/internal/scoring"
-	"github.com/thebtf/engram/pkg/models"
 	"github.com/rs/zerolog"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/suite"
+	"github.com/thebtf/engram/internal/scoring"
+	"github.com/thebtf/engram/pkg/models"
 )
 
 // SchedulerSuite validates scheduler lifecycle operations.
@@ -29,12 +29,14 @@ func (s *SchedulerSuite) SetupTest() {
 }
 
 type mockObservationStore struct {
-	getAllFn              func(context.Context) ([]*models.Observation, error)
-	getRecentFn           func(context.Context, string, int) ([]*models.Observation, error)
-	updateImportanceFn    func(context.Context, map[int64]float64) error
-	archiveObservationFn  func(context.Context, int64, string) error
+	getAllFn             func(context.Context) ([]*models.Observation, error)
+	getAllIteratorFn     func(context.Context, int, func([]*models.Observation) bool) error
+	getRecentFn          func(context.Context, string, int) ([]*models.Observation, error)
+	updateImportanceFn   func(context.Context, map[int64]float64) error
+	archiveObservationFn func(context.Context, int64, string) error
 
 	getAllCalled            int
+	getAllIteratorCalled    int
 	getRecentCalled         int
 	updateImportanceCalled  int
 	archiveObservationCalls int
@@ -46,6 +48,30 @@ func (m *mockObservationStore) GetAllObservations(ctx context.Context) ([]*model
 		return []*models.Observation{}, nil
 	}
 	return m.getAllFn(ctx)
+}
+
+func (m *mockObservationStore) GetAllObservationsIterator(ctx context.Context, batchSize int, callback func([]*models.Observation) bool) error {
+	m.getAllIteratorCalled++
+
+	if m.getAllIteratorFn != nil {
+		return m.getAllIteratorFn(ctx, batchSize, callback)
+	}
+
+	// Fallback: use getAllFn directly to avoid incrementing getAllCalled
+	var observations []*models.Observation
+	var err error
+	if m.getAllFn != nil {
+		observations, err = m.getAllFn(ctx)
+	}
+	if err != nil {
+		return err
+	}
+
+	if len(observations) == 0 || callback == nil {
+		return nil
+	}
+	callback(observations)
+	return nil
 }
 
 func (m *mockObservationStore) GetRecentObservations(ctx context.Context, project string, limit int) ([]*models.Observation, error) {
@@ -73,13 +99,17 @@ func (m *mockObservationStore) ArchiveObservation(ctx context.Context, id int64,
 }
 
 type mockRelationStore struct {
-	getRelationsByIDFn func(context.Context, int64) ([]*models.ObservationRelation, error)
-	storeRelationFn    func(context.Context, *models.ObservationRelation) (int64, error)
-	getRelationCountFn func(context.Context, int64) (int, error)
+	getRelationsByIDFn       func(context.Context, int64) ([]*models.ObservationRelation, error)
+	storeRelationFn          func(context.Context, *models.ObservationRelation) (int64, error)
+	getRelationCountFn       func(context.Context, int64) (int, error)
+	getRelationCountsBatchFn func(context.Context, []int64) (map[int64]int, error)
+	getAvgConfidenceBatchFn  func(context.Context, []int64) (map[int64]float64, error)
 
-	getRelationsByIDCalled int
-	storeRelationCalled    int
-	getRelationCountCalled int
+	getRelationsByIDCalled       int
+	storeRelationCalled          int
+	getRelationCountCalled       int
+	getRelationCountsBatchCalled int
+	getAvgConfidenceBatchCalled  int
 }
 
 func (m *mockRelationStore) GetRelationsByObservationID(ctx context.Context, obsID int64) ([]*models.ObservationRelation, error) {
@@ -104,6 +134,22 @@ func (m *mockRelationStore) GetRelationCount(ctx context.Context, obsID int64) (
 		return 0, nil
 	}
 	return m.getRelationCountFn(ctx, obsID)
+}
+
+func (m *mockRelationStore) GetRelationCountsBatch(ctx context.Context, obsIDs []int64) (map[int64]int, error) {
+	m.getRelationCountsBatchCalled++
+	if m.getRelationCountsBatchFn == nil {
+		return map[int64]int{}, nil
+	}
+	return m.getRelationCountsBatchFn(ctx, obsIDs)
+}
+
+func (m *mockRelationStore) GetAvgConfidenceBatch(ctx context.Context, obsIDs []int64) (map[int64]float64, error) {
+	m.getAvgConfidenceBatchCalled++
+	if m.getAvgConfidenceBatchFn == nil {
+		return map[int64]float64{}, nil
+	}
+	return m.getAvgConfidenceBatchFn(ctx, obsIDs)
 }
 
 func (s *SchedulerSuite) TestDefaultSchedulerConfigValues() {
@@ -133,7 +179,8 @@ func (s *SchedulerSuite) TestRunDecay_EmptyObservationsReturnsNil() {
 	err := scheduler.RunDecay(s.ctx)
 	assert.NoError(s.T(), err)
 	assert.Equal(s.T(), 0, obsStore.updateImportanceCalled)
-	assert.Equal(s.T(), 1, obsStore.getAllCalled)
+	assert.Equal(s.T(), 0, obsStore.getAllCalled)
+	assert.Equal(s.T(), 1, obsStore.getAllIteratorCalled)
 }
 
 func (s *SchedulerSuite) TestRunDecay_PropagatesGetAllError() {
@@ -155,18 +202,19 @@ func (s *SchedulerSuite) TestRunDecay_PropagatesGetAllError() {
 	err := scheduler.RunDecay(s.ctx)
 	assert.Error(s.T(), err)
 	assert.Equal(s.T(), "load failed", err.Error())
-	assert.Equal(s.T(), 1, obsStore.getAllCalled)
+	assert.Equal(s.T(), 0, obsStore.getAllCalled)
+	assert.Equal(s.T(), 1, obsStore.getAllIteratorCalled)
 	assert.Equal(s.T(), 0, obsStore.updateImportanceCalled)
 }
 
 func (s *SchedulerSuite) TestRunDecay_StoresRelevanceForSingleObservation() {
 	obsStore := &mockObservationStore{}
 	relStore := &mockRelationStore{
-		getRelationCountFn: func(context.Context, int64) (int, error) {
-			return 0, nil
+		getRelationCountsBatchFn: func(context.Context, []int64) (map[int64]int, error) {
+			return map[int64]int{42: 0}, nil
 		},
-		getRelationsByIDFn: func(context.Context, int64) ([]*models.ObservationRelation, error) {
-			return []*models.ObservationRelation{}, nil
+		getAvgConfidenceBatchFn: func(context.Context, []int64) (map[int64]float64, error) {
+			return map[int64]float64{}, nil
 		},
 	}
 
@@ -180,9 +228,9 @@ func (s *SchedulerSuite) TestRunDecay_StoresRelevanceForSingleObservation() {
 
 	obs := &models.Observation{
 		ID:              42,
-		CreatedAtEpoch:   time.Now().Add(-48 * time.Hour).UnixMilli(),
-		ImportanceScore:  0.2,
-		LastRetrievedAt:  sql.NullInt64{Valid: false},
+		CreatedAtEpoch:  time.Now().Add(-48 * time.Hour).UnixMilli(),
+		ImportanceScore: 0.2,
+		LastRetrievedAt: sql.NullInt64{Valid: false},
 		Type:            models.ObsTypeDiscovery,
 	}
 	obsStore.getAllFn = func(context.Context) ([]*models.Observation, error) {
@@ -200,10 +248,13 @@ func (s *SchedulerSuite) TestRunDecay_StoresRelevanceForSingleObservation() {
 
 	err := scheduler.RunDecay(s.ctx)
 	assert.NoError(s.T(), err)
-	assert.Equal(s.T(), 1, obsStore.getAllCalled)
+	assert.Equal(s.T(), 0, obsStore.getAllCalled)
+	assert.Equal(s.T(), 1, obsStore.getAllIteratorCalled)
 	assert.Equal(s.T(), 1, obsStore.updateImportanceCalled)
-	assert.Equal(s.T(), 1, relStore.getRelationCountCalled)
-	assert.Equal(s.T(), 1, relStore.getRelationsByIDCalled)
+	assert.Equal(s.T(), 0, relStore.getRelationCountCalled)
+	assert.Equal(s.T(), 0, relStore.getRelationsByIDCalled)
+	assert.Equal(s.T(), 1, relStore.getRelationCountsBatchCalled)
+	assert.Equal(s.T(), 1, relStore.getAvgConfidenceBatchCalled)
 
 	expected := 0.6 * (0.5 + obs.ImportanceScore) * 0.85
 	assert.InDelta(s.T(), expected, captured[obs.ID], 1e-12)
@@ -230,6 +281,7 @@ func (s *SchedulerSuite) TestRunForgetting_DisabledNoChanges() {
 	assert.NoError(s.T(), err)
 	assert.Equal(s.T(), 0, obsStore.archiveObservationCalls)
 	assert.Equal(s.T(), 0, obsStore.getAllCalled)
+	assert.Equal(s.T(), 0, obsStore.getAllIteratorCalled)
 }
 
 func (s *SchedulerSuite) TestRunForgetting_DoesNotArchiveProtectedObservations() {
@@ -239,24 +291,24 @@ func (s *SchedulerSuite) TestRunForgetting_DoesNotArchiveProtectedObservations()
 	}{
 		{
 			name: "high importance protected",
-			obs: &models.Observation{ID: 1, ImportanceScore: 0.9, CreatedAtEpoch: time.Now().Add(-100 * 24 * time.Hour).UnixMilli(), Type: models.ObsTypeFeature},
+			obs:  &models.Observation{ID: 1, ImportanceScore: 0.9, CreatedAtEpoch: time.Now().Add(-100 * 24 * time.Hour).UnixMilli(), Type: models.ObsTypeFeature},
 		},
 		{
 			name: "young age protected",
-			obs: &models.Observation{ID: 2, ImportanceScore: 0.1, CreatedAtEpoch: time.Now().Add(-30 * 24 * time.Hour).UnixMilli(), Type: models.ObsTypeFeature},
+			obs:  &models.Observation{ID: 2, ImportanceScore: 0.1, CreatedAtEpoch: time.Now().Add(-30 * 24 * time.Hour).UnixMilli(), Type: models.ObsTypeFeature},
 		},
 		{
 			name: "decision type protected",
-			obs: &models.Observation{ID: 3, ImportanceScore: 0.1, CreatedAtEpoch: time.Now().Add(-100 * 24 * time.Hour).UnixMilli(), Type: models.ObsTypeDecision},
+			obs:  &models.Observation{ID: 3, ImportanceScore: 0.1, CreatedAtEpoch: time.Now().Add(-100 * 24 * time.Hour).UnixMilli(), Type: models.ObsTypeDecision},
 		},
 	}
 
 	for _, tt := range tests {
 		s.Run(tt.name, func() {
-			scheduler := newSchedulerForForgetting(tt.obs)
+			scheduler, obsStore := newSchedulerForForgetting(tt.obs)
 			err := scheduler.RunForgetting(s.ctx)
 			assert.NoError(s.T(), err)
-			assert.Equal(s.T(), 0, scheduler.obsStore.archiveObservationCalls)
+			assert.Equal(s.T(), 0, obsStore.archiveObservationCalls)
 		})
 	}
 }
@@ -267,12 +319,12 @@ func (s *SchedulerSuite) TestRunForgetting_ArchivesLowScoreObservation() {
 	recorded := struct {
 		calls  int
 		reason string
-		id    int64
+		id     int64
 	}{}
 
 	obs := &models.Observation{
-		ID:             obsID,
-		Type:           models.ObsTypeFeature,
+		ID:              obsID,
+		Type:            models.ObsTypeFeature,
 		ImportanceScore: 0.01,
 		CreatedAtEpoch:  time.Now().Add(-200 * 24 * time.Hour).UnixMilli(),
 	}
@@ -331,7 +383,7 @@ func scoreCalculatorWithZeroDecay() *scoring.RelevanceCalculator {
 	return scoring.NewRelevanceCalculator(cfg)
 }
 
-func newSchedulerForForgetting(obs *models.Observation) *Scheduler {
+func newSchedulerForForgetting(obs *models.Observation) (*Scheduler, *mockObservationStore) {
 	obsStore := &mockObservationStore{
 		getAllFn: func(context.Context) ([]*models.Observation, error) {
 			return []*models.Observation{obs}, nil
@@ -342,5 +394,5 @@ func newSchedulerForForgetting(obs *models.Observation) *Scheduler {
 	cfg.ForgetEnabled = true
 	cfg.ForgetThreshold = 0.4
 	cfg.Project = "project"
-	return NewScheduler(scoreCalculatorWithZeroDecay(), nil, obsStore, relStore, cfg, zerolog.Nop())
+	return NewScheduler(scoreCalculatorWithZeroDecay(), nil, obsStore, relStore, cfg, zerolog.Nop()), obsStore
 }

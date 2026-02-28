@@ -304,3 +304,104 @@ func TestRelationStore_DeleteRelationsByObservationID(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, 1, total)
 }
+
+func TestRelationStore_GetRelationCountsBatch(t *testing.T) {
+	relationStore, _, cleanup := testRelationStore(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	now := time.Now()
+
+	relations := []*models.ObservationRelation{
+		{
+			SourceID:        1,
+			TargetID:        2,
+			RelationType:    models.RelationCauses,
+			Confidence:      0.4,
+			DetectionSource: models.DetectionSourceFileOverlap,
+			CreatedAt:       now.Format(time.RFC3339),
+			CreatedAtEpoch:  now.UnixMilli(),
+		},
+		{
+			SourceID:        2,
+			TargetID:        3,
+			RelationType:    models.RelationCauses,
+			Confidence:      0.8,
+			DetectionSource: models.DetectionSourceTemporalProximity,
+			CreatedAt:       now.Format(time.RFC3339),
+			CreatedAtEpoch:  now.UnixMilli(),
+		},
+		{
+			SourceID:        2,
+			TargetID:        4,
+			RelationType:    models.RelationFixes,
+			Confidence:      0.6,
+			DetectionSource: models.DetectionSourceConceptOverlap,
+			CreatedAt:       now.Format(time.RFC3339),
+			CreatedAtEpoch:  now.UnixMilli(),
+		},
+		{
+			SourceID:        5,
+			TargetID:        2,
+			RelationType:    models.RelationRelatesTo,
+			Confidence:      0.9,
+			DetectionSource: models.DetectionSourceFileStructure,
+			CreatedAt:       now.Format(time.RFC3339),
+			CreatedAtEpoch:  now.UnixMilli(),
+		},
+	}
+
+	err := relationStore.StoreRelations(ctx, relations)
+	require.NoError(t, err)
+
+	counts, err := relationStore.GetRelationCountsBatch(ctx, []int64{2, 3})
+	require.NoError(t, err)
+	assert.Equal(t, 3, counts[2])
+	assert.Equal(t, 1, counts[3])
+}
+
+func TestRelationStore_GetAvgConfidenceBatch(t *testing.T) {
+	relationStore, _, cleanup := testRelationStore(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	now := time.Now()
+
+	relations := []*models.ObservationRelation{
+		{
+			SourceID:        1,
+			TargetID:        2,
+			RelationType:    models.RelationCauses,
+			Confidence:      0.5,
+			DetectionSource: models.DetectionSourceFileOverlap,
+			CreatedAt:       now.Format(time.RFC3339),
+			CreatedAtEpoch:  now.UnixMilli(),
+		},
+		{
+			SourceID:        2,
+			TargetID:        3,
+			RelationType:    models.RelationCauses,
+			Confidence:      0.7,
+			DetectionSource: models.DetectionSourceTemporalProximity,
+			CreatedAt:       now.Format(time.RFC3339),
+			CreatedAtEpoch:  now.UnixMilli(),
+		},
+		{
+			SourceID:        2,
+			TargetID:        4,
+			RelationType:    models.RelationFixes,
+			Confidence:      0.9,
+			DetectionSource: models.DetectionSourceConceptOverlap,
+			CreatedAt:       now.Format(time.RFC3339),
+			CreatedAtEpoch:  now.UnixMilli(),
+		},
+	}
+
+	err := relationStore.StoreRelations(ctx, relations)
+	require.NoError(t, err)
+
+	avg, err := relationStore.GetAvgConfidenceBatch(ctx, []int64{2, 4})
+	require.NoError(t, err)
+	assert.InDelta(t, (0.5+0.7+0.9)/3, avg[2], 1e-9)
+	assert.InDelta(t, 0.9, avg[4], 1e-9)
+}

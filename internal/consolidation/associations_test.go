@@ -202,8 +202,8 @@ func (s *AssociationsSuite) TestSampleObservations_Behavior() {
 		s.Run(tc.name, func() {
 			result := sampleObservations(all, tc.n)
 			assert.Len(s.T(), result, tc.expectedN)
-			if tc.shouldSame {
-				assert.Same(s.T(), all, result)
+			if tc.shouldSame && len(result) > 0 {
+				assert.True(s.T(), &all[0] == &result[0], "expected same backing array")
 			}
 
 			seen := map[int64]bool{}

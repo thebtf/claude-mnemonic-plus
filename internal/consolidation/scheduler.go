@@ -5,14 +5,15 @@ import (
 	"context"
 	"time"
 
+	"github.com/rs/zerolog"
 	"github.com/thebtf/engram/internal/scoring"
 	"github.com/thebtf/engram/pkg/models"
-	"github.com/rs/zerolog"
 )
 
 // ObservationProvider is the subset of observation store methods needed by the scheduler.
 type ObservationProvider interface {
 	GetAllObservations(ctx context.Context) ([]*models.Observation, error)
+	GetAllObservationsIterator(ctx context.Context, batchSize int, callback func([]*models.Observation) bool) error
 	GetRecentObservations(ctx context.Context, project string, limit int) ([]*models.Observation, error)
 	UpdateImportanceScores(ctx context.Context, scores map[int64]float64) error
 	ArchiveObservation(ctx context.Context, id int64, reason string) error
@@ -23,6 +24,8 @@ type RelationProvider interface {
 	GetRelationsByObservationID(ctx context.Context, obsID int64) ([]*models.ObservationRelation, error)
 	StoreRelation(ctx context.Context, relation *models.ObservationRelation) (int64, error)
 	GetRelationCount(ctx context.Context, obsID int64) (int, error)
+	GetRelationCountsBatch(ctx context.Context, obsIDs []int64) (map[int64]int, error)
+	GetAvgConfidenceBatch(ctx context.Context, obsIDs []int64) (map[int64]float64, error)
 }
 
 // SchedulerConfig contains scheduling intervals and thresholds.
@@ -142,59 +145,85 @@ func (s *Scheduler) Stop() {
 func (s *Scheduler) RunDecay(ctx context.Context) error {
 	start := time.Now()
 
-	observations, err := s.obsStore.GetAllObservations(ctx)
-	if err != nil {
-		return err
-	}
+	scores := make(map[int64]float64)
+	var iterErr error
 
-	if len(observations) == 0 {
-		return nil
-	}
-
-	now := time.Now()
-	scores := make(map[int64]float64, len(observations))
-
-	for _, obs := range observations {
-		ageDays := now.Sub(time.UnixMilli(obs.CreatedAtEpoch)).Hours() / 24.0
-		if ageDays < 0 {
-			ageDays = 0
+	iterationErr := s.obsStore.GetAllObservationsIterator(ctx, 500, func(observations []*models.Observation) bool {
+		if ctx.Err() != nil {
+			iterErr = ctx.Err()
+			return false
 		}
 
-		// Compute access recency
-		accessRecencyDays := ageDays // default: same as age if never accessed
-		if obs.LastRetrievedAt.Valid && obs.LastRetrievedAt.Int64 > 0 {
-			accessRecencyDays = now.Sub(time.UnixMilli(obs.LastRetrievedAt.Int64)).Hours() / 24.0
-			if accessRecencyDays < 0 {
-				accessRecencyDays = 0
-			}
+		if len(observations) == 0 {
+			return true
 		}
 
-		// Get relation count
-		relCount, err := s.relStore.GetRelationCount(ctx, obs.ID)
+		ids := make([]int64, 0, len(observations))
+		for _, obs := range observations {
+			ids = append(ids, obs.ID)
+		}
+
+		relCounts, err := s.relStore.GetRelationCountsBatch(ctx, ids)
 		if err != nil {
-			relCount = 0
+			iterErr = err
+			return false
 		}
 
-		// Get average confidence
-		avgConf := 0.5
-		rels, err := s.relStore.GetRelationsByObservationID(ctx, obs.ID)
-		if err == nil && len(rels) > 0 {
-			totalConf := 0.0
-			for _, r := range rels {
-				totalConf += r.Confidence
+		avgConfs, err := s.relStore.GetAvgConfidenceBatch(ctx, ids)
+		if err != nil {
+			iterErr = err
+			return false
+		}
+
+		now := time.Now()
+		for _, obs := range observations {
+			ageDays := now.Sub(time.UnixMilli(obs.CreatedAtEpoch)).Hours() / 24.0
+			if ageDays < 0 {
+				ageDays = 0
 			}
-			avgConf = totalConf / float64(len(rels))
+
+			accessRecencyDays := ageDays
+			if obs.LastRetrievedAt.Valid && obs.LastRetrievedAt.Int64 > 0 {
+				accessRecencyDays = now.Sub(time.UnixMilli(obs.LastRetrievedAt.Int64)).Hours() / 24.0
+				if accessRecencyDays < 0 {
+					accessRecencyDays = 0
+				}
+			}
+
+			relCount := 0
+			if value, ok := relCounts[obs.ID]; ok {
+				relCount = value
+			}
+
+			avgConf := 0.5
+			if value, ok := avgConfs[obs.ID]; ok {
+				avgConf = value
+			}
+
+			relevance := s.relevanceCalc.CalculateRelevance(scoring.RelevanceParams{
+				AgeDays:           ageDays,
+				AccessRecencyDays: accessRecencyDays,
+				RelationCount:     relCount,
+				ImportanceScore:   obs.ImportanceScore,
+				AvgRelConfidence:  avgConf,
+			})
+
+			scores[obs.ID] = relevance
 		}
 
-		relevance := s.relevanceCalc.CalculateRelevance(scoring.RelevanceParams{
-			AgeDays:           ageDays,
-			AccessRecencyDays: accessRecencyDays,
-			RelationCount:     relCount,
-			ImportanceScore:   obs.ImportanceScore,
-			AvgRelConfidence:  avgConf,
-		})
+		return true
+	})
 
-		scores[obs.ID] = relevance
+	if iterationErr != nil {
+		return iterationErr
+	}
+
+	if iterErr != nil {
+		return iterErr
+	}
+
+	if len(scores) == 0 {
+		return nil
 	}
 
 	if err := s.obsStore.UpdateImportanceScores(ctx, scores); err != nil {
@@ -269,49 +298,54 @@ func (s *Scheduler) RunForgetting(ctx context.Context) error {
 
 	start := time.Now()
 
-	observations, err := s.obsStore.GetAllObservations(ctx)
+	archived := 0
+
+	err := s.obsStore.GetAllObservationsIterator(ctx, 500, func(observations []*models.Observation) bool {
+		if ctx.Err() != nil {
+			return false
+		}
+
+		now := time.Now()
+		for _, obs := range observations {
+			if obs == nil {
+				continue
+			}
+
+			// Protection rule: high importance
+			if obs.ImportanceScore >= 0.7 {
+				continue
+			}
+
+			// Protection rule: age < 90 days
+			ageDays := now.Sub(time.UnixMilli(obs.CreatedAtEpoch)).Hours() / 24.0
+			if ageDays < 90 {
+				continue
+			}
+
+			// Protection rule: important types
+			if obs.Type == models.ObsTypeDecision || obs.Type == models.ObsTypeDiscovery {
+				continue
+			}
+
+			// Check if below threshold (using importance_score as proxy for relevance)
+			if obs.ImportanceScore >= s.config.ForgetThreshold {
+				continue
+			}
+
+			if err := s.obsStore.ArchiveObservation(ctx, obs.ID, "consolidation: below relevance threshold"); err != nil {
+				s.logger.Warn().Err(err).Int64("obs_id", obs.ID).Msg("Failed to archive observation")
+				continue
+			}
+			archived++
+		}
+
+		return true
+	})
 	if err != nil {
 		return err
 	}
 
-	now := time.Now()
-	archived := 0
-
-	for _, obs := range observations {
-		if ctx.Err() != nil {
-			break
-		}
-
-		// Protection rule: high importance
-		if obs.ImportanceScore >= 0.7 {
-			continue
-		}
-
-		// Protection rule: age < 90 days
-		ageDays := now.Sub(time.UnixMilli(obs.CreatedAtEpoch)).Hours() / 24.0
-		if ageDays < 90 {
-			continue
-		}
-
-		// Protection rule: important types
-		if obs.Type == models.ObsTypeDecision || obs.Type == models.ObsTypeDiscovery {
-			continue
-		}
-
-		// Check if below threshold (using importance_score as proxy for relevance)
-		if obs.ImportanceScore >= s.config.ForgetThreshold {
-			continue
-		}
-
-		if err := s.obsStore.ArchiveObservation(ctx, obs.ID, "consolidation: below relevance threshold"); err != nil {
-			s.logger.Warn().Err(err).Int64("obs_id", obs.ID).Msg("Failed to archive observation")
-			continue
-		}
-		archived++
-	}
-
 	s.logger.Info().
-		Int("total", len(observations)).
 		Int("archived", archived).
 		Dur("elapsed", time.Since(start)).
 		Msg("Forgetting cycle complete")
