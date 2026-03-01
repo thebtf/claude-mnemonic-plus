@@ -1,9 +1,9 @@
 ---
-name: using-engram
+name: engram-memory
 description: Use when starting a session with Engram MCP tools available, when needing to recall past decisions or patterns, or when searching for knowledge captured across previous coding sessions
 ---
 
-# Using Engram
+# Engram Memory
 
 ## Overview
 

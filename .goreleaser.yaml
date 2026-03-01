@@ -269,6 +269,11 @@ archives:
       - src: plugin/commands/*
         dst: commands
         strip_parent: true
+      - src: plugin/skills/*/*.md
+        dst: skills
+      - src: plugin/.mcp.json
+        dst: .
+        strip_parent: true
     format_overrides:
       - goos: windows
         formats:

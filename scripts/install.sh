@@ -191,6 +191,17 @@ download_release() {
         cp -r "$tmp_dir/commands/"* "$INSTALL_DIR/commands/" 2>/dev/null || true
     fi
 
+    # Copy skills if they exist in the release
+    if [[ -d "$tmp_dir/skills" ]]; then
+        mkdir -p "$INSTALL_DIR/skills"
+        cp -r "$tmp_dir/skills/"* "$INSTALL_DIR/skills/" 2>/dev/null || true
+    fi
+
+    # Copy MCP config if it exists in the release
+    if [[ -f "$tmp_dir/.mcp.json" ]]; then
+        cp "$tmp_dir/.mcp.json" "$INSTALL_DIR/.mcp.json"
+    fi
+
     # Make binaries executable
     chmod +x "$INSTALL_DIR/worker"
     chmod +x "$INSTALL_DIR/mcp-server"
