@@ -1,21 +1,20 @@
 # Restart Engram Worker
 
-Restart the engram worker process. Use this command when experiencing issues with the memory system.
+Restart the Engram worker process. Use when experiencing issues with the memory system.
 
 ## Instructions
 
-1. Call the restart API endpoint using curl:
+1. Call `check_system_health` to verify current connection and get server info.
+
+2. If connected, report current status and ask the user if they want to proceed with restart.
+
+3. The restart endpoint is on the same server as MCP. If `ENGRAM_URL` is set, derive the base URL from it (strip `/mcp` path). Otherwise, ask the user for the server address.
+
+4. Call the restart endpoint:
    ```bash
-   curl -X POST http://127.0.0.1:37777/api/restart
+   curl -X POST <base-url>/api/restart -H "Authorization: Bearer ${ENGRAM_API_TOKEN}"
    ```
 
-2. Wait a moment for the worker to restart (typically 1-2 seconds)
+5. Wait 2 seconds, then call `check_system_health` again to verify the worker restarted.
 
-3. Verify the worker is running by checking the version:
-   ```bash
-   curl -s http://127.0.0.1:37777/api/version
-   ```
-
-4. Report the result to the user, including the version number from the response.
-
-If the restart fails, suggest the user check `/tmp/engram-worker.log` for errors.
+6. Report the result, including the version number.
