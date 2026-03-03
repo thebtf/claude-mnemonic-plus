@@ -239,7 +239,7 @@ Progressive Refinement: four levels of knowledge quality, each building on the p
 │    │     ├── Entity-Entity relations (SPO triples)            │
 │    │     └── Graph-aware search (traverse → expand → fuse)    │
 │    ├── Embedding (builtin ONNX BGE 384d / OpenAI REST)        │
-│    │     └── halfvec indexing for >2000 dims (see D9)         │
+│    │     └── DiskANN indexing for >2000 dims (see D9)          │
 │    ├── Hybrid Search (vector + FTS + BM25 + graph, RRF fusion)│
 │    └── Storage (PostgreSQL + pgvector)                        │
 │                                                               │
@@ -401,7 +401,7 @@ If `claude --print` fails or times out during Level 1, observations remain at Le
 
 **D9: Vector dimension strategy — tiered indexing, no AlloyDB**
 
-pgvector HNSW index has a hard limit: **2,000 dims for `vector` (float32)**, **4,000 dims for `halfvec` (float16)**. This is constrained by PostgreSQL's 8KB page size (float32 × 2000 + overhead ≈ 8KB). The current `.env.example` sets `EMBEDDING_DIMENSIONS=4096` which would **fail** when creating HNSW indexes.
+pgvector HNSW index has a hard limit: **2,000 dims for `vector` (float32)**. This is constrained by PostgreSQL's 8KB page size (float32 × 2000 + overhead ≈ 8KB). The current `.env.example` sets `EMBEDDING_DIMENSIONS=4096` which would **fail** when creating HNSW indexes. Solution: pgvectorscale DiskANN for >2000 dims.
 
 **Why float32 (not float64)?** PostgreSQL 8KB page constraint. float64 would halve max dims to ~1,000. Distance functions internally accumulate as float64 for precision. No native float64 vector type exists in pgvector; the workaround (`double precision[]` + expression index) downcasts to float32 for indexing anyway.
 
@@ -409,42 +409,32 @@ pgvector HNSW index has a hard limit: **2,000 dims for `vector` (float32)**, **4
 
 | Dims | Tier | Index Strategy | Extension |
 |------|------|---------------|-----------|
-| ≤2,000 | **Tier 1** | HNSW `vector(N)` — direct, no precision loss | pgvector (existing) |
-| 2,001-4,000 | **Tier 2** | HNSW `halfvec(N)` expression index, store as `vector(N)` | pgvector (existing) |
-| 4,001-16,000 | **Tier 3** | StreamingDiskANN via `pgvectorscale`, SBQ compression | pgvectorscale (add) |
-| >16,000 | **Tier 4** | Binary quantization `bit(N)` + float32 re-ranking | pgvector (existing) |
+| ≤2,000 | **Tier 1** | HNSW `vector(N)` — direct, full float32 precision | pgvector (existing) |
+| 2,001–16,000 | **Tier 2** | StreamingDiskANN via `pgvectorscale`, SBQ compression, full float32 storage | pgvectorscale (add) |
+| >16,000 | **Tier 3** | IVFFlat `vector(N)` + startup warning to switch model | pgvector (existing) |
 
-**Tier 2 implementation (halfvec, 2001-4000 dims):**
+No halfvec. All vectors stored as float32 `vector(N)`. DiskANN handles 2001–16000 dims natively without precision loss.
+
+**Tier 1 implementation (HNSW, ≤2000 dims):**
 
 ```sql
--- Store full-precision vectors
-embedding vector(3072)
-
--- Index at half-precision (up to 4000 dims for HNSW)
+-- Standard HNSW — current behavior, unchanged
 CREATE INDEX idx_vectors_embedding_hnsw ON vectors
-  USING hnsw ((embedding::halfvec(3072)) halfvec_cosine_ops)
+  USING hnsw (embedding vector_cosine_ops)
   WITH (m = 16, ef_construction = 64);
-
--- Query: ANN via halfvec index, then re-rank with full float32
-SELECT * FROM (
-    SELECT *, embedding::halfvec(3072) <=> query_halfvec AS approx_dist
-    FROM vectors ORDER BY approx_dist LIMIT 20  -- oversampled
-) sub ORDER BY embedding <=> query_full LIMIT 5;  -- re-ranked
 ```
 
-Recall: ~98-99%. Index size: 50% smaller. Float16 precision loss is negligible for ranking.
-
-**Tier 3 implementation (pgvectorscale DiskANN, 4001-16000 dims):**
+**Tier 2 implementation (pgvectorscale DiskANN, 2001–16000 dims):**
 
 ```sql
 -- pgvectorscale extension (PostgreSQL License, self-hostable)
 CREATE EXTENSION IF NOT EXISTS vectorscale;
 
--- Store full-precision vectors
-embedding vector(4096)
+-- Store full-precision float32 vectors (column type unchanged)
+-- embedding vector(4096)  -- same as always
 
 -- DiskANN index with Statistical Binary Quantization (SBQ)
--- Supports up to 16,000 dims natively, 32x compression at 1-bit SBQ
+-- 16,000 dims native, 28x lower p95 latency vs Pinecone s1
 CREATE INDEX idx_vectors_embedding_diskann ON vectors
   USING diskann (embedding vector_cosine_ops);
 
@@ -453,7 +443,7 @@ SELECT *, embedding <=> query_vec AS distance
 FROM vectors ORDER BY embedding <=> query_vec LIMIT 5;
 ```
 
-pgvectorscale key stats: 28x lower p95 latency vs Pinecone s1. Index size ~21MB vs pgvector HNSW ~193MB for 25K 3072d vectors. Production-ready (v0.9.0, Timescale Cloud). Works alongside pgvector — same data types, same operators.
+pgvectorscale: PostgreSQL License, self-hostable, production-ready (v0.9.0). Same `vector(N)` data type — zero schema migration, same operators, works alongside pgvector.
 
 **Dimension support matrix:**
 
@@ -461,9 +451,9 @@ pgvectorscale key stats: 28x lower p95 latency vs Pinecone s1. Index size ~21MB 
 |----------|------|-----------|------------|--------|
 | BGE-small (builtin) | 384 | Tier 1 | HNSW vector(384) | 100% |
 | OpenAI text-embedding-3-small | 1536 | Tier 1 | HNSW vector(1536) | 100% |
-| OpenAI text-embedding-3-large | 3072 | Tier 2 | HNSW halfvec(3072) | ~99% |
-| Qwen3-Embedding-8B | 4096 | Tier 3 | DiskANN vector(4096) | ~99% |
-| Custom high-dim | 8192+ | Tier 3/4 | DiskANN or bit+rerank | ~95-99% |
+| OpenAI text-embedding-3-large | 3072 | Tier 2 | DiskANN vector(3072) | ~99% |
+| Qwen3-Embedding-8B | 4096 | Tier 2 | DiskANN vector(4096) | ~99% |
+| Custom high-dim | 16001+ | Tier 3 | IVFFlat + warning | ~95% |
 
 **TRUNCATE on dimension change: unavoidable when switching embedding models.** Vectors from different models are semantically incompatible — a 384d BGE vector and a 4096d Qwen vector cannot coexist in the same column. TRUNCATE is correct behavior, not a bug. The migration should warn clearly and require explicit confirmation.
 
@@ -473,7 +463,7 @@ pgvectorscale key stats: 28x lower p95 latency vs Pinecone s1. Index size ~21MB 
 
 | Extension | Max ANN Dims | License | Self-Host | Decision |
 |-----------|-------------|---------|-----------|----------|
-| **pgvectorscale** | 16,000 | PostgreSQL | Yes | **ADOPT for Tier 3** |
+| **pgvectorscale** | 16,000 | PostgreSQL | Yes | **ADOPT for Tier 2 (>2000 dims)** |
 | VectorChord (RaBitQ) | 60,000 | AGPLv3/ELv2 | Yes | Monitor (license concern) |
 | pg_diskann (Microsoft) | 16,000 | Proprietary | Azure-only | Reject (vendor lock-in) |
 | AlloyDB ScaNN | 8,000 | Proprietary | GCP-only | Reject (vendor lock-in) |
@@ -543,15 +533,15 @@ Growth model: 10 workstations × 200 entities/day × 5 years ≈ 1M entities, 15
 | New infrastructure | N/A | NONE (no WAL, no daemon, no second port) |
 | Dead code | sqlitevec (build-ignored) | Deleted |
 | Data model | Flat observations only | Observations + Entities + Relationships (knowledge graph) |
-| Vector indexing | HNSW vector(N), max 2000 dims | halfvec indexing for >2000 dims, float32 re-ranking |
+| Vector indexing | HNSW vector(N), max 2000 dims | HNSW ≤2000 dims, DiskANN (pgvectorscale) for >2000 dims |
 | Search | vector + FTS + BM25 | vector + FTS + BM25 + **graph expansion** |
 | Knowledge structure | Isolated observations | Entity graph with SPO relationships |
 
 ### What Stays the Same
 
 - MCP server (all 40 tools, extended with entity/graph tools)
-- PostgreSQL + pgvector (extended with entities/relations tables, halfvec indexing)
-- Embedding pipeline (server-side, same Service/Model interfaces, halfvec added)
+- PostgreSQL + pgvector (extended with entities/relations tables, DiskANN indexing via pgvectorscale)
+- Embedding pipeline (server-side, same Service/Model interfaces, DiskANN added for >2000 dims)
 - Hybrid search (server-side, vector + FTS + BM25 + **graph**, RRF fusion)
 - Hook registration in Claude Code (same events, same hooks.json)
 - Session tracking (server-side)
@@ -591,11 +581,11 @@ Growth model: 10 workstations × 200 entities/day × 5 years ≈ 1M entities, 15
 5. Level 0 observation stored with `enrichment_level: 0`, `source_event_ids: [...]`
 6. Create `entities`, `entity_observations`, `entity_relations` tables (PostgreSQL migration) — schema from Level 2.5 section. Level 0 populates entities + entity_observations with deterministic extractions.
 7. Modify `formatObservationDocs` (`internal/vector/pgvector/sync.go`) to handle Level 0: when `obs.Narrative` is NULL, create vector document from `FormatEmbeddingText` content instead. Without this, Level 0 observations produce ZERO vectors and are invisible to search.
-8. Implement halfvec indexing for >2000 dims (`internal/db/gorm/migrations.go`):
-   - If configured dims ≤ 2000: HNSW on `vector(N)` — direct (current behavior)
-   - If configured dims 2001-4000: HNSW on `halfvec(N)` expression index, store as `vector(N)`
-   - If configured dims > 4000: HNSW on `halfvec(4000)` + MRL truncation, or `binary_quantize(bit(N))` + re-ranking
-   - Eliminates need for TRUNCATE on dimension changes within same embedding model
+8. Implement tiered vector indexing (`internal/db/gorm/migrations.go`):
+   - If configured dims ≤ 2000: HNSW on `vector(N)` — current behavior, unchanged
+   - If configured dims 2001–16000: DiskANN via `pgvectorscale` extension (`CREATE EXTENSION vectorscale`)
+   - If configured dims > 16000: IVFFlat fallback + startup warning to switch to a smaller model
+   - All tiers store full float32 `vector(N)` — no halfvec, no precision loss
 9. Embedding + pgvector sync on Level 0 content (via modified formatObservationDocs)
 10. Update `POST /api/sessions/{id}/finalize` to mark session events as processed
 11. Rewire `stop` hook from `/sessions/{id}/summarize` to `/api/sessions/{id}/finalize` (current summarize endpoint calls broken CLI)
@@ -724,7 +714,7 @@ Growth model: 10 workstations × 200 entities/day × 5 years ≈ 1M entities, 15
 4. Check: `raw_events` table has entries
 5. Check: `observations` table has Level 0 entries
 6. Check: `entities` table has deterministic entity entries
-7. Check: `vectors` table has embeddings (verify halfvec indexing works for >2000 dims)
+7. Check: `vectors` table has embeddings (verify DiskANN indexing works for >2000 dims)
 8. Start new session → verify observations injected via session-start hook
 9. Search via MCP tools → verify relevant results returned
 
