@@ -6,9 +6,27 @@ Claude Code sessions are ephemeral: each conversation starts with zero context a
 
 The core problem is **automated knowledge extraction and cross-session retrieval**: intercept meaningful events during a coding session (file edits, command results, architectural decisions), distill them into structured observations via LLM analysis, store them durably, and inject relevant observations into future sessions — all without manual effort from the user.
 
-The original assumption was that this requires an LLM-in-the-loop pipeline: raw tool events (Edit file X, Bash output Y) are meaningless data until an LLM classifies them. **This assumption is wrong.** ~80% of classification is rule-based, ~70% of concept tagging is keyword extraction, and semantic embedding (BGE/OpenAI) makes raw events searchable without any LLM processing. The consumer of observations is Claude (an LLM) — it can interpret raw context directly. LLM enrichment improves quality (adds narrative, refined facts) but is not a functional requirement. The system must work at Level 0 (deterministic + embedding, no LLM) and optionally upgrade to Level 1 (batch LLM enrichment) when Claude CLI is available.
+### Paradigm Shift: Question-Answer → Accumulation-Analysis
 
-The system must operate as a transparent background process: hooks capture events automatically, extraction happens asynchronously, and relevant memories surface at session start and per-prompt via semantic search. The user never manually "saves" or "tags" anything — the system observes, distills, remembers, and recalls.
+Traditional RAG systems fragment documents into chunks and answer questions by finding similar chunks. This is the "question-answer" model — stateless, per-query, no persistent knowledge structure.
+
+Engram adopts the **accumulation-analysis** model (inspired by [OmniMemory](https://github.com/andrew-veriga/OmniMemory) graph-RAG architecture): the system continuously accumulates structured knowledge — entities, relationships, facts — building an evolving knowledge graph that remembers everything across sessions. The agent is not just a search engine over past events; it is a **developing knowledge base** where entities gain context over time, relationships form between concepts, and patterns emerge from accumulated observations.
+
+Key differences:
+
+| Aspect | Question-Answer (old) | Accumulation-Analysis (new) |
+|--------|----------------------|---------------------------|
+| Storage unit | Text chunk / observation | Entity + Relationship + Observation |
+| Structure | Flat (similarity-only links) | Graph (explicit SPO relationships) |
+| Knowledge growth | Linear (more chunks) | Compounding (entities gain context) |
+| Retrieval | "Find similar text" | "Traverse knowledge graph" |
+| Cross-session | Independent observations | Linked entities evolve across sessions |
+
+### Core Assumptions Revised
+
+The original assumption was that this requires an LLM-in-the-loop pipeline: raw tool events (Edit file X, Bash output Y) are meaningless data until an LLM classifies them. **This assumption is wrong.** ~80% of classification is rule-based, ~70% of concept tagging is keyword extraction, and semantic embedding (BGE/OpenAI) makes raw events searchable without any LLM processing. The consumer of observations is Claude (an LLM) — it can interpret raw context directly. LLM enrichment improves quality (adds narrative, refined facts, refined entity extraction) but is not a functional requirement. The system must work at Level 0 (deterministic + embedding, no LLM) and optionally upgrade to Level 1 (batch LLM enrichment + entity graph construction) when Claude CLI is available.
+
+The system must operate as a transparent background process: hooks capture events automatically, extraction happens asynchronously, and relevant memories surface at session start and per-prompt via semantic search. The user never manually "saves" or "tags" anything — the system observes, structures, remembers, connects, and recalls.
 
 **Hard constraint**: LLM calls MUST go through Claude CLI (free with subscription). Anthropic API is separately billed and therefore unacceptable.
 
@@ -153,10 +171,11 @@ Challenge-plans agent verified all claims against codebase. Key corrections appl
 
 The previous architecture (v1, engram-processor daemon) tried to move the LLM to the client. This solved the blocker but introduced complexity: new binary, WAL, daemon management, two ports. The root insight we missed: **the consumer of observations is Claude (an LLM)**. It doesn't need human-readable narrative to find relevant context. Raw tool events + semantic embedding = functional search.
 
-Progressive Refinement: three levels of observation quality, each building on the previous:
-- **Level 0**: Instant, deterministic, server-side, no LLM. Solves the Docker blocker.
-- **Level 1**: Batch LLM enrichment, client-side, optional. Upgrades quality when CLI available.
+Progressive Refinement: four levels of knowledge quality, each building on the previous:
+- **Level 0**: Instant, deterministic, server-side, no LLM. Solves the Docker blocker. Extracts entities deterministically.
+- **Level 1**: Batch LLM enrichment, client-side, optional. Upgrades quality, extracts SPO relationships.
 - **Level 2**: Consolidation across observations. Already implemented.
+- **Level 2.5** (NEW): Knowledge Graph construction — entity deduplication, cross-session linking, relationship graph maturation.
 
 ### Architecture
 
@@ -212,13 +231,21 @@ Progressive Refinement: three levels of observation quality, each building on th
 │    │     ├── Rule-based classifier (~80% accuracy)            │
 │    │     ├── Template title generator                         │
 │    │     ├── Keyword concept extractor                        │
-│    │     └── Diff-based fact extractor                        │
+│    │     ├── Diff-based fact extractor                        │
+│    │     └── Entity extractor (file paths, concepts, tools)   │
+│    ├── Knowledge Graph (NEW — accumulation-analysis model)     │
+│    │     ├── Entities table (deduplicated knowledge nodes)     │
+│    │     ├── Entity-Observation links (which obs mentions whom)│
+│    │     ├── Entity-Entity relations (SPO triples)            │
+│    │     └── Graph-aware search (traverse → expand → fuse)    │
 │    ├── Embedding (builtin ONNX BGE 384d / OpenAI REST)        │
-│    ├── Hybrid Search (vector + FTS + BM25, RRF fusion)        │
+│    │     └── halfvec indexing for >2000 dims (see D9)         │
+│    ├── Hybrid Search (vector + FTS + BM25 + graph, RRF fusion)│
 │    └── Storage (PostgreSQL + pgvector)                        │
 │                                                               │
-│  NO Claude CLI. NO SDK Processor. NO daemon.                  │
+│  NO Claude CLI. NO SDK Processor. NO daemon. NO AlloyDB.      │
 │  Level 0 = fully autonomous. Level 1 = client enrichment.     │
+│  Level 2.5 = knowledge graph maturation.                      │
 └──────────────────────────────────────────────────────────────┘
 ```
 
@@ -253,9 +280,10 @@ When Claude CLI is available (workstation with subscription), hooks trigger batc
 1. Fetch unprocessed Level 0 events from server (GET /api/events/unprocessed?session_id=X)
 2. Pre-filter for content rot: keep first+last Edit per file, collapse redundant Bash
 3. Build batch prompt with full event sequence (cross-event context)
-4. `claude --print --model haiku` → structured observations with narrative, refined facts, concepts
+4. `claude --print --model haiku` → structured observations with narrative, refined facts, concepts, **SPO entity-relationship triples**
 5. POST enriched observations to server (POST /api/observations/enrich)
 6. Server merges LLM fields into Level 0 observations, re-embeds, upgrades to Level 1
+7. **Extract entities and relationships** from LLM output → populate entities + entity_relations tables
 
 **Content rot handling in batch:**
 - Code rot: batch sees first+last state → produces "final state" observation
@@ -267,7 +295,82 @@ When Claude CLI is available (workstation with subscription), hooks trigger batc
 
 #### Level 2: Consolidation (Already implemented)
 
-Existing consolidation system runs periodically. Merges related observations, detects patterns, builds knowledge graph. No changes needed — it operates on stored observations regardless of their level.
+Existing consolidation system runs periodically. Merges related observations, detects patterns. No changes needed — it operates on stored observations regardless of their level.
+
+#### Level 2.5: Knowledge Graph (NEW — inspired by OmniMemory Graph-RAG)
+
+The accumulation-analysis paradigm: instead of storing only flat observations, build a **knowledge graph** of entities connected by relationships. Entities are deduplicated across sessions; relationships form SPO (Subject-Predicate-Object) triples.
+
+**New tables:**
+
+```sql
+-- Entities: deduplicated knowledge nodes (files, concepts, tools, patterns, decisions)
+CREATE TABLE entities (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    canonical_name TEXT UNIQUE NOT NULL,        -- normalized English name
+    entity_type TEXT NOT NULL,                  -- 'file', 'concept', 'tool', 'pattern', 'decision'
+    embedding vector(N),                        -- entity name/description embedding
+    metadata JSONB DEFAULT '{}',               -- flexible: description, aliases, etc.
+    first_seen_at TIMESTAMPTZ DEFAULT NOW(),
+    last_seen_at TIMESTAMPTZ DEFAULT NOW(),
+    mention_count INT DEFAULT 1,
+    session_count INT DEFAULT 1                -- how many sessions mention this entity
+);
+
+-- Entity-Observation links (which observations mention which entities)
+CREATE TABLE entity_observations (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    entity_id UUID REFERENCES entities(id) ON DELETE CASCADE,
+    observation_id UUID REFERENCES observations(id) ON DELETE CASCADE,
+    relation_type TEXT NOT NULL,                -- 'subject_of', 'mentioned_in', 'modified_by'
+    predicate TEXT,                             -- verb: 'created', 'modified', 'debugged', 'decided'
+    confidence FLOAT DEFAULT 1.0,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    UNIQUE(entity_id, observation_id, relation_type)
+);
+
+-- Entity-Entity relationships (knowledge graph edges, SPO triples)
+CREATE TABLE entity_relations (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    subject_id UUID REFERENCES entities(id) ON DELETE CASCADE,
+    predicate TEXT NOT NULL,                    -- 'depends_on', 'implements', 'replaced_by', 'part_of'
+    object_id UUID REFERENCES entities(id) ON DELETE CASCADE,
+    source_observation_id UUID REFERENCES observations(id) ON DELETE SET NULL,
+    confidence FLOAT DEFAULT 1.0,
+    metadata JSONB DEFAULT '{}',
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    UNIQUE(subject_id, predicate, object_id)
+);
+
+-- Indexes
+CREATE INDEX idx_entities_name_trgm ON entities USING gin (canonical_name gin_trgm_ops);
+CREATE INDEX idx_entities_embedding ON entities USING hnsw (embedding vector_cosine_ops);
+CREATE INDEX idx_entity_obs_entity ON entity_observations(entity_id);
+CREATE INDEX idx_entity_obs_observation ON entity_observations(observation_id);
+CREATE INDEX idx_entity_rel_subject ON entity_relations(subject_id);
+CREATE INDEX idx_entity_rel_object ON entity_relations(object_id);
+```
+
+**Entity extraction at each level:**
+
+| Level | Extraction Method | Entity Quality |
+|-------|-------------------|---------------|
+| Level 0 (deterministic) | File paths → file entities, tool names → tool entities, keyword extraction → concept entities | ~60% coverage, high precision |
+| Level 1 (LLM batch) | LLM extracts entities + SPO relationships from event batches | ~95% coverage, nuanced predicates |
+| Level 2.5 (consolidation) | Entity deduplication (fuzzy match, embedding similarity), cross-session linking, relationship graph maturation | Graph coherence, entity evolution |
+
+**Graph-aware search (extends existing hybrid search):**
+
+```
+Query: "authentication middleware changes"
+  1. Standard hybrid search (vector + FTS + BM25) → observations [existing]
+  2. Entity search: find entities matching query → entity IDs [NEW]
+  3. Graph expansion: entity_observations WHERE entity_id IN (...) → more observations [NEW]
+  4. Relationship traversal: entity_relations → connected entities → their observations [NEW]
+  5. RRF fusion of all result sets → rerank → return [existing, extended]
+```
+
+**Key difference from OmniMemory:** OmniMemory stores ONLY entities+facts (no raw data). Engram stores raw events + observations + entities. Entities are an overlay that adds structure, not a replacement for the observation model. This is more resilient — if entity extraction fails, observations still work.
 
 ### Key Design Decisions
 
@@ -296,6 +399,134 @@ Server `/health` includes: `level_0_enabled: true`, `events_ingested_24h: N`, `o
 **D8: Fire-and-forget enrichment is acceptable**
 If `claude --print` fails or times out during Level 1, observations remain at Level 0. System degrades gracefully. Level 0 is always the baseline. Level 1 is a quality upgrade, not a functional requirement.
 
+**D9: Vector dimension strategy — tiered indexing, no AlloyDB**
+
+pgvector HNSW index has a hard limit: **2,000 dims for `vector` (float32)**, **4,000 dims for `halfvec` (float16)**. This is constrained by PostgreSQL's 8KB page size (float32 × 2000 + overhead ≈ 8KB). The current `.env.example` sets `EMBEDDING_DIMENSIONS=4096` which would **fail** when creating HNSW indexes.
+
+**Why float32 (not float64)?** PostgreSQL 8KB page constraint. float64 would halve max dims to ~1,000. Distance functions internally accumulate as float64 for precision. No native float64 vector type exists in pgvector; the workaround (`double precision[]` + expression index) downcasts to float32 for indexing anyway.
+
+**Tiered solution based on configured dimensions:**
+
+| Dims | Tier | Index Strategy | Extension |
+|------|------|---------------|-----------|
+| ≤2,000 | **Tier 1** | HNSW `vector(N)` — direct, no precision loss | pgvector (existing) |
+| 2,001-4,000 | **Tier 2** | HNSW `halfvec(N)` expression index, store as `vector(N)` | pgvector (existing) |
+| 4,001-16,000 | **Tier 3** | StreamingDiskANN via `pgvectorscale`, SBQ compression | pgvectorscale (add) |
+| >16,000 | **Tier 4** | Binary quantization `bit(N)` + float32 re-ranking | pgvector (existing) |
+
+**Tier 2 implementation (halfvec, 2001-4000 dims):**
+
+```sql
+-- Store full-precision vectors
+embedding vector(3072)
+
+-- Index at half-precision (up to 4000 dims for HNSW)
+CREATE INDEX idx_vectors_embedding_hnsw ON vectors
+  USING hnsw ((embedding::halfvec(3072)) halfvec_cosine_ops)
+  WITH (m = 16, ef_construction = 64);
+
+-- Query: ANN via halfvec index, then re-rank with full float32
+SELECT * FROM (
+    SELECT *, embedding::halfvec(3072) <=> query_halfvec AS approx_dist
+    FROM vectors ORDER BY approx_dist LIMIT 20  -- oversampled
+) sub ORDER BY embedding <=> query_full LIMIT 5;  -- re-ranked
+```
+
+Recall: ~98-99%. Index size: 50% smaller. Float16 precision loss is negligible for ranking.
+
+**Tier 3 implementation (pgvectorscale DiskANN, 4001-16000 dims):**
+
+```sql
+-- pgvectorscale extension (PostgreSQL License, self-hostable)
+CREATE EXTENSION IF NOT EXISTS vectorscale;
+
+-- Store full-precision vectors
+embedding vector(4096)
+
+-- DiskANN index with Statistical Binary Quantization (SBQ)
+-- Supports up to 16,000 dims natively, 32x compression at 1-bit SBQ
+CREATE INDEX idx_vectors_embedding_diskann ON vectors
+  USING diskann (embedding vector_cosine_ops);
+
+-- Query: same pgvector operators, DiskANN index used automatically
+SELECT *, embedding <=> query_vec AS distance
+FROM vectors ORDER BY embedding <=> query_vec LIMIT 5;
+```
+
+pgvectorscale key stats: 28x lower p95 latency vs Pinecone s1. Index size ~21MB vs pgvector HNSW ~193MB for 25K 3072d vectors. Production-ready (v0.9.0, Timescale Cloud). Works alongside pgvector — same data types, same operators.
+
+**Dimension support matrix:**
+
+| Provider | Dims | Index Tier | Index Type | Recall |
+|----------|------|-----------|------------|--------|
+| BGE-small (builtin) | 384 | Tier 1 | HNSW vector(384) | 100% |
+| OpenAI text-embedding-3-small | 1536 | Tier 1 | HNSW vector(1536) | 100% |
+| OpenAI text-embedding-3-large | 3072 | Tier 2 | HNSW halfvec(3072) | ~99% |
+| Qwen3-Embedding-8B | 4096 | Tier 3 | DiskANN vector(4096) | ~99% |
+| Custom high-dim | 8192+ | Tier 3/4 | DiskANN or bit+rerank | ~95-99% |
+
+**TRUNCATE on dimension change: unavoidable when switching embedding models.** Vectors from different models are semantically incompatible — a 384d BGE vector and a 4096d Qwen vector cannot coexist in the same column. TRUNCATE is correct behavior, not a bug. The migration should warn clearly and require explicit confirmation.
+
+**AlloyDB migration rejected.** AlloyDB's ScaNN (IVF+SQ8) supports 8,000 dims but requires Google Cloud credentials for Vertex AI features, adds vendor lock-in, and provides no architectural benefit over pgvectorscale DiskANN (16,000 dims, self-hosted, open-source). AlloyDB's `google_ml.embedding()` is its killer feature, but Engram already has local ONNX BGE and OpenAI REST — no need for in-DB embedding generation.
+
+**Alternative extensions evaluated:**
+
+| Extension | Max ANN Dims | License | Self-Host | Decision |
+|-----------|-------------|---------|-----------|----------|
+| **pgvectorscale** | 16,000 | PostgreSQL | Yes | **ADOPT for Tier 3** |
+| VectorChord (RaBitQ) | 60,000 | AGPLv3/ELv2 | Yes | Monitor (license concern) |
+| pg_diskann (Microsoft) | 16,000 | Proprietary | Azure-only | Reject (vendor lock-in) |
+| AlloyDB ScaNN | 8,000 | Proprietary | GCP-only | Reject (vendor lock-in) |
+| Lantern | 2,000 | Custom | Yes | Reject (no advantage) |
+| pgvecto.rs | 65,535 | Apache 2.0 | Yes | Reject (**deprecated**, migrate to VectorChord) |
+| pg_embedding (Neon) | ~2,000 | Apache 2.0 | Yes | Reject (**deprecated**) |
+
+**D10: Knowledge graph as overlay, not replacement**
+
+Unlike OmniMemory (which stores ONLY entities+facts), Engram stores raw events + observations + entities. The knowledge graph is an enrichment layer — it adds structure on top of observations. If entity extraction fails or hasn't run yet, observations remain fully searchable. This design is more resilient and preserves backward compatibility with existing data.
+
+**D11: Entity deduplication — fuzzy, not exact**
+
+OmniMemory uses exact name matching for entities (`WHERE name = %s`). This creates duplicates: "Claude 4.6" and "Claude Opus 4.6" become separate entities. Engram uses fuzzy matching: pg_trgm similarity + embedding cosine distance. If an incoming entity name has >0.8 trigram similarity OR >0.9 embedding cosine to an existing entity, they are merged. This produces a denser, more connected knowledge graph.
+
+**D12: Graph storage in PostgreSQL, no separate graph database**
+
+Evaluated dedicated graph databases for the knowledge graph layer:
+
+| Option | Decision | Rationale |
+|--------|----------|-----------|
+| **Memgraph** | Reject (S1-S2), Reconsider (S3) | BSL license (not true open source), operational burden of 2nd DB, 100-500 MiB RAM overhead. At S3 scale (>1M entities), reconsider if AGE Cypher performance is insufficient |
+| **Neo4j** | Reject | JVM-based (high memory), AGPL license, even more overkill than Memgraph |
+| **Apache AGE** (PG extension) | Monitor | Cypher syntax in PostgreSQL, but maturity concerns: 40x slower than recursive CTEs for simple traversals, Cypher implementation gaps (MERGE ON CREATE SET, datetime()) |
+| **PostgreSQL tables + recursive CTEs** | **ADOPT** | Zero new dependencies, full ACID, GORM-compatible, fast for bounded 2-4 hop traversals at Engram's scale |
+
+Engram already has graph infrastructure: `internal/graph/observation_graph.go` (CSR graph), `edge_detector.go` (temporal/concept/file/semantic edge detection), `ObservationRelation` with 17 typed relation types. The new `entities` + `entity_relations` tables extend this with knowledge-level graph structure. Go-side CSR graph can index entity relationships for in-memory traversal. No need for Cypher — Go code + SQL recursive CTEs handle all required patterns.
+
+**Scaling Path (explicit tiers):**
+
+Growth model: 10 workstations × 200 entities/day × 5 years ≈ 1M entities, 15M entity_observation links, 4.7M entity_relations. Millions are reachable — architecture MUST handle them.
+
+| Tier | Scale | Graph Strategy | Storage | Trigger |
+|------|-------|----------------|---------|---------|
+| **S1** | <100K entities | Go CSR in-memory (full load at startup, ~50 MB) + SQL recursive CTEs | PostgreSQL tables | Default |
+| **S2** | 100K–1M entities | Project-scoped lazy graph loading (load only active project subgraph into CSR), entity archival (hot/warm/cold partitioning by `last_seen_at`), PostgreSQL table partitioning by project | PostgreSQL with partitioning | `SELECT count(*) FROM entities` crosses 100K |
+| **S3** | >1M entities | Apache AGE (Cypher-in-PG) for complex traversals (>4 hops), Go CSR retained for hot subgraph only, optional Memgraph for real-time deep graph analytics | PostgreSQL + AGE extension, optional Memgraph | Recursive CTE query time >500ms at p95 |
+
+**S1 → S2 adaptations (no new dependencies):**
+- `entity_archival_tier` column: `hot` (accessed <30 days), `warm` (30-180 days), `cold` (>180 days)
+- CSR loads only `hot` entities at startup; `warm`/`cold` loaded on demand via SQL
+- PostgreSQL declarative partitioning on `entities` by project (HASH) or time range
+- `entity_observations` partitioned by `entity_id` range (co-located with parent entity)
+- Index: `CREATE INDEX idx_entities_project_active ON entities(project, last_seen_at) WHERE archival_tier = 'hot'`
+
+**S2 → S3 adaptations (new dependency: Apache AGE):**
+- AGE provides Cypher queries directly in PostgreSQL (no separate process)
+- Complex graph patterns (path finding, subgraph matching, >4 hop traversals) offloaded to AGE
+- Go CSR remains for hot-path in-memory lookups during search (sub-millisecond)
+- Memgraph considered ONLY if AGE Cypher performance is insufficient for real-time deep analytics
+
+**Design principle:** Each tier is a superset of the previous. No data migration, no schema breaks — only additive columns, indexes, and optional extensions.
+
 ### What Changes
 
 | Component | Before | After |
@@ -311,20 +542,25 @@ If `claude --print` fails or times out during Level 1, observations remain at Le
 | New binaries | N/A | NONE (no engram-processor) |
 | New infrastructure | N/A | NONE (no WAL, no daemon, no second port) |
 | Dead code | sqlitevec (build-ignored) | Deleted |
+| Data model | Flat observations only | Observations + Entities + Relationships (knowledge graph) |
+| Vector indexing | HNSW vector(N), max 2000 dims | halfvec indexing for >2000 dims, float32 re-ranking |
+| Search | vector + FTS + BM25 | vector + FTS + BM25 + **graph expansion** |
+| Knowledge structure | Isolated observations | Entity graph with SPO relationships |
 
 ### What Stays the Same
 
-- MCP server (all 40 tools, unchanged)
-- PostgreSQL + pgvector schema (extended, not replaced)
-- Embedding pipeline (server-side, same Service/Model interfaces)
-- Hybrid search (server-side, vector + FTS + BM25)
+- MCP server (all 40 tools, extended with entity/graph tools)
+- PostgreSQL + pgvector (extended with entities/relations tables, halfvec indexing)
+- Embedding pipeline (server-side, same Service/Model interfaces, halfvec added)
+- Hybrid search (server-side, vector + FTS + BM25 + **graph**, RRF fusion)
 - Hook registration in Claude Code (same events, same hooks.json)
 - Session tracking (server-side)
 - Context injection format (`<engram-context>`, `<relevant-memory>`)
 - `ENGRAM_INTERNAL=1` loop prevention
-- Consolidation system (Level 2)
+- Consolidation system (Level 2, extended for entity dedup)
 - Single port architecture (37777)
 - Single binary (`engram-server`)
+- No AlloyDB, no vendor lock-in
 
 ---
 
@@ -348,17 +584,24 @@ If `claude --print` fails or times out during Level 1, observations remain at Le
    - `GenerateTitle(event) → string` — template-based title
    - `ExtractFacts(event) → []string` — diff parsing, output extraction
    - `ExtractConcepts(event) → []string` — keyword extraction from paths/output
+   - `ExtractEntities(event) → []Entity` — deterministic entity extraction: file paths → file entities, tool names → tool entities, keywords → concept entities (Level 0 entity extraction, ~60% coverage)
    - `FormatEmbeddingText(event) → string` — compact representation for embedding: `"{tool_name}: {file_path}\n{truncated_new_content}"` (stays within BGE's 512-token limit; raw event JSON would overflow)
    - `DetermineScope(concepts) → ObservationScope` — existing function
    - `ClassifyMemoryType(concepts) → MemoryType` — existing function (adapted)
 5. Level 0 observation stored with `enrichment_level: 0`, `source_event_ids: [...]`
-6. Modify `formatObservationDocs` (`internal/vector/pgvector/sync.go`) to handle Level 0: when `obs.Narrative` is NULL, create vector document from `FormatEmbeddingText` content instead. Without this, Level 0 observations produce ZERO vectors and are invisible to search.
-7. Embedding + pgvector sync on Level 0 content (via modified formatObservationDocs)
-8. Update `POST /api/sessions/{id}/finalize` to mark session events as processed
-9. Rewire `stop` hook from `/sessions/{id}/summarize` to `/api/sessions/{id}/finalize` (current summarize endpoint calls broken CLI)
-10. Update `/health` to report pipeline status
-11. Rewire `post-tool-use` hook to call `/api/events/ingest` instead of current observation endpoint
-12. **Early validation**: Run deterministic classifier against 50-100 sample events from existing sessions, measure agreement with LLM-classified observations. Validates the "~80% accuracy" claim that underpins Level 0 value proposition.
+6. Create `entities`, `entity_observations`, `entity_relations` tables (PostgreSQL migration) — schema from Level 2.5 section. Level 0 populates entities + entity_observations with deterministic extractions.
+7. Modify `formatObservationDocs` (`internal/vector/pgvector/sync.go`) to handle Level 0: when `obs.Narrative` is NULL, create vector document from `FormatEmbeddingText` content instead. Without this, Level 0 observations produce ZERO vectors and are invisible to search.
+8. Implement halfvec indexing for >2000 dims (`internal/db/gorm/migrations.go`):
+   - If configured dims ≤ 2000: HNSW on `vector(N)` — direct (current behavior)
+   - If configured dims 2001-4000: HNSW on `halfvec(N)` expression index, store as `vector(N)`
+   - If configured dims > 4000: HNSW on `halfvec(4000)` + MRL truncation, or `binary_quantize(bit(N))` + re-ranking
+   - Eliminates need for TRUNCATE on dimension changes within same embedding model
+9. Embedding + pgvector sync on Level 0 content (via modified formatObservationDocs)
+10. Update `POST /api/sessions/{id}/finalize` to mark session events as processed
+11. Rewire `stop` hook from `/sessions/{id}/summarize` to `/api/sessions/{id}/finalize` (current summarize endpoint calls broken CLI)
+12. Update `/health` to report pipeline status
+13. Rewire `post-tool-use` hook to call `/api/events/ingest` instead of current observation endpoint
+14. **Early validation**: Run deterministic classifier against 50-100 sample events from existing sessions, measure agreement with LLM-classified observations. Validates the "~80% accuracy" claim that underpins Level 0 value proposition.
 
 **Risk**: Low. Additive. Existing endpoints unchanged. Can deploy and immediately get observations in production.
 
@@ -402,8 +645,9 @@ If `claude --print` fails or times out during Level 1, observations remain at Le
 3. Build batch enrichment prompt (`internal/pipeline/enrichment_prompt.go`):
    - Takes N events as input sequence
    - Instructs LLM: "focus on final state for code, capture evolution for decisions"
+   - **Extract SPO triples**: subject entity → predicate → object entity for each observation
    - Content rot handling: first+last Edit per file, collapse approach sequences
-   - Returns structured observations (reuse existing XML format)
+   - Returns structured observations (reuse existing XML format) + entity/relationship data
 4. Client-side enrichment logic in hooks:
    - `user-prompt` hook: check if >30min since last enrichment, >5 unprocessed events
    - `stop` hook: batch all remaining unprocessed events
@@ -412,6 +656,37 @@ If `claude --print` fails or times out during Level 1, observations remain at Le
 5. Handle enrichment failures gracefully (Level 0 observations remain functional)
 
 **Risk**: Medium. Client-side CLI spawning + parsing. But failure is non-fatal (Level 0 baseline).
+
+### Phase 3.5: Knowledge Graph Maturation (Level 2.5)
+
+**Goal**: Build an evolving knowledge graph from accumulated entities and relationships. Enable graph-aware search.
+
+1. Entity deduplication service (`internal/graph/dedup.go`):
+   - On entity insert: check pg_trgm similarity (>0.8) + embedding cosine (>0.9) against existing entities
+   - If match found: merge (update metadata, increment mention_count, link to both observations)
+   - Alias tracking: `entity.metadata.aliases[]` stores alternate names
+2. Cross-session entity linking:
+   - Same entity referenced in different sessions → increment `session_count`
+   - Entity `last_seen_at` updated on each reference
+   - Entities with high session_count = core project knowledge (files, patterns, architectural decisions)
+3. Graph-aware search extension (`internal/search/graph.go`):
+   - `SearchWithGraphExpansion(query, limit)`:
+     a. Standard hybrid search → top N observations
+     b. Extract entity_ids from matched observations via entity_observations
+     c. Expand: find related entities via entity_relations (1-hop)
+     d. Fetch observations linked to expanded entities
+     e. RRF fuse all result sets (standard + graph-expanded)
+   - Config: `ENGRAM_GRAPH_EXPANSION_HOPS=1` (default), `ENGRAM_GRAPH_EXPANSION_LIMIT=10`
+4. MCP tools for knowledge graph:
+   - `engram_search_entities` — find entities by name/type/embedding
+   - `engram_entity_relations` — get relationships for an entity
+   - `engram_knowledge_graph` — subgraph visualization (entity + N-hop neighbors)
+5. Entity embedding: embed `canonical_name + entity_type + top-3 fact summaries` for each entity
+6. Relationship strength scoring: frequency × recency × confidence
+
+**Risk**: Low-Medium. Additive feature, does not change existing search behavior. Graph expansion is opt-in.
+
+**Verification**: Create entities from existing observations → verify deduplication → verify graph search returns more relevant results than standard search alone.
 
 ### Phase 4: Cleanup and Hardening
 
@@ -425,6 +700,7 @@ If `claude --print` fails or times out during Level 1, observations remain at Le
 6. Update goreleaser config (no new binary, just cleanup)
 7. Update Dockerfile (no changes needed — but verify health endpoint)
 8. Integration tests: Level 0 pipeline end-to-end against real PostgreSQL
+9. Add pgvectorscale extension to Docker image for Tier 3 (>4000 dims) support
 
 **Risk**: Low. Deletion and simplification.
 
@@ -447,13 +723,22 @@ If `claude --print` fails or times out during Level 1, observations remain at Le
 3. Perform tool operations (Edit, Write, Bash)
 4. Check: `raw_events` table has entries
 5. Check: `observations` table has Level 0 entries
-6. Check: `vectors` table has embeddings
-7. Start new session → verify observations injected via session-start hook
-8. Search via MCP tools → verify relevant results returned
+6. Check: `entities` table has deterministic entity entries
+7. Check: `vectors` table has embeddings (verify halfvec indexing works for >2000 dims)
+8. Start new session → verify observations injected via session-start hook
+9. Search via MCP tools → verify relevant results returned
 
 **After Phase 3** (enrichment working):
 1. Perform a coding session (>30 min)
 2. Verify user-prompt hook triggers mid-session enrichment
 3. Check: some observations upgraded to Level 1 (have narrative)
-4. Verify enriched observations have better search relevance
-5. End session → verify stop hook triggers final batch enrichment
+4. Check: entity_relations table has SPO triples extracted by LLM
+5. Verify enriched observations have better search relevance
+6. End session → verify stop hook triggers final batch enrichment
+
+**After Phase 3.5** (knowledge graph):
+1. Check: entity deduplication merges "server.go" references across sessions into one entity
+2. Check: entity_relations shows relationships (e.g., "authentication" → "depends_on" → "middleware")
+3. Verify graph-aware search: query "authentication" returns observations about middleware (graph expansion)
+4. Verify MCP tool `engram_search_entities` returns relevant entities
+5. Compare search quality: standard vs graph-expanded (graph should surface related but non-obvious results)
