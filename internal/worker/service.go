@@ -139,6 +139,8 @@ type Service struct {
 	store                  *gorm.Store
 	retrievalStats         map[string]*RetrievalStats
 	sessionStore           *gorm.SessionStore
+	rawEventStore          *gorm.RawEventStore
+	ingestDedup            *deduplicationCache
 	cancel                 context.CancelFunc
 	cachedObsCounts        map[string]cachedCount
 	config                 *config.Config
@@ -389,6 +391,7 @@ func NewService(version string) (*Service, error) {
 		cachedObsCounts:    make(map[string]cachedCount),
 		statsCacheTTL:      time.Minute,             // Cache stats for 1 minute
 		vectorSyncSem:      make(chan struct{}, 10), // Limit to 10 concurrent vector syncs
+		ingestDedup:        newDeduplicationCache(5 * time.Minute),
 	}
 
 	// Setup middleware and routes (health endpoint works immediately)
@@ -499,10 +502,14 @@ func (s *Service) initializeAsync() {
 		log.Info().Msg("SDK processor initialized")
 	}
 
+	// Create raw event store and ingest deduplication cache
+	rawEventStore := gorm.NewRawEventStore(store)
+
 	// Set all the initialized components
 	s.initMu.Lock()
 	s.store = store
 	s.sessionStore = sessionStore
+	s.rawEventStore = rawEventStore
 	s.observationStore = observationStore
 	s.summaryStore = summaryStore
 	s.promptStore = promptStore
@@ -828,10 +835,14 @@ func (s *Service) reinitializeDatabase() {
 	// Create new pattern detector
 	patternDetector := pattern.NewDetector(patternStore, observationStore, pattern.DefaultConfig())
 
+	// Create raw event store for reinit path
+	rawEventStore := gorm.NewRawEventStore(store)
+
 	// Atomically swap all components
 	s.initMu.Lock()
 	s.store = store
 	s.sessionStore = sessionStore
+	s.rawEventStore = rawEventStore
 	s.observationStore = observationStore
 	s.summaryStore = summaryStore
 	s.promptStore = promptStore
@@ -1332,6 +1343,9 @@ func (s *Service) setupRoutes() {
 		r.Post("/api/sessions/observations", s.handleObservation)
 		r.Post("/api/sessions/subagent-complete", s.handleSubagentComplete)
 		r.Post("/sessions/{id}/summarize", s.handleSummarize)
+
+		// Event ingest (Level 0 deterministic pipeline)
+		r.Post("/api/events/ingest", s.handleIngestEvent)
 
 		// Data routes
 		r.Get("/api/observations", s.handleGetObservations)
