@@ -4,6 +4,7 @@ package pgvector
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/thebtf/engram/internal/vector"
 	"github.com/thebtf/engram/pkg/models"
@@ -97,7 +98,50 @@ func (s *Sync) formatObservationDocs(obs *models.Observation) []vector.Document 
 		})
 	}
 
+	// Level 0 fallback: when narrative and facts are both empty,
+	// generate a composite document from title + concepts + files
+	// so the observation is still searchable via vector similarity.
+	if len(docs) == 0 {
+		content := formatLevel0Content(obs)
+		if content != "" {
+			docs = append(docs, vector.Document{
+				ID:       fmt.Sprintf("obs_%d_composite", obs.ID),
+				Content:  content,
+				Metadata: vector.CopyMetadata(baseMetadata, "field_type", "level0_composite"),
+			})
+		}
+	}
+
 	return docs
+}
+
+// formatLevel0Content builds embedding text for Level 0 observations
+// that have no narrative or facts. Uses available metadata fields.
+func formatLevel0Content(obs *models.Observation) string {
+	var parts []string
+
+	if obs.Type != "" {
+		parts = append(parts, string(obs.Type))
+	}
+	if obs.Title.Valid && obs.Title.String != "" {
+		parts = append(parts, obs.Title.String)
+	}
+	if obs.RawContent.Valid && obs.RawContent.String != "" {
+		parts = append(parts, obs.RawContent.String)
+	}
+	if len(obs.FilesModified) > 0 {
+		parts = append(parts, "Files: "+vector.JoinStrings(obs.FilesModified, ", "))
+	} else if len(obs.FilesRead) > 0 {
+		parts = append(parts, "Files: "+vector.JoinStrings(obs.FilesRead, ", "))
+	}
+	if len(obs.Concepts) > 0 {
+		parts = append(parts, "Concepts: "+vector.JoinStrings(obs.Concepts, ", "))
+	}
+
+	if len(parts) == 0 {
+		return ""
+	}
+	return strings.Join(parts, "\n")
 }
 
 // SyncSummary syncs a single session summary to the vector store.
@@ -204,6 +248,7 @@ func (s *Sync) DeleteObservations(ctx context.Context, observationIDs []int64) e
 
 	for _, obsID := range observationIDs {
 		ids = append(ids, fmt.Sprintf("obs_%d_narrative", obsID))
+		ids = append(ids, fmt.Sprintf("obs_%d_composite", obsID))
 		for i := 0; i < maxFactsPerObs; i++ {
 			ids = append(ids, fmt.Sprintf("obs_%d_fact_%d", obsID, i))
 		}

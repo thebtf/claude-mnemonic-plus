@@ -61,6 +61,7 @@ type Pattern struct {
 type JSONInt64Array []int64
 
 // Scan implements sql.Scanner for JSONInt64Array.
+// Handles both JSON format [1,2,3] and PostgreSQL array format {1,2,3}.
 func (j *JSONInt64Array) Scan(src interface{}) error {
 	if src == nil {
 		*j = nil
@@ -80,6 +81,13 @@ func (j *JSONInt64Array) Scan(src interface{}) error {
 	if len(data) == 0 {
 		*j = nil
 		return nil
+	}
+
+	// Convert PostgreSQL array format {1,2,3} to JSON [1,2,3]
+	s := string(data)
+	if len(s) >= 2 && s[0] == '{' && s[len(s)-1] == '}' {
+		s = "[" + s[1:len(s)-1] + "]"
+		data = []byte(s)
 	}
 
 	return json.Unmarshal(data, j)

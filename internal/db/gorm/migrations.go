@@ -779,6 +779,102 @@ func runMigrations(db *gorm.DB, embeddingDims int) error {
 				return tx.Exec(`DROP INDEX IF EXISTS idx_patterns_type_project`).Error
 			},
 		},
+		// Migration 022: Raw events table — immutable append-only event log (source of truth).
+		{
+			ID: "022_raw_events",
+			Migrate: func(tx *gorm.DB) error {
+				sqls := []string{
+					`CREATE TABLE IF NOT EXISTS raw_events (
+						id BIGSERIAL PRIMARY KEY,
+						session_id TEXT NOT NULL,
+						tool_name TEXT NOT NULL,
+						tool_input JSONB,
+						tool_result JSONB,
+						created_at_epoch BIGINT NOT NULL DEFAULT (EXTRACT(EPOCH FROM NOW()) * 1000)::BIGINT,
+						project TEXT NOT NULL DEFAULT '',
+						workstation_id TEXT NOT NULL DEFAULT '',
+						processed BOOLEAN NOT NULL DEFAULT FALSE
+					)`,
+					`CREATE INDEX IF NOT EXISTS idx_raw_events_session_time
+					 ON raw_events(session_id, created_at_epoch)`,
+					`CREATE INDEX IF NOT EXISTS idx_raw_events_unprocessed
+					 ON raw_events(created_at_epoch)
+					 WHERE processed = FALSE`,
+				}
+				for _, s := range sqls {
+					if err := tx.Exec(s).Error; err != nil {
+						return fmt.Errorf("migration 022: %w", err)
+					}
+				}
+				return nil
+			},
+			Rollback: func(tx *gorm.DB) error {
+				return tx.Exec("DROP TABLE IF EXISTS raw_events").Error
+			},
+		},
+		// Migration 023: Add enrichment fields to observations for Progressive Refinement.
+		{
+			ID: "023_observation_enrichment",
+			Migrate: func(tx *gorm.DB) error {
+				sqls := []string{
+					`ALTER TABLE observations ADD COLUMN IF NOT EXISTS enrichment_level INT NOT NULL DEFAULT 0`,
+					`ALTER TABLE observations ADD COLUMN IF NOT EXISTS source_event_ids BIGINT[]`,
+					`ALTER TABLE observations ADD COLUMN IF NOT EXISTS raw_content TEXT`,
+					`CREATE INDEX IF NOT EXISTS idx_observations_enrichment
+					 ON observations(enrichment_level, created_at_epoch DESC)`,
+				}
+				for _, s := range sqls {
+					if err := tx.Exec(s).Error; err != nil {
+						return fmt.Errorf("migration 023: %w", err)
+					}
+				}
+				return nil
+			},
+			Rollback: func(tx *gorm.DB) error {
+				sqls := []string{
+					`DROP INDEX IF EXISTS idx_observations_enrichment`,
+					`ALTER TABLE observations DROP COLUMN IF EXISTS raw_content`,
+					`ALTER TABLE observations DROP COLUMN IF EXISTS source_event_ids`,
+					`ALTER TABLE observations DROP COLUMN IF EXISTS enrichment_level`,
+				}
+				for _, s := range sqls {
+					if err := tx.Exec(s).Error; err != nil {
+						return err
+					}
+				}
+				return nil
+			},
+		},
+		// Migration 024: Memory blocks schema — structured distilled knowledge per project.
+		// Schema only; population logic is Phase 2 (consolidation-driven).
+		{
+			ID: "024_memory_blocks",
+			Migrate: func(tx *gorm.DB) error {
+				sqls := []string{
+					`CREATE TABLE IF NOT EXISTS memory_blocks (
+						id BIGSERIAL PRIMARY KEY,
+						project TEXT NOT NULL,
+						block_type TEXT NOT NULL,
+						content TEXT NOT NULL DEFAULT '',
+						source_observation_ids BIGINT[],
+						version INT NOT NULL DEFAULT 1,
+						last_updated_epoch BIGINT NOT NULL DEFAULT (EXTRACT(EPOCH FROM NOW()) * 1000)::BIGINT,
+						UNIQUE(project, block_type)
+					)`,
+					`CREATE INDEX IF NOT EXISTS idx_memory_blocks_project
+					 ON memory_blocks(project)`,
+				}
+				for _, s := range sqls {
+					if err := tx.Exec(s).Error; err != nil {
+						return fmt.Errorf("migration 024: %w", err)
+					}
+				}
+				return nil
+			},
+			Rollback: func(tx *gorm.DB) error {
+				return tx.Exec("DROP TABLE IF EXISTS memory_blocks").Error
+			},
+		},
 	})
 	if err := m.Migrate(); err != nil {
 		return fmt.Errorf("run gormigrate migrations: %w", err)

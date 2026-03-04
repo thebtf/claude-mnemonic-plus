@@ -170,6 +170,9 @@ type Observation struct {
 	RetrievalCount  int              `db:"retrieval_count" json:"retrieval_count"`
 	IsStale         bool             `db:"-" json:"is_stale,omitempty"`
 	IsSuperseded    bool             `db:"is_superseded" json:"is_superseded,omitempty"`
+	EnrichmentLevel int              `db:"enrichment_level" json:"enrichment_level"`
+	SourceEventIDs  JSONInt64Array   `db:"source_event_ids" json:"source_event_ids,omitempty"`
+	RawContent      sql.NullString   `db:"raw_content" json:"raw_content,omitempty"`
 }
 
 // ParsedObservation represents an observation parsed from SDK response XML.
