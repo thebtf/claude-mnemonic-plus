@@ -28,6 +28,7 @@ func (s *ObservationSuite) TestObservationTypeConstants() {
 	s.Equal(ObservationType("feature"), ObsTypeFeature)
 	s.Equal(ObservationType("refactor"), ObsTypeRefactor)
 	s.Equal(ObservationType("change"), ObsTypeChange)
+	s.Equal(ObservationType("guidance"), ObsTypeGuidance)
 }
 
 // TestScopeConstants tests scope constants.
@@ -100,6 +101,36 @@ func (s *ObservationSuite) TestDetermineScope_TableDriven() {
 			result := DetermineScope(tt.concepts)
 			s.Equal(tt.expected, result)
 		})
+	}
+}
+
+// TestClassifyMemoryType_GuidanceShortcut tests that guidance type bypasses concept matching.
+func (s *ObservationSuite) TestClassifyMemoryType_GuidanceShortcut() {
+	// Guidance type should always return MemTypeGuidance regardless of concepts
+	obs := &ParsedObservation{
+		Type:     ObsTypeGuidance,
+		Concepts: []string{"architecture", "pattern"}, // Would match MemTypeDecision/MemTypePattern
+	}
+	s.Equal(MemTypeGuidance, ClassifyMemoryType(obs))
+
+	// Non-guidance type should still use concept matching
+	obs2 := &ParsedObservation{
+		Type:     ObsTypeDiscovery,
+		Concepts: []string{"architecture"},
+	}
+	s.Equal(MemTypeDecision, ClassifyMemoryType(obs2))
+}
+
+// TestTypeBaseScore_Guidance tests that guidance has the highest base score.
+func (s *ObservationSuite) TestTypeBaseScore_Guidance() {
+	score := TypeBaseScore(ObsTypeGuidance)
+	s.Equal(1.4, score)
+
+	// Verify guidance is the highest score
+	for obsType, otherScore := range TypeBaseScores {
+		if obsType != ObsTypeGuidance {
+			s.GreaterOrEqual(score, otherScore, "guidance should have highest or equal base score")
+		}
 	}
 }
 

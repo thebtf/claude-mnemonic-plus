@@ -411,6 +411,24 @@ func (s *ObservationStore) GetActiveObservations(ctx context.Context, project st
 	return toModelObservations(dbObservations), nil
 }
 
+// GetGuidanceObservations retrieves active guidance-type observations for a project.
+// These are behavioral corrections and preferences that should be prominently surfaced.
+// Results are ordered by importance_score DESC, then created_at_epoch DESC.
+func (s *ObservationStore) GetGuidanceObservations(ctx context.Context, project string, limit int) ([]*models.Observation, error) {
+	var dbObservations []Observation
+	err := s.db.WithContext(ctx).
+		Scopes(projectScopeFilter(project), activeObservationFilter(), importanceOrdering()).
+		Where("type = ?", string(models.ObsTypeGuidance)).
+		Limit(limit).
+		Find(&dbObservations).Error
+
+	if err != nil {
+		return nil, err
+	}
+
+	return toModelObservations(dbObservations), nil
+}
+
 // GetSupersededObservations retrieves observations that have been superseded by newer ones.
 // Results are ordered by created_at_epoch DESC.
 func (s *ObservationStore) GetSupersededObservations(ctx context.Context, project string, limit int) ([]*models.Observation, error) {

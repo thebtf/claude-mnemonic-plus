@@ -20,6 +20,7 @@ const (
 	ObsTypeRefactor  ObservationType = "refactor"
 	ObsTypeDiscovery ObservationType = "discovery"
 	ObsTypeChange    ObservationType = "change"
+	ObsTypeGuidance  ObservationType = "guidance"
 )
 
 // MemoryType represents the classification for memory storage and retrieval.
@@ -223,6 +224,9 @@ func DetermineScope(concepts []string) ObservationScope {
 
 // ClassifyMemoryType classifies an observation into a memory bucket.
 func ClassifyMemoryType(obs *ParsedObservation) MemoryType {
+	if obs.Type == ObsTypeGuidance {
+		return MemTypeGuidance
+	}
 	for _, c := range obs.Concepts {
 		cl := strings.ToLower(c)
 		switch {

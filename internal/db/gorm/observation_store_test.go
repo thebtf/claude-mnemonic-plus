@@ -406,6 +406,45 @@ func TestObservationStore_GetSupersededObservations(t *testing.T) {
 	assert.True(t, observations[0].IsSuperseded)
 }
 
+func TestObservationStore_GetGuidanceObservations(t *testing.T) {
+	observationStore, _, cleanup := testObservationStore(t)
+	defer cleanup()
+
+	ctx := context.Background()
+
+	// Store a guidance observation
+	guidanceObs := &models.ParsedObservation{
+		Type:  models.ObsTypeGuidance,
+		Title: "Always use snake_case",
+	}
+	guidanceID, _, err := observationStore.StoreObservation(ctx, "claude-1", "test-project", guidanceObs, 1, 10)
+	require.NoError(t, err)
+
+	// Store a non-guidance observation
+	normalObs := &models.ParsedObservation{
+		Type:  models.ObsTypeDiscovery,
+		Title: "Found a bug",
+	}
+	_, _, err = observationStore.StoreObservation(ctx, "claude-1", "test-project", normalObs, 2, 10)
+	require.NoError(t, err)
+
+	// Store a superseded guidance observation (should be excluded)
+	supersededGuidance := &models.ParsedObservation{
+		Type:  models.ObsTypeGuidance,
+		Title: "Old guidance",
+	}
+	supersededID, _, err := observationStore.StoreObservation(ctx, "claude-1", "test-project", supersededGuidance, 3, 10)
+	require.NoError(t, err)
+	observationStore.db.Model(&Observation{}).Where("id = ?", supersededID).Update("is_superseded", 1)
+
+	// Get guidance observations - should only return the active guidance one
+	observations, err := observationStore.GetGuidanceObservations(ctx, "test-project", 10)
+	require.NoError(t, err)
+	assert.Len(t, observations, 1)
+	assert.Equal(t, guidanceID, observations[0].ID)
+	assert.Equal(t, models.ObsTypeGuidance, observations[0].Type)
+}
+
 func TestObservationStore_GetObservationsByProjectStrict(t *testing.T) {
 	observationStore, _, cleanup := testObservationStore(t)
 	defer cleanup()

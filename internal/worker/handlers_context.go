@@ -709,6 +709,35 @@ func (s *Service) handleContextInject(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// --- Guidance section: top guidance observations ---
+	var guidanceObservations []*models.Observation
+	guidanceRaw, guidanceErr := s.observationStore.GetGuidanceObservations(ctx, project, 5)
+	if guidanceErr != nil {
+		log.Debug().Err(guidanceErr).Str("project", project).Msg("Failed to fetch guidance observations")
+	} else {
+		// Apply staleness filter
+		for _, obs := range guidanceRaw {
+			if len(obs.FileMtimes) > 0 {
+				var paths []string
+				for path := range obs.FileMtimes {
+					paths = append(paths, path)
+				}
+				currentMtimes := sdk.GetFileMtimes(paths, cwd)
+				if obs.CheckStaleness(currentMtimes) {
+					staleCount++
+					s.queueStaleVerification(obs.ID, cwd)
+					continue
+				}
+			}
+			guidanceObservations = append(guidanceObservations, obs)
+		}
+	}
+
+	// Add guidance IDs to recent dedup set
+	for _, obs := range guidanceObservations {
+		recentIDs[obs.ID] = struct{}{}
+	}
+
 	// --- Backward-compat observations field: full recent list + relevant deduped union ---
 	// Get the full recent list (up to configured limit) for the legacy field
 	allRecentRaw, err := s.observationStore.GetRecentObservations(ctx, project, limit)
@@ -773,6 +802,7 @@ func (s *Service) handleContextInject(w http.ResponseWriter, r *http.Request) {
 		Int("stale_excluded", staleCount).
 		Int("recent_section", len(recentFresh)).
 		Int("relevant_section", len(relevantObservations)).
+		Int("guidance_section", len(guidanceObservations)).
 		Msg("Context injection with clustering")
 
 	writeJSON(w, map[string]any{
@@ -780,6 +810,7 @@ func (s *Service) handleContextInject(w http.ResponseWriter, r *http.Request) {
 		"observations":       clusteredObservations,
 		"recent":             recentFresh,
 		"relevant":           relevantObservations,
+		"guidance":           guidanceObservations,
 		"full_count":         fullCount,
 		"stale_excluded":     staleCount,
 		"duplicates_removed": duplicatesRemoved,

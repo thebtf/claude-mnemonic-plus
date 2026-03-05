@@ -104,6 +104,41 @@ func handleSessionStart(ctx *hooks.HookContext, input *Input) (string, error) {
 	}
 
 	contextBuilder += "</engram-context>\n"
+
+	// Build guidance block from separate guidance observations
+	guidanceData, _ := result["guidance"].([]interface{})
+	if len(guidanceData) > 0 {
+		contextBuilder += "\n<engram-guidance>\n"
+		contextBuilder += "# Behavioral Guidance\n"
+		contextBuilder += "These are learned preferences and corrections. Follow them.\n\n"
+
+		for i, g := range guidanceData {
+			gObs, ok := g.(map[string]interface{})
+			if !ok {
+				continue
+			}
+			title := getString(gObs, "title")
+			narrative := getString(gObs, "narrative")
+
+			contextBuilder += fmt.Sprintf("%d. **%s**\n", i+1, title)
+			if narrative != "" {
+				contextBuilder += "   " + narrative + "\n"
+			}
+			if facts, ok := gObs["facts"].([]interface{}); ok {
+				for _, f := range facts {
+					if fact, ok := f.(string); ok && fact != "" {
+						contextBuilder += fmt.Sprintf("   - %s\n", fact)
+					}
+				}
+			}
+			contextBuilder += "\n"
+		}
+
+		contextBuilder += "</engram-guidance>\n"
+
+		fmt.Fprintf(os.Stderr, "[engram] Injecting %d guidance observations\n", len(guidanceData))
+	}
+
 	return contextBuilder, nil
 }
 

@@ -58,6 +58,7 @@ var TypeBaseScores = map[ObservationType]float64{
 	ObsTypeDecision:  1.1, // Architectural decisions guide development
 	ObsTypeRefactor:  1.0, // Refactoring is neutral
 	ObsTypeChange:    0.9, // Minor changes are slightly less important
+	ObsTypeGuidance:  1.4, // Guidance is most actionable - behavioral corrections
 }
 
 // ScoringConfig contains all scoring weights and parameters.
