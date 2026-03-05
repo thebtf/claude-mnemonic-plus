@@ -26,25 +26,26 @@ const (
 type MemoryType string
 
 const (
-	MemTypeDecision   MemoryType = "decision"
-	MemTypePattern    MemoryType = "pattern"
-	MemTypePreference MemoryType = "preference"
-	MemTypeStyle      MemoryType = "style"
-	MemTypeHabit      MemoryType = "habit"
-	MemTypeInsight    MemoryType = "insight"
-	MemTypeContext    MemoryType = "context"
+        MemTypeDecision   MemoryType = "decision"
+        MemTypePattern    MemoryType = "pattern"
+        MemTypePreference MemoryType = "preference"
+        MemTypeStyle      MemoryType = "style"
+        MemTypeHabit      MemoryType = "habit"
+        MemTypeInsight    MemoryType = "insight"
+        MemTypeContext    MemoryType = "context"
+        MemTypeGuidance   MemoryType = "guidance"
 )
 
 var AllMemoryTypes = []MemoryType{
-	MemTypeDecision,
-	MemTypePattern,
-	MemTypePreference,
-	MemTypeStyle,
-	MemTypeHabit,
-	MemTypeInsight,
-	MemTypeContext,
+        MemTypeDecision,
+        MemTypePattern,
+        MemTypePreference,
+        MemTypeStyle,
+        MemTypeHabit,
+        MemTypeInsight,
+        MemTypeContext,
+        MemTypeGuidance,
 }
-
 // ObservationScope defines the visibility scope of an observation.
 type ObservationScope string
 

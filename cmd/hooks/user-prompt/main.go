@@ -31,52 +31,105 @@ func handleUserPrompt(ctx *hooks.HookContext, input *Input) (string, error) {
 
 	searchResult, _ := hooks.GET(ctx.Port, searchURL)
 	if observations, ok := searchResult["observations"].([]interface{}); ok && len(observations) > 0 {
-		// Results are already filtered by relevance threshold and capped by max_results
-		// from the server-side config (ContextRelevanceThreshold, ContextMaxPromptResults)
-		observationCount = len(observations)
+	        // Results are already filtered by relevance threshold and capped by max_results
+	        // from the server-side config (ContextRelevanceThreshold, ContextMaxPromptResults)
+	        observationCount = len(observations)
 
-		// Build context from search results
-		var contextBuilder string
-		contextBuilder = "<relevant-memory>\n"
-		contextBuilder += "# Relevant Knowledge From Previous Sessions\n"
-		contextBuilder += "IMPORTANT: Use this information to answer the question directly. Do NOT explore the codebase if the answer is here.\n\n"
+	        // Partition observations into guidance and standard blocks
+	        var guidanceObs []map[string]interface{}
+	        var standardObs []map[string]interface{}
 
-		for i, obs := range observations {
-			if obsMap, ok := obs.(map[string]interface{}); ok {
-				title := ""
-				if t, ok := obsMap["title"].(string); ok {
-					title = t
-				}
-				obsType := ""
-				if t, ok := obsMap["type"].(string); ok {
-					obsType = t
-				}
+	        for _, obs := range observations {
+	                if obsMap, ok := obs.(map[string]interface{}); ok {
+	                        isGuidance := false
+	                        if memType, ok := obsMap["memory_type"].(string); ok && memType == "guidance" {
+	                                isGuidance = true
+	                        }
+	                        if isGuidance {
+	                                guidanceObs = append(guidanceObs, obsMap)
+	                        } else {
+	                                standardObs = append(standardObs, obsMap)
+	                        }
+	                }
+	        }
 
-				// Start observation block
-				contextBuilder += fmt.Sprintf("## %d. [%s] %s\n", i+1, obsType, title)
+	        // Build context from search results
+	        var contextBuilder string
+	        contextBuilder = "<relevant-memory>\n"
 
-				// Add facts first (most concise answers)
-				if facts, ok := obsMap["facts"].([]interface{}); ok && len(facts) > 0 {
-					contextBuilder += "Key facts:\n"
-					for _, fact := range facts {
-						if factStr, ok := fact.(string); ok {
-							contextBuilder += fmt.Sprintf("- %s\n", factStr)
-						}
-					}
-					contextBuilder += "\n"
-				}
+	        if len(guidanceObs) > 0 {
+	                contextBuilder += "### GUIDANCE (High Priority)\n"
+	                contextBuilder += "IMPORTANT: Use this information to answer the question directly. Do NOT explore the codebase if the answer is here.\n\n"
+	                for i, obsMap := range guidanceObs {
+	                        title := ""
+	                        if t, ok := obsMap["title"].(string); ok {
+	                                title = t
+	                        }
+	                        obsType := ""
+	                        if t, ok := obsMap["type"].(string); ok {
+	                                obsType = t
+	                        }
 
-				// Add narrative if present
-				if narrative, ok := obsMap["narrative"].(string); ok && narrative != "" {
-					contextBuilder += narrative + "\n\n"
-				}
-			}
-		}
+	                        // Start observation block
+	                        contextBuilder += fmt.Sprintf("## %d. [%s] %s\n", i+1, obsType, title)
 
-		contextBuilder += "</relevant-memory>\n"
-		contextToInject = contextBuilder
+	                        // Add facts first (most concise answers)
+	                        if facts, ok := obsMap["facts"].([]interface{}); ok && len(facts) > 0 {
+	                                contextBuilder += "Key facts:\n"
+	                                for _, fact := range facts {
+	                                        if factStr, ok := fact.(string); ok {
+	                                                contextBuilder += fmt.Sprintf("- %s\n", factStr)
+	                                        }
+	                                }
+	                                contextBuilder += "\n"
+	                        }
+
+	                        // Add narrative if present
+	                        if narrative, ok := obsMap["narrative"].(string); ok && narrative != "" {
+	                                contextBuilder += narrative + "\n\n"
+	                        }
+	                }
+	        }
+
+	        if len(standardObs) > 0 {
+	                contextBuilder += "# Relevant Knowledge From Previous Sessions\n"
+	                if len(guidanceObs) == 0 {
+	                        contextBuilder += "IMPORTANT: Use this information to answer the question directly. Do NOT explore the codebase if the answer is here.\n\n"
+	                }
+	                for i, obsMap := range standardObs {
+	                        title := ""
+	                        if t, ok := obsMap["title"].(string); ok {
+	                                title = t
+	                        }
+	                        obsType := ""
+	                        if t, ok := obsMap["type"].(string); ok {
+	                                obsType = t
+	                        }
+
+	                        // Start observation block
+	                        contextBuilder += fmt.Sprintf("## %d. [%s] %s\n", i+1, obsType, title)
+
+	                        // Add facts first (most concise answers)
+	                        if facts, ok := obsMap["facts"].([]interface{}); ok && len(facts) > 0 {
+	                                contextBuilder += "Key facts:\n"
+	                                for _, fact := range facts {
+	                                        if factStr, ok := fact.(string); ok {
+	                                                contextBuilder += fmt.Sprintf("- %s\n", factStr)
+	                                        }
+	                                }
+	                                contextBuilder += "\n"
+	                        }
+
+	                        // Add narrative if present
+	                        if narrative, ok := obsMap["narrative"].(string); ok && narrative != "" {
+	                                contextBuilder += narrative + "\n\n"
+	                        }
+	                }
+	        }
+
+	        contextBuilder += "</relevant-memory>\n"
+	        contextToInject = contextBuilder
 	}
-
 	// Initialize session with matched observations count
 	result, err := hooks.POST(ctx.Port, "/api/sessions/init", map[string]interface{}{
 		"claudeSessionId":     ctx.SessionID,
