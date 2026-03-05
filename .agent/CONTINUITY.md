@@ -1,45 +1,38 @@
 # Continuity State
 
-**Last Updated:** 2026-03-05
-**Session:** Re-Genesis Phase 1 — Implementation (Deterministic Pipeline)
+**Last Updated:** 2026-03-06
+**Session:** Self-Learning Plan — Deep Planning Complete
 
-## Current Goal
-Phase 1 implementation: 8-step plan in `.agent/plans/re-genesis-phase1-implementation.md`
+## Done
+- Self-learning spec: `.agent/specs/self-learning.md` (10 FRs, 7 NFRs, 8 ACs)
+- Multi-model consensus (gemini + claude): Approach B "Minimal Viable Learning" selected
+- Implementation plan: `.agent/plans/self-learning.md` — 3 phases + 1 deferred
+- Challenging-plans critique: REVISE → 7 findings → all resolved → GO
+- Found MemTypeGuidance already exists in codebase
 
-## Genesis Progress
-- Phase 1 (DECOMPOSE): DONE
-- Phase 2 (DECIDE): DONE
-- Phase 2b (OmniMemory + Vector research): DONE
-- Phase 2c (Deep Planning — 3-track analysis): DONE (this session)
-- Phase 3 (CODIFY — Phase 1 Implementation): IN PROGRESS
+## Now
+Plan approved, ready for Phase 1 implementation.
 
-## Phase 1 Steps (8 total)
-1. [ ] raw_events table migration (022)
-2. [ ] Fix formatObservationDocs for Level 0 (CRITICAL)
-3. [ ] Observation model enrichment (migration 023)
-4. [ ] Deterministic Pipeline (`internal/pipeline/deterministic.go`)
-5. [ ] POST /api/events/ingest endpoint
-6. [ ] Hook rewiring (post-tool-use → /api/events/ingest)
-7. [ ] Context injection restructure (modular XML)
-8. [ ] Memory blocks schema (migration 024, schema only)
+## Next
+1. **Phase 1**: Guidance observations (ObsTypeGuidance, ClassifyMemoryType, `<engram-guidance>` block)
+2. **Phase 2**: Utility tracking (parseTranscript rewrite, InjectionCount, UtilityScore, EMA)
+3. **Phase 3**: LLM extraction at session end (new `internal/learning/` package)
+4. Phase 4: Shadow scoring — DEFERRED to v1.1
 
-## Key Decisions (this session)
-- DiskANN **DEFERRED** — BGE-small 384d uses HNSW, DiskANN only if >2000 dims
-- Entity tables **DEFERRED** to Phase 2 — file paths in observation fields for now
-- Memory blocks schema in Phase 1, population in Phase 2
-- formatObservationDocs fix is CRITICAL PATH (Step 2)
-- EnrichmentLevel as int (0=raw, 1=LLM, 2=block, 3=graph)
-- Level 0 embedding text: "{type}: {title}\nFiles: {files}\nConcepts: {concepts}"
+## Pending (from previous sessions)
+- Commit `/simplify` refactoring (8 files: `pkg/strutil` created, truncate deduplication)
+- Re-Genesis Phase 1 steps (see `.agent/plans/re-genesis-phase1-implementation.md`)
 
 ## Plan Documents
-- Architecture: `.agent/plans/re-genesis-architecture.md`
-- Phase 1 Plan: `.agent/plans/re-genesis-phase1-implementation.md`
+- Self-Learning Plan: `.agent/plans/self-learning.md`
+- Self-Learning Spec: `.agent/specs/self-learning.md`
+- Re-Genesis Architecture: `.agent/plans/re-genesis-architecture.md`
+- Re-Genesis Phase 1: `.agent/plans/re-genesis-phase1-implementation.md`
 
-## Key Files
-- Migrations: `internal/db/gorm/migrations.go`
-- Observation model: `pkg/models/observation.go`
-- Vector sync: `internal/vector/pgvector/sync.go`
-- Search: `internal/search/manager.go`
-- Pipeline: `internal/pipeline/deterministic.go` (NEW)
-- Hooks: `cmd/hooks/post-tool-use/main.go`
-- Server: `internal/worker/server.go`, `internal/worker/handlers.go`
+## Key Files (Self-Learning)
+- Observation model: `pkg/models/observation.go` (MemTypeGuidance already exists)
+- Scoring: `pkg/models/scoring.go` + `internal/scoring/calculator.go`
+- Feedback API: `internal/worker/handlers_scoring.go`
+- Session hooks: `cmd/hooks/session-start/main.go`, `cmd/hooks/stop/main.go`
+- Context inject: `internal/worker/handlers_context.go`
+- Sessions: `internal/worker/handlers_sessions.go`
