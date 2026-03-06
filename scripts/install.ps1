@@ -2,10 +2,10 @@
 # Usage: irm https://raw.githubusercontent.com/thebtf/engram/main/scripts/install.ps1 | iex
 #
 # Or with a specific version:
-# $env:MNEMONIC_VERSION = "v1.0.0"; irm https://raw.githubusercontent.com/thebtf/engram/main/scripts/install.ps1 | iex
+# $env:ENGRAM_VERSION = "v1.0.0"; irm https://raw.githubusercontent.com/thebtf/engram/main/scripts/install.ps1 | iex
 
 param(
-    [string]$Version = $env:MNEMONIC_VERSION,
+    [string]$Version = $env:ENGRAM_VERSION,
     [switch]$Uninstall
 )
 
@@ -42,21 +42,12 @@ function Get-LatestVersion {
             Write-Host "You have a few options:" -ForegroundColor Yellow
             Write-Host "  1. Wait ~1 hour for the rate limit to reset"
             Write-Host "  2. Specify a version manually:"
-            Write-Host "     `$env:MNEMONIC_VERSION = 'v0.6.1'; irm https://raw.githubusercontent.com/$GitHubRepo/main/scripts/install.ps1 | iex" -ForegroundColor Cyan
+            Write-Host "     `$env:ENGRAM_VERSION = 'v0.6.1'; irm https://raw.githubusercontent.com/$GitHubRepo/main/scripts/install.ps1 | iex" -ForegroundColor Cyan
             Write-Host "  3. Use a GitHub token (set `$env:GITHUB_TOKEN)"
-            Write-Host "  4. Clone and build from source:"
-            Write-Host "     git clone https://github.com/$GitHubRepo.git" -ForegroundColor Cyan
-            Write-Host "     cd engram; make build; make install" -ForegroundColor Cyan
             exit 1
         }
         Write-Error "Failed to fetch latest version from GitHub: $_"
     }
-}
-
-function Stop-ExistingWorker {
-    Write-Info "Stopping existing worker (if running)..."
-    Get-Process | Where-Object { $_.ProcessName -like "*worker*" -and $_.Path -like "*engram*" } | Stop-Process -Force -ErrorAction SilentlyContinue
-    Start-Sleep -Seconds 1
 }
 
 function Install-Release {
@@ -77,20 +68,36 @@ function Install-Release {
         Write-Info "Extracting archive..."
         Expand-Archive -Path $ZipPath -DestinationPath $TempDir -Force
 
-        Stop-ExistingWorker
-
         # Create installation directories
         Write-Info "Installing to $InstallDir..."
         New-Item -ItemType Directory -Path "$InstallDir\hooks" -Force | Out-Null
         New-Item -ItemType Directory -Path "$InstallDir\.claude-plugin" -Force | Out-Null
+        New-Item -ItemType Directory -Path "$InstallDir\commands" -Force | Out-Null
 
-        # Copy binaries
-        Copy-Item "$TempDir\worker.exe" "$InstallDir\" -Force
-        Copy-Item "$TempDir\mcp-server.exe" "$InstallDir\" -Force
+        # Copy binaries (goreleaser names: engram-server, engram-mcp, engram-mcp-stdio-proxy)
+        Copy-Item "$TempDir\engram-server.exe" "$InstallDir\" -Force -ErrorAction SilentlyContinue
+        Copy-Item "$TempDir\engram-mcp.exe" "$InstallDir\" -Force -ErrorAction SilentlyContinue
+        Copy-Item "$TempDir\engram-mcp-stdio-proxy.exe" "$InstallDir\" -Force -ErrorAction SilentlyContinue
         Copy-Item "$TempDir\hooks\*" "$InstallDir\hooks\" -Force
 
         # Copy plugin configuration
         Copy-Item "$TempDir\.claude-plugin\*" "$InstallDir\.claude-plugin\" -Force
+
+        # Copy slash commands if they exist in the release
+        if (Test-Path "$TempDir\commands") {
+            Copy-Item "$TempDir\commands\*" "$InstallDir\commands\" -Force -ErrorAction SilentlyContinue
+        }
+
+        # Copy skills if they exist in the release
+        if (Test-Path "$TempDir\skills") {
+            New-Item -ItemType Directory -Path "$InstallDir\skills" -Force | Out-Null
+            Copy-Item "$TempDir\skills\*" "$InstallDir\skills\" -Recurse -Force -ErrorAction SilentlyContinue
+        }
+
+        # Copy MCP config if it exists in the release
+        if (Test-Path "$TempDir\.mcp.json") {
+            Copy-Item "$TempDir\.mcp.json" "$InstallDir\.mcp.json" -Force
+        }
 
         Write-Success "Binaries installed to $InstallDir"
     } finally {
@@ -173,6 +180,8 @@ function Register-Plugin {
         Write-Success "Plugin enabled in settings.json"
         Write-Success "Statusline configured in settings.json"
 
+        # Note: MCP server registration is handled by the plugin's .mcp.json file.
+
         # Update known_marketplaces.json
         $Marketplaces = Get-Content $MarketplacesFile -Raw | ConvertFrom-Json
         $MarketplaceEntry = @{
@@ -186,109 +195,55 @@ function Register-Plugin {
         $Marketplaces | Add-Member -NotePropertyName "engram" -NotePropertyValue $MarketplaceEntry -Force
         $Marketplaces | ConvertTo-Json -Depth 10 | Out-File -Encoding UTF8 $MarketplacesFile
         Write-Success "Marketplace registered in known_marketplaces.json"
-
-        # Register MCP server in settings.json
-        $McpBinary = Join-Path $InstallDir "mcp-server.exe"
-        if (Test-Path $McpBinary) {
-            Write-Info "Registering MCP server in settings.json..."
-
-            # Reload settings to include any previous updates
-            $Settings = Get-Content $SettingsFile -Raw | ConvertFrom-Json
-
-            # Ensure mcpServers object exists
-            if (-not $Settings.mcpServers) {
-                $Settings | Add-Member -NotePropertyName "mcpServers" -NotePropertyValue @{} -Force
-            }
-
-            # Add MCP server entry
-            $McpEntry = @{
-                command = $McpBinary
-                args    = @("--project", "`${CLAUDE_PROJECT}")
-                env     = @{}
-            }
-
-            $Settings.mcpServers | Add-Member -NotePropertyName "engram" -NotePropertyValue $McpEntry -Force
-
-            $Settings | ConvertTo-Json -Depth 10 | Out-File -Encoding UTF8 $SettingsFile
-            Write-Success "MCP server registered successfully"
-        } else {
-            Write-Warn "MCP server binary not found at $McpBinary, skipping MCP registration"
-        }
     } catch {
         Write-Warn "Plugin registration encountered an error: $_"
     }
 }
 
-function Start-Worker {
-    $WorkerPath = Join-Path $InstallDir "worker.exe"
-    if (-not (Test-Path $WorkerPath)) {
-        Write-Error "Worker binary not found at $WorkerPath"
+function Setup-Connection {
+    Write-Host ""
+    Write-Info "Engram uses a remote server for storage. Configure your connection:"
+    Write-Host ""
+
+    $DefaultUrl = "http://localhost:37777/mcp"
+    $ServerUrl = Read-Host "  Server URL [$DefaultUrl]"
+    if ([string]::IsNullOrWhiteSpace($ServerUrl)) { $ServerUrl = $DefaultUrl }
+
+    # Ensure URL ends with /mcp
+    if (-not $ServerUrl.EndsWith("/mcp")) {
+        $ServerUrl = $ServerUrl.TrimEnd("/") + "/mcp"
+        Write-Info "Added /mcp suffix: $ServerUrl"
     }
 
-    Write-Info "Starting worker service..."
-    Start-Process -FilePath $WorkerPath -WindowStyle Hidden
+    $ApiToken = Read-Host "  API Token (empty for no auth)"
 
-    Start-Sleep -Seconds 2
+    # Set persistent user environment variables
+    [Environment]::SetEnvironmentVariable("ENGRAM_URL", $ServerUrl, "User")
+    [Environment]::SetEnvironmentVariable("ENGRAM_API_TOKEN", $ApiToken, "User")
+    Write-Success "Environment variables set (ENGRAM_URL, ENGRAM_API_TOKEN)"
+
+    # Also set for current process
+    $env:ENGRAM_URL = $ServerUrl
+    $env:ENGRAM_API_TOKEN = $ApiToken
+}
+
+function Test-ServerHealth {
+    $HealthUrl = $env:ENGRAM_URL -replace "/mcp$", "/health"
+    Write-Info "Checking server health at $HealthUrl..."
 
     try {
-        $response = Invoke-WebRequest -Uri "http://localhost:37777/health" -UseBasicParsing -TimeoutSec 5
-        Write-Success "Worker started successfully at http://localhost:37777"
+        $response = Invoke-WebRequest -Uri $HealthUrl -UseBasicParsing -TimeoutSec 5
+        Write-Success "Server is reachable"
     } catch {
-        Write-Warn "Worker may not have started properly. Check the process manually."
+        Write-Warn "Could not reach server at $HealthUrl"
+        Write-Warn "Make sure your Engram server is running. See docs/DEPLOYMENT.md for setup."
     }
 }
 
-function Test-OptionalDependencies {
-    $missingDeps = @()
-
-    # Check for Python 3.13+
-    try {
-        $pythonVersion = & python --version 2>&1
-        if ($pythonVersion -match "Python (\d+)\.(\d+)") {
-            $major = [int]$Matches[1]
-            $minor = [int]$Matches[2]
-            if ($major -lt 3 -or ($major -eq 3 -and $minor -lt 13)) {
-                $missingDeps += "Python 3.13+ (found $major.$minor)"
-            }
-        }
-    } catch {
-        $missingDeps += "Python 3.13+"
-    }
-
-    # Check for uvx
-    try {
-        $null = Get-Command uvx -ErrorAction Stop
-    } catch {
-        $missingDeps += "uvx"
-    }
-
-    if ($missingDeps.Count -gt 0) {
-        Write-Host ""
-        Write-Warn "Optional dependencies missing (needed for semantic search):"
-        foreach ($dep in $missingDeps) {
-            Write-Host "  - $dep"
-        }
-        Write-Host ""
-        Write-Info "Install on Windows:"
-        Write-Host "  winget install Python.Python.3.13"
-        Write-Host "  pip install uv"
-        Write-Host ""
-        Write-Info "Note: Requires Python 3.13+."
-        Write-Host ""
-        Write-Info "Semantic search will be disabled until these are installed."
-        Write-Info "Core functionality (SQLite storage, full-text search) will work."
-        Write-Host ""
-    } else {
-        Write-Success "Optional dependencies found (semantic search enabled)"
-    }
-}
-
-function Uninstall-ClaudeMnemonic {
+function Uninstall-Engram {
     param([switch]$KeepData)
 
     Write-Info "Uninstalling Engram..."
-
-    Stop-ExistingWorker
 
     # Remove directories
     Remove-Item -Recurse -Force $InstallDir -ErrorAction SilentlyContinue
@@ -310,10 +265,6 @@ function Uninstall-ClaudeMnemonic {
             if ($Settings.statusLine -and $Settings.statusLine.command -match "engram") {
                 $Settings.PSObject.Properties.Remove("statusLine")
             }
-            # Remove MCP server entry
-            if ($Settings.mcpServers) {
-                $Settings.mcpServers.PSObject.Properties.Remove("engram")
-            }
             $Settings | ConvertTo-Json -Depth 10 | Out-File -Encoding UTF8 $SettingsFile
         }
         if (Test-Path $MarketplacesFile) {
@@ -324,6 +275,10 @@ function Uninstall-ClaudeMnemonic {
     } catch {
         Write-Warn "Error cleaning up JSON files: $_"
     }
+
+    # Remove environment variables
+    [Environment]::SetEnvironmentVariable("ENGRAM_URL", $null, "User")
+    [Environment]::SetEnvironmentVariable("ENGRAM_API_TOKEN", $null, "User")
 
     # Handle data directory
     $DataDir = "$env:USERPROFILE\.engram"
@@ -348,7 +303,7 @@ Write-Host "================================================================" -F
 Write-Host ""
 
 if ($Uninstall) {
-    Uninstall-ClaudeMnemonic
+    Uninstall-Engram
     exit 0
 }
 
@@ -362,15 +317,20 @@ Write-Info "Installing version: $Version"
 # Install
 Install-Release -Version $Version
 Register-Plugin -Version $Version
-Start-Worker
-Test-OptionalDependencies
+
+# Configure server connection
+Setup-Connection
+
+# Verify server health
+Test-ServerHealth
 
 Write-Host ""
 Write-Host "================================================================" -ForegroundColor Green
 Write-Host "                  Installation Complete!                        " -ForegroundColor Green
 Write-Host "================================================================" -ForegroundColor Green
-Write-Host "  Dashboard: http://localhost:37777" -ForegroundColor White
+Write-Host "  Restart Claude Code to activate the engram plugin." -ForegroundColor White
+Write-Host "  Then run /engram:doctor to verify the connection." -ForegroundColor White
 Write-Host ""
-Write-Host "  Start a new Claude Code session to activate memory." -ForegroundColor White
+Write-Host "  Server setup: docs/DEPLOYMENT.md" -ForegroundColor White
 Write-Host "================================================================" -ForegroundColor Green
 Write-Host ""

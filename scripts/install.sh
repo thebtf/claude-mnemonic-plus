@@ -158,20 +158,6 @@ download_release() {
         fi
     fi
 
-    # Stop existing worker if running
-    info "Stopping existing worker (if running)..."
-    pkill -9 -f 'engram.*worker' 2>/dev/null || true
-    pkill -9 -f '\.claude/plugins/.*/worker' 2>/dev/null || true
-    # Kill process on port 37777 (use lsof on macOS, ss/fuser on Linux)
-    if command -v lsof &> /dev/null; then
-        lsof -ti :37777 | xargs kill -9 2>/dev/null || true
-    elif command -v ss &> /dev/null; then
-        ss -tlnp 'sport = :37777' 2>/dev/null | awk 'NR>1 {print $6}' | grep -oP 'pid=\K[0-9]+' | xargs -r kill -9 2>/dev/null || true
-    elif command -v fuser &> /dev/null; then
-        fuser -k 37777/tcp 2>/dev/null || true
-    fi
-    sleep 1
-
     # Create installation directories
     info "Installing to ${INSTALL_DIR}..."
     mkdir -p "$INSTALL_DIR/hooks"
@@ -179,8 +165,9 @@ download_release() {
     mkdir -p "$INSTALL_DIR/commands"
 
     # Copy binaries
-    cp "$tmp_dir/worker" "$INSTALL_DIR/"
-    cp "$tmp_dir/mcp-server" "$INSTALL_DIR/"
+    cp "$tmp_dir/engram-server" "$INSTALL_DIR/" 2>/dev/null || true
+    cp "$tmp_dir/engram-mcp" "$INSTALL_DIR/" 2>/dev/null || true
+    cp "$tmp_dir/engram-mcp-stdio-proxy" "$INSTALL_DIR/" 2>/dev/null || true
     cp "$tmp_dir/hooks/"* "$INSTALL_DIR/hooks/"
 
     # Copy plugin configuration
@@ -203,8 +190,9 @@ download_release() {
     fi
 
     # Make binaries executable
-    chmod +x "$INSTALL_DIR/worker"
-    chmod +x "$INSTALL_DIR/mcp-server"
+    chmod +x "$INSTALL_DIR/engram-server" 2>/dev/null || true
+    chmod +x "$INSTALL_DIR/engram-mcp" 2>/dev/null || true
+    chmod +x "$INSTALL_DIR/engram-mcp-stdio-proxy" 2>/dev/null || true
     chmod +x "$INSTALL_DIR/hooks/"*
 
     success "Binaries installed to ${INSTALL_DIR}"
@@ -309,112 +297,72 @@ EOF
 
     success "Marketplace registered in known_marketplaces.json"
 
-    # Register MCP server in settings.json
-    local mcp_binary="$INSTALL_DIR/mcp-server"
-    if [[ -f "$mcp_binary" ]]; then
-        info "Registering MCP server in settings.json..."
-
-        # MCP server entry - note the escaped ${CLAUDE_PROJECT}
-        local mcp_entry
-        mcp_entry=$(cat <<'EOF'
-{
-    "command": "MCP_BINARY_PLACEHOLDER",
-    "args": ["--project", "${CLAUDE_PROJECT}"],
-    "env": {}
-}
-EOF
-)
-        # Replace placeholder with actual path
-        mcp_entry=$(echo "$mcp_entry" | sed "s|MCP_BINARY_PLACEHOLDER|$mcp_binary|g")
-
-        # Add or update mcpServers field
-        if jq --arg key "engram" --argjson entry "$mcp_entry" \
-            '.mcpServers //= {} | .mcpServers[$key] = $entry' "$SETTINGS_FILE" > "${SETTINGS_FILE}.tmp"; then
-            mv "${SETTINGS_FILE}.tmp" "$SETTINGS_FILE"
-            success "MCP server registered successfully"
-        else
-            warn "Failed to register MCP server (jq error)"
-            rm -f "${SETTINGS_FILE}.tmp"
-        fi
-    else
-        warn "MCP server binary not found at $mcp_binary, skipping MCP registration"
-    fi
+    # Note: MCP server registration is handled by the plugin's .mcp.json file.
+    # No need to modify settings.json for MCP — the plugin handles this automatically.
 }
 
-# Start the worker service
-start_worker() {
-    local worker_path="$INSTALL_DIR/worker"
+# Prompt for server connection settings
+setup_connection() {
+    echo ""
+    info "Engram uses a remote server for storage. Configure your connection:"
+    echo ""
 
-    if [[ ! -x "$worker_path" ]]; then
-        error "Worker binary not found at $worker_path"
+    # Prompt for server URL
+    local default_url="http://localhost:37777/mcp"
+    read -p "  Server URL [${default_url}]: " ENGRAM_URL
+    ENGRAM_URL="${ENGRAM_URL:-$default_url}"
+
+    # Ensure URL ends with /mcp
+    if [[ "$ENGRAM_URL" != */mcp ]]; then
+        ENGRAM_URL="${ENGRAM_URL%/}/mcp"
+        info "Added /mcp suffix: $ENGRAM_URL"
     fi
 
-    info "Starting worker service..."
-    nohup "$worker_path" > /tmp/engram-worker.log 2>&1 &
+    # Prompt for API token
+    read -p "  API Token (empty for no auth): " ENGRAM_API_TOKEN
+    ENGRAM_API_TOKEN="${ENGRAM_API_TOKEN:-}"
 
-    sleep 2
+    # Detect shell profile
+    local shell_profile=""
+    if [[ -f "$HOME/.zshrc" ]]; then
+        shell_profile="$HOME/.zshrc"
+    elif [[ -f "$HOME/.bashrc" ]]; then
+        shell_profile="$HOME/.bashrc"
+    elif [[ -f "$HOME/.bash_profile" ]]; then
+        shell_profile="$HOME/.bash_profile"
+    fi
 
-    if curl -sS http://localhost:37777/health > /dev/null 2>&1; then
-        success "Worker started successfully at http://localhost:37777"
+    if [[ -n "$shell_profile" ]]; then
+        # Remove old entries if present
+        sed -i.bak '/^export ENGRAM_URL=/d' "$shell_profile" 2>/dev/null || true
+        sed -i.bak '/^export ENGRAM_API_TOKEN=/d' "$shell_profile" 2>/dev/null || true
+        rm -f "${shell_profile}.bak"
+
+        # Append new entries
+        echo "export ENGRAM_URL=\"${ENGRAM_URL}\"" >> "$shell_profile"
+        echo "export ENGRAM_API_TOKEN=\"${ENGRAM_API_TOKEN}\"" >> "$shell_profile"
+        success "Environment variables written to $shell_profile"
     else
-        warn "Worker may not have started properly. Check /tmp/engram-worker.log"
+        warn "Could not detect shell profile. Set these manually:"
+        echo "  export ENGRAM_URL=\"${ENGRAM_URL}\""
+        echo "  export ENGRAM_API_TOKEN=\"${ENGRAM_API_TOKEN}\""
     fi
+
+    # Export for current session
+    export ENGRAM_URL
+    export ENGRAM_API_TOKEN
 }
 
-# Check optional dependencies for semantic search
-check_optional_deps() {
-    local missing_deps=()
-    local install_hints=""
+# Verify server connectivity
+verify_health() {
+    local health_url="${ENGRAM_URL%/mcp}/health"
+    info "Checking server health at ${health_url}..."
 
-    # Check for Python 3.13+
-    if command -v python3 &> /dev/null; then
-        local py_version=$(python3 -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")' 2>/dev/null)
-        if [[ "$py_version" < "3.13" ]]; then
-            missing_deps+=("Python 3.13+ (found $py_version)")
-        fi
+    if curl -sS --connect-timeout 5 "$health_url" > /dev/null 2>&1; then
+        success "Server is reachable"
     else
-        missing_deps+=("Python 3.13+")
-    fi
-
-    # Check for uvx
-    if ! command -v uvx &> /dev/null; then
-        missing_deps+=("uvx")
-    fi
-
-    if [[ ${#missing_deps[@]} -gt 0 ]]; then
-        echo ""
-        warn "Optional dependencies missing (needed for semantic search):"
-        for dep in "${missing_deps[@]}"; do
-            echo "  - $dep"
-        done
-        echo ""
-
-        # Detect OS and show appropriate install command
-        case "$(uname -s)" in
-            Darwin)
-                info "Install on macOS:"
-                echo "  brew install python@3.13"
-                echo "  pip3 install uv"
-                ;;
-            Linux)
-                info "Install on Linux:"
-                echo "  sudo apt install python3 python3-pip"
-                echo "  pip3 install uv"
-                ;;
-            MINGW*|MSYS*|CYGWIN*)
-                info "Install on Windows:"
-                echo "  winget install Python.Python.3.13"
-                echo "  pip install uv"
-                ;;
-        esac
-        echo ""
-        info "Note: Requires Python 3.13+. Most package managers install the latest version."
-        echo ""
-        info "Semantic search will be disabled until these are installed."
-        info "Core functionality (SQLite storage, full-text search) will work."
-        echo ""
-    else
-        success "Optional dependencies found (semantic search enabled)"
+        warn "Could not reach server at ${health_url}"
+        warn "Make sure your Engram server is running. See docs/DEPLOYMENT.md for setup."
     fi
 }
 
@@ -460,20 +408,20 @@ main() {
         warn "Plugin registration incomplete - please install jq and run again"
     fi
 
-    # Start worker
-    start_worker
+    # Configure server connection
+    setup_connection
 
-    # Check optional dependencies
-    check_optional_deps
+    # Verify server health
+    verify_health
 
     echo ""
     echo "╔═══════════════════════════════════════════════════════════╗"
     echo "║                  Installation Complete!                   ║"
     echo "╠═══════════════════════════════════════════════════════════╣"
-    echo "║  Dashboard: http://localhost:37777                        ║"
-    echo "║  Logs: /tmp/engram-worker.log                    ║"
+    echo "║  Restart Claude Code to activate the engram plugin.       ║"
+    echo "║  Then run /engram:doctor to verify the connection.        ║"
     echo "║                                                           ║"
-    echo "║  Start a new Claude Code CLI session to activate memory.  ║"
+    echo "║  Server setup: docs/DEPLOYMENT.md                         ║"
     echo "╚═══════════════════════════════════════════════════════════╝"
     echo ""
 }
@@ -496,19 +444,6 @@ if [[ "${1:-}" == "--uninstall" ]]; then
     echo "╚═══════════════════════════════════════════════════════════╝"
     echo ""
 
-    info "Stopping worker processes..."
-    pkill -9 -f 'engram.*worker' 2>/dev/null || true
-    pkill -9 -f '\.claude/plugins/.*/worker' 2>/dev/null || true
-    # Kill process on port 37777 (use lsof on macOS, ss/fuser on Linux)
-    if command -v lsof &> /dev/null; then
-        lsof -ti :37777 | xargs kill -9 2>/dev/null || true
-    elif command -v ss &> /dev/null; then
-        ss -tlnp 'sport = :37777' 2>/dev/null | awk 'NR>1 {print $6}' | grep -oP 'pid=\K[0-9]+' | xargs -r kill -9 2>/dev/null || true
-    elif command -v fuser &> /dev/null; then
-        fuser -k 37777/tcp 2>/dev/null || true
-    fi
-    sleep 1
-
     info "Removing plugin directories..."
     rm -rf "$INSTALL_DIR"
     rm -rf "$CACHE_DIR"
@@ -521,10 +456,9 @@ if [[ "${1:-}" == "--uninstall" ]]; then
             jq 'del(.plugins["'"$PLUGIN_KEY"'"])' "$PLUGINS_FILE" > "${PLUGINS_FILE}.tmp" && mv "${PLUGINS_FILE}.tmp" "$PLUGINS_FILE"
         fi
         if [[ -f "$SETTINGS_FILE" ]]; then
-            # Remove plugin from enabled plugins, remove statusline if it's ours, and remove MCP server entry
+            # Remove plugin from enabled plugins, remove statusline if it's ours
             jq 'del(.enabledPlugins["'"$PLUGIN_KEY"'"]) |
-                if .statusLine.command | test("engram") then del(.statusLine) else . end |
-                del(.mcpServers["engram"])' "$SETTINGS_FILE" > "${SETTINGS_FILE}.tmp" && mv "${SETTINGS_FILE}.tmp" "$SETTINGS_FILE"
+                if .statusLine.command | test("engram") then del(.statusLine) else . end' "$SETTINGS_FILE" > "${SETTINGS_FILE}.tmp" && mv "${SETTINGS_FILE}.tmp" "$SETTINGS_FILE"
         fi
         if [[ -f "$MARKETPLACES_FILE" ]]; then
             jq 'del(.["engram"])' "$MARKETPLACES_FILE" > "${MARKETPLACES_FILE}.tmp" && mv "${MARKETPLACES_FILE}.tmp" "$MARKETPLACES_FILE"
