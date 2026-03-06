@@ -47,6 +47,35 @@ var AllMemoryTypes = []MemoryType{
         MemTypeContext,
         MemTypeGuidance,
 }
+
+// SourceType represents the provenance of an observation — where the data came from.
+type SourceType string
+
+const (
+	SourceToolVerified SourceType = "tool_verified"
+	SourceToolRead     SourceType = "tool_read"
+	SourceWebFetch     SourceType = "web_fetch"
+	SourceTodoWrite    SourceType = "todo_write"
+	SourceLLMDerived   SourceType = "llm_derived"
+	SourceUnknown      SourceType = "unknown"
+)
+
+// ClassifySourceType maps a Claude Code tool name to its source type.
+func ClassifySourceType(toolName string) SourceType {
+	switch toolName {
+	case "Edit", "Write", "Bash", "NotebookEdit":
+		return SourceToolVerified
+	case "Read", "Grep", "Glob", "LSP":
+		return SourceToolRead
+	case "WebFetch", "WebSearch":
+		return SourceWebFetch
+	case "TodoWrite", "TodoRead":
+		return SourceTodoWrite
+	default:
+		return SourceUnknown
+	}
+}
+
 // ObservationScope defines the visibility scope of an observation.
 type ObservationScope string
 
@@ -153,6 +182,7 @@ type Observation struct {
 	Scope           ObservationScope `db:"scope" json:"scope"`
 	Type            ObservationType  `db:"type" json:"type"`
 	MemoryType      MemoryType       `db:"memory_type" json:"memory_type"`
+	SourceType      SourceType       `db:"source_type" json:"source_type,omitempty"`
 	CreatedAt       string           `db:"created_at" json:"created_at"`
 	Subtitle        sql.NullString   `db:"subtitle" json:"subtitle,omitempty"`
 	Title           sql.NullString   `db:"title" json:"title,omitempty"`
@@ -184,6 +214,7 @@ type ParsedObservation struct {
 	FileMtimes    map[string]int64
 	Type          ObservationType
 	MemoryType    MemoryType
+	SourceType    SourceType
 	Title         string
 	Subtitle      string
 	Narrative     string
@@ -200,6 +231,7 @@ func (p *ParsedObservation) ToStoredObservation() *Observation {
 	return &Observation{
 		Type:          p.Type,
 		MemoryType:    p.MemoryType,
+		SourceType:    p.SourceType,
 		Title:         sql.NullString{String: p.Title, Valid: p.Title != ""},
 		Subtitle:      sql.NullString{String: p.Subtitle, Valid: p.Subtitle != ""},
 		Facts:         p.Facts,
@@ -258,6 +290,7 @@ type ObservationJSON struct {
 	Scope           ObservationScope `json:"scope"`
 	Type            ObservationType  `json:"type"`
 	MemoryType      string           `json:"memory_type"`
+	SourceType      string           `json:"source_type,omitempty"`
 	Title           string           `json:"title,omitempty"`
 	CreatedAt       string           `json:"created_at"`
 	Narrative       string           `json:"narrative,omitempty"`
@@ -291,6 +324,7 @@ func (o *Observation) MarshalJSON() ([]byte, error) {
 		Scope:           o.Scope,
 		Type:            o.Type,
 		MemoryType:      string(o.MemoryType),
+		SourceType:      string(o.SourceType),
 		Facts:           o.Facts,
 		Concepts:        o.Concepts,
 		FilesRead:       o.FilesRead,
@@ -346,6 +380,7 @@ func NewObservation(sdkSessionID, project string, parsed *ParsedObservation, pro
 		Scope:           scope,
 		Type:            parsed.Type,
 		MemoryType:      ClassifyMemoryType(parsed),
+		SourceType:      parsed.SourceType,
 		Title:           sql.NullString{String: parsed.Title, Valid: parsed.Title != ""},
 		Subtitle:        sql.NullString{String: parsed.Subtitle, Valid: parsed.Subtitle != ""},
 		Facts:           parsed.Facts,

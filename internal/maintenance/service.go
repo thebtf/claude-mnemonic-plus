@@ -6,28 +6,32 @@ import (
 	"sync"
 	"time"
 
+	"github.com/rs/zerolog"
 	"github.com/thebtf/engram/internal/config"
 	"github.com/thebtf/engram/internal/db/gorm"
-	"github.com/rs/zerolog"
+	"github.com/thebtf/engram/internal/telemetry"
 )
 
 // Service handles scheduled maintenance tasks.
 type Service struct {
-	log              zerolog.Logger
-	lastRunTime      time.Time
-	promptStore      *gorm.PromptStore
-	store            *gorm.Store
-	vectorCleanupFn  func(ctx context.Context, deletedIDs []int64)
-	config           *config.Config
-	summaryStore     *gorm.SummaryStore
-	stopCh           chan struct{}
-	doneCh           chan struct{}
-	observationStore *gorm.ObservationStore
-	lastRunDuration  time.Duration
-	totalCleanedObs  int64
-	totalOptimizeRun int64
-	mu               sync.Mutex
-	running          bool
+	log                 zerolog.Logger
+	lastRunTime         time.Time
+	promptStore         *gorm.PromptStore
+	store               *gorm.Store
+	vectorCleanupFn     func(ctx context.Context, deletedIDs []int64)
+	config              *config.Config
+	summaryStore        *gorm.SummaryStore
+	stopCh              chan struct{}
+	doneCh              chan struct{}
+	observationStore    *gorm.ObservationStore
+	similarityTelemetry *telemetry.SimilarityTelemetry
+	smartGC             *SmartGC
+	lastRunDuration     time.Duration
+	totalSmartGCArchived int64
+	totalCleanedObs     int64
+	totalOptimizeRun    int64
+	mu                  sync.Mutex
+	running             bool
 }
 
 // NewService creates a new maintenance service.
@@ -38,18 +42,22 @@ func NewService(
 	promptStore *gorm.PromptStore,
 	vectorCleanupFn func(ctx context.Context, deletedIDs []int64),
 	cfg *config.Config,
+	similarityTelemetry *telemetry.SimilarityTelemetry,
+	smartGC *SmartGC,
 	log zerolog.Logger,
 ) *Service {
 	return &Service{
-		store:            store,
-		observationStore: observationStore,
-		summaryStore:     summaryStore,
-		promptStore:      promptStore,
-		vectorCleanupFn:  vectorCleanupFn,
-		config:           cfg,
-		log:              log.With().Str("component", "maintenance").Logger(),
-		stopCh:           make(chan struct{}),
-		doneCh:           make(chan struct{}),
+		store:               store,
+		observationStore:    observationStore,
+		summaryStore:        summaryStore,
+		promptStore:         promptStore,
+		vectorCleanupFn:     vectorCleanupFn,
+		config:              cfg,
+		similarityTelemetry: similarityTelemetry,
+		smartGC:             smartGC,
+		log:                 log.With().Str("component", "maintenance").Logger(),
+		stopCh:              make(chan struct{}),
+		doneCh:              make(chan struct{}),
 	}
 }
 
@@ -165,6 +173,23 @@ func (s *Service) runMaintenance(ctx context.Context) {
 		s.log.Info().Int64("cleaned", cleanedPrompts).Msg("Cleaned old prompts")
 	}
 
+	// Task 5: Run similarity telemetry
+	if s.config.TelemetryEnabled && s.similarityTelemetry != nil {
+		s.similarityTelemetry.Run(ctx)
+	}
+
+	// Task 6: Smart GC — archive low-value observations
+	if s.config.SmartGCEnabled && s.smartGC != nil {
+		gcStats := s.smartGC.Run(ctx)
+		s.totalSmartGCArchived += gcStats.Archived
+		if gcStats.Archived > 0 {
+			s.log.Info().
+				Int64("archived", gcStats.Archived).
+				Int64("evaluated", gcStats.Evaluated).
+				Msg("Smart GC archived low-value observations")
+		}
+	}
+
 	// Update metrics
 	s.mu.Lock()
 	s.lastRunTime = time.Now()
@@ -272,15 +297,18 @@ func (s *Service) Stats() map[string]any {
 	defer s.mu.Unlock()
 
 	return map[string]any{
-		"enabled":           s.config.MaintenanceEnabled,
-		"interval_hours":    s.config.MaintenanceIntervalHours,
-		"retention_days":    s.config.ObservationRetentionDays,
-		"cleanup_stale":     s.config.CleanupStaleObservations,
-		"last_run":          s.lastRunTime,
-		"last_duration_ms":  s.lastRunDuration.Milliseconds(),
-		"total_cleaned_obs": s.totalCleanedObs,
-		"total_optimizes":   s.totalOptimizeRun,
-		"running":           s.running,
+		"enabled":            s.config.MaintenanceEnabled,
+		"interval_hours":     s.config.MaintenanceIntervalHours,
+		"retention_days":     s.config.ObservationRetentionDays,
+		"cleanup_stale":      s.config.CleanupStaleObservations,
+		"last_run":           s.lastRunTime,
+		"last_duration_ms":   s.lastRunDuration.Milliseconds(),
+		"total_cleaned_obs":  s.totalCleanedObs,
+		"total_optimizes":    s.totalOptimizeRun,
+		"running":            s.running,
+		"telemetry_enabled":      s.config.TelemetryEnabled,
+		"smart_gc_enabled":       s.config.SmartGCEnabled,
+		"smart_gc_total_archived": s.totalSmartGCArchived,
 	}
 }
 

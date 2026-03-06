@@ -756,3 +756,45 @@ func (s *Service) handleGraphSync(w http.ResponseWriter, r *http.Request) {
 
 	writeJSON(w, map[string]any{"status": "sync started in background"})
 }
+
+// handleGetSimilarityTelemetry returns the latest similarity telemetry data.
+// GET /api/telemetry/similarity
+func (s *Service) handleGetSimilarityTelemetry(w http.ResponseWriter, r *http.Request) {
+	s.initMu.RLock()
+	st := s.similarityTelemetry
+	s.initMu.RUnlock()
+
+	if st == nil {
+		writeJSON(w, map[string]any{
+			"enabled": false,
+			"message": "Similarity telemetry not initialized",
+		})
+		return
+	}
+
+	project := r.URL.Query().Get("project")
+
+	if project != "" {
+		snapshot, err := st.GetLatestSnapshot(r.Context(), project)
+		if err != nil {
+			http.Error(w, "failed to get telemetry: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+		writeJSON(w, map[string]any{
+			"enabled":  true,
+			"project":  project,
+			"snapshot": snapshot,
+		})
+		return
+	}
+
+	snapshots, err := st.GetAllLatestSnapshots(r.Context())
+	if err != nil {
+		http.Error(w, "failed to get telemetry: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, map[string]any{
+		"enabled":   true,
+		"snapshots": snapshots,
+	})
+}

@@ -161,6 +161,7 @@ func (s *Service) handleIngestEvent(w http.ResponseWriter, r *http.Request) {
 		FilesRead:     filesRead,
 		FilesModified: filesModified,
 	}
+	parsed.SourceType = models.ClassifySourceType(req.ToolName)
 
 	// Store observation using the existing store interface
 	obsID, _, err := s.observationStore.StoreObservation(r.Context(), req.SessionID, req.Project, parsed, 0, 0)

@@ -19,6 +19,7 @@ import (
 	"github.com/thebtf/engram/internal/consolidation"
 	"github.com/thebtf/engram/internal/db/gorm"
 	"github.com/thebtf/engram/internal/embedding"
+	"github.com/thebtf/engram/internal/maintenance"
 	"github.com/thebtf/engram/internal/mcp"
 	"github.com/thebtf/engram/internal/pattern"
 	"github.com/thebtf/engram/internal/reranking"
@@ -26,6 +27,7 @@ import (
 	"github.com/thebtf/engram/internal/search"
 	"github.com/thebtf/engram/internal/search/expansion"
 	"github.com/thebtf/engram/internal/sessions"
+	"github.com/thebtf/engram/internal/telemetry"
 	"github.com/thebtf/engram/internal/update"
 	"github.com/thebtf/engram/internal/vector"
 	"github.com/thebtf/engram/internal/vector/pgvector"
@@ -154,6 +156,8 @@ type Service struct {
 	dbWatcher              *watcher.Watcher
 	configWatcher          *watcher.Watcher
 	updater                *update.Updater
+	similarityTelemetry    *telemetry.SimilarityTelemetry
+	maintenanceService     *maintenance.Service
 	rateLimiter            *PerClientRateLimiter
 	tokenAuth              *TokenAuth
 	expensiveOpLimiter     *ExpensiveOperationLimiter
@@ -631,6 +635,14 @@ func (s *Service) initializeAsync() {
 	s.reranker = reranker
 	s.initMu.Unlock()
 
+	// Initialize similarity telemetry (optional — requires vector client)
+	if vectorClient != nil && store != nil && observationStore != nil {
+		simTelemetry := telemetry.NewSimilarityTelemetry(store, observationStore, vectorClient, log.Logger)
+		s.initMu.Lock()
+		s.similarityTelemetry = simTelemetry
+		s.initMu.Unlock()
+	}
+
 	// Background sync: populate FalkorDB from existing PostgreSQL relations.
 	if _, ok := gs.(*graphpkg.NoopGraphStore); !ok && gs != nil {
 		go s.syncGraphFromRelations()
@@ -699,6 +711,37 @@ func (s *Service) initializeAsync() {
 		log.Info().Msg("Pattern recognition engine started")
 	}
 
+	// Initialize Smart GC and maintenance service
+	// Build a vector cleanup function for maintenance tasks
+	var vectorCleanupFn func(ctx context.Context, deletedIDs []int64)
+	if vectorSync != nil {
+		vectorCleanupFn = func(ctx context.Context, deletedIDs []int64) {
+			if err := vectorSync.DeleteObservations(ctx, deletedIDs); err != nil {
+				log.Warn().Err(err).Msg("Maintenance: failed to delete observations from vector store")
+			}
+		}
+	}
+	var smartGC *maintenance.SmartGC
+	if cfg.SmartGCEnabled {
+		smartGC = maintenance.NewSmartGC(
+			store, observationStore, vectorCleanupFn,
+			scoreCalculator, cfg, log.Logger,
+		)
+	}
+	maintenanceSvc := maintenance.NewService(
+		store, observationStore, summaryStore, promptStore,
+		vectorCleanupFn, cfg, s.similarityTelemetry, smartGC, log.Logger,
+	)
+	s.initMu.Lock()
+	s.maintenanceService = maintenanceSvc
+	s.initMu.Unlock()
+	s.wg.Add(1)
+	go func() {
+		defer s.wg.Done()
+		maintenanceSvc.Start(s.ctx)
+	}()
+	log.Info().Bool("smart_gc", cfg.SmartGCEnabled).Msg("Maintenance service started")
+
 	// Initialize collection registry
 	collectionRegistry, colErr := collections.Load(config.GetCollectionConfigPath())
 	if colErr != nil {
@@ -739,7 +782,7 @@ func (s *Service) initializeAsync() {
 		vectorClient,
 		scoreCalculator,
 		recalculator,
-		nil, // maintenanceService
+		maintenanceSvc,
 		collectionRegistry,
 		sessionIdxStore,
 		consolidationScheduler,
@@ -1530,6 +1573,9 @@ func (s *Service) setupRoutes() {
 
 		// Bulk status operations
 		r.Post("/api/observations/bulk-status", s.handleBulkStatusUpdate)
+
+		// Telemetry
+		r.Get("/api/telemetry/similarity", s.handleGetSimilarityTelemetry)
 	})
 }
 

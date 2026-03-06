@@ -941,6 +941,64 @@ func runMigrations(db *gorm.DB, embeddingDims int) error {
 				return nil
 			},
 		},
+		// Migration 026: Telemetry snapshots table for belief revision measurement.
+		{
+			ID: "026_telemetry_snapshots",
+			Migrate: func(tx *gorm.DB) error {
+				sqls := []string{
+					`CREATE TABLE IF NOT EXISTS telemetry_snapshots (
+						id BIGSERIAL PRIMARY KEY,
+						snapshot_type TEXT NOT NULL,
+						project TEXT NOT NULL DEFAULT '',
+						data JSONB NOT NULL,
+						created_at_epoch BIGINT NOT NULL
+					)`,
+					`CREATE INDEX IF NOT EXISTS idx_telemetry_type_time ON telemetry_snapshots(snapshot_type, created_at_epoch DESC)`,
+				}
+				for _, s := range sqls {
+					if err := tx.Exec(s).Error; err != nil {
+						return fmt.Errorf("migration 026: %w", err)
+					}
+				}
+				return nil
+			},
+			Rollback: func(tx *gorm.DB) error {
+				return tx.Exec("DROP TABLE IF EXISTS telemetry_snapshots").Error
+			},
+		},
+
+		// Migration 027: Add source_type for provenance tracking (belief revision Phase 1).
+		{
+			ID: "027_observation_source_type",
+			Migrate: func(tx *gorm.DB) error {
+				sqls := []string{
+					`ALTER TABLE observations ADD COLUMN IF NOT EXISTS source_type TEXT DEFAULT 'unknown'`,
+					`CREATE INDEX IF NOT EXISTS idx_observations_source_type ON observations(source_type)`,
+					// Backfill existing observations based on their type field
+					`UPDATE observations SET source_type = CASE
+						WHEN type IN ('change', 'bugfix') THEN 'tool_verified'
+						WHEN type = 'discovery' THEN 'tool_read'
+						ELSE 'unknown'
+					END WHERE source_type = '' OR source_type IS NULL OR source_type = 'unknown'`,
+				}
+				for _, s := range sqls {
+					if err := tx.Exec(s).Error; err != nil {
+						return fmt.Errorf("migration 027: %w", err)
+					}
+				}
+				return nil
+			},
+			Rollback: func(tx *gorm.DB) error {
+				sqls := []string{
+					`DROP INDEX IF EXISTS idx_observations_source_type`,
+					`ALTER TABLE observations DROP COLUMN IF EXISTS source_type`,
+				}
+				for _, s := range sqls {
+					_ = tx.Exec(s).Error
+				}
+				return nil
+			},
+		},
 	})
 	if err := m.Migrate(); err != nil {
 		return fmt.Errorf("run gormigrate migrations: %w", err)

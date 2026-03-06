@@ -102,6 +102,10 @@ type Config struct {
 	FalkorDBPassword          string   // env-only: ENGRAM_FALKORDB_PASSWORD
 	FalkorDBGraphName         string   `json:"falkordb_graph_name"` // default: "engram"
 	GraphSearchExpansion      bool     `json:"graph_search_expansion"` // expand search via graph (default: true when graph provider set)
+	TelemetryEnabled          bool     `json:"telemetry_enabled"`
+	SmartGCEnabled            bool     `json:"smart_gc_enabled"`
+	SmartGCThreshold          float64  `json:"smart_gc_threshold"`
+	SmartGCMinAgeDays         int      `json:"smart_gc_min_age_days"`
 }
 
 var (
@@ -221,6 +225,10 @@ func Default() *Config {
 		DatabaseMaxConns:          10,
 		FalkorDBGraphName:         "engram",
 		GraphSearchExpansion:      true,
+		TelemetryEnabled:          true,
+		SmartGCEnabled:            false, // Opt-in: archive low-value observations
+		SmartGCThreshold:          0.05,  // FinalScore below this = candidate for archival
+		SmartGCMinAgeDays:         14,    // Only consider observations older than 14 days
 	}
 }
 
@@ -431,6 +439,22 @@ func Load() (*Config, error) {
 	}
 	if v := strings.TrimSpace(os.Getenv("ENGRAM_GRAPH_SEARCH_EXPANSION")); v == "false" || v == "0" {
 		cfg.GraphSearchExpansion = false
+	}
+	if v := strings.TrimSpace(os.Getenv("ENGRAM_TELEMETRY_ENABLED")); v == "false" || v == "0" {
+		cfg.TelemetryEnabled = false
+	}
+	if v := strings.TrimSpace(os.Getenv("ENGRAM_SMART_GC_ENABLED")); v == "true" || v == "1" {
+		cfg.SmartGCEnabled = true
+	}
+	if v := strings.TrimSpace(os.Getenv("ENGRAM_SMART_GC_THRESHOLD")); v != "" {
+		if f, err := strconv.ParseFloat(v, 64); err == nil && f > 0 {
+			cfg.SmartGCThreshold = f
+		}
+	}
+	if v := strings.TrimSpace(os.Getenv("ENGRAM_SMART_GC_MIN_AGE_DAYS")); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			cfg.SmartGCMinAgeDays = n
+		}
 	}
 
 	return cfg, nil

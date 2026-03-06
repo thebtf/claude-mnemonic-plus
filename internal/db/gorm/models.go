@@ -53,6 +53,7 @@ type Observation struct {
 	Scope           models.ObservationScope `gorm:"type:text;default:'project';check:scope IN ('project', 'global');index:idx_observations_scope;index:idx_observations_project_scope,priority:2"`
 	Type            models.ObservationType  `gorm:"type:text;check:type IN ('decision', 'bugfix', 'feature', 'refactor', 'discovery', 'change', 'guidance');index;not null"`
 	MemoryType      models.MemoryType       `gorm:"type:text;index:idx_observations_memory_type"`
+	SourceType      models.SourceType       `gorm:"type:text;index:idx_observations_source_type"`
 	CreatedAt       string                  `gorm:"not null"`
 	Facts           models.JSONStringArray  `gorm:"type:text"`
 	Narrative       sql.NullString          `gorm:"type:text"`
@@ -325,3 +326,14 @@ type IndexedSession struct {
 }
 
 func (IndexedSession) TableName() string { return "indexed_sessions" }
+
+// TelemetrySnapshot stores periodic telemetry measurements.
+type TelemetrySnapshot struct {
+	ID             int64  `gorm:"primaryKey;autoIncrement"`
+	SnapshotType   string `gorm:"type:text;not null;index:idx_telemetry_type_time,priority:1"`
+	Project        string `gorm:"type:text;not null;default:''"`
+	Data           string `gorm:"type:jsonb;not null"`
+	CreatedAtEpoch int64  `gorm:"not null;index:idx_telemetry_type_time,priority:2,sort:desc"`
+}
+
+func (TelemetrySnapshot) TableName() string { return "telemetry_snapshots" }
