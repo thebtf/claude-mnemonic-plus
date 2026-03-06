@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/thebtf/engram/internal/learning"
 	"github.com/thebtf/engram/internal/privacy"
 	"github.com/thebtf/engram/internal/worker/session"
 	"github.com/thebtf/engram/pkg/models"
@@ -351,4 +352,78 @@ func (s *Service) handleSummarize(w http.ResponseWriter, r *http.Request) {
 
 	s.broadcastProcessingStatus()
 	w.WriteHeader(http.StatusOK)
+}
+
+// ExtractLearningsRequest is the request body for learning extraction.
+type ExtractLearningsRequest struct {
+	Messages []learning.Message `json:"messages"`
+	Project  string             `json:"project"`
+}
+
+// handleExtractLearnings runs LLM-based extraction of behavioral patterns from a session transcript.
+// POST /api/sessions/{id}/extract-learnings
+func (s *Service) handleExtractLearnings(w http.ResponseWriter, r *http.Request) {
+	if !learning.IsEnabled() {
+		writeJSON(w, map[string]any{"status": "disabled", "count": 0})
+		return
+	}
+
+	var req ExtractLearningsRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	if len(req.Messages) == 0 {
+		writeJSON(w, map[string]any{"status": "ok", "count": 0})
+		return
+	}
+
+	s.initMu.RLock()
+	observationStore := s.observationStore
+	s.initMu.RUnlock()
+
+	if observationStore == nil {
+		http.Error(w, "service not ready", http.StatusServiceUnavailable)
+		return
+	}
+
+	// Create LLM client
+	llmCfg := learning.DefaultOpenAIConfig()
+	llmClient := learning.NewOpenAIClient(llmCfg)
+	if !llmClient.IsConfigured() {
+		writeJSON(w, map[string]any{"status": "llm_not_configured", "count": 0})
+		return
+	}
+
+	// Extract learnings
+	extractor := learning.NewExtractor(llmClient)
+	observations, err := extractor.ExtractGuidance(r.Context(), req.Messages, req.Project)
+	if err != nil {
+		log.Warn().Err(err).Msg("Learning extraction failed")
+		http.Error(w, "extraction failed", http.StatusInternalServerError)
+		return
+	}
+
+	if len(observations) == 0 {
+		writeJSON(w, map[string]any{"status": "ok", "count": 0})
+		return
+	}
+
+	// Store extracted observations
+	stored := 0
+	for _, obs := range observations {
+		if err := observationStore.CreateObservation(r.Context(), obs); err != nil {
+			log.Warn().Err(err).Str("title", obs.Title.String).Msg("Failed to store extracted guidance")
+			continue
+		}
+		stored++
+	}
+
+	log.Info().Int("extracted", len(observations)).Int("stored", stored).Msg("Learning extraction complete")
+
+	writeJSON(w, map[string]any{
+		"status": "ok",
+		"count":  stored,
+	})
 }

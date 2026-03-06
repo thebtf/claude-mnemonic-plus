@@ -291,5 +291,37 @@ func handleStop(ctx *hooks.HookContext, input *Input) (string, error) {
 		fmt.Fprintf(os.Stderr, "[stop] Warning: summary request failed: %v\n", err)
 	}
 
+	// Extract learnings via LLM (background, non-blocking)
+	if len(transcriptMessages) > 0 {
+		go extractLearnings(ctx, transcriptMessages, int64(sessionID))
+	}
+
 	return "", nil
+}
+
+// extractLearnings sends transcript to the server for LLM-based learning extraction.
+func extractLearnings(ctx *hooks.HookContext, messages []ParsedMessage, sessionID int64) {
+	// Convert to the format expected by the API
+	apiMessages := make([]map[string]string, 0, len(messages))
+	for _, msg := range messages {
+		apiMessages = append(apiMessages, map[string]string{
+			"role": msg.Role,
+			"text": msg.Text,
+		})
+	}
+
+	result, err := hooks.POST(ctx.Port,
+		fmt.Sprintf("/api/sessions/%d/extract-learnings", sessionID),
+		map[string]interface{}{
+			"messages": apiMessages,
+			"project":  ctx.Project,
+		})
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "[stop] Warning: learning extraction failed: %v\n", err)
+		return
+	}
+
+	if count, ok := result["count"].(float64); ok && count > 0 {
+		fmt.Fprintf(os.Stderr, "[stop] Extracted %d learnings from session\n", int(count))
+	}
 }

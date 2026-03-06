@@ -1343,6 +1343,7 @@ func (s *Service) setupRoutes() {
 		r.Post("/api/sessions/observations", s.handleObservation)
 		r.Post("/api/sessions/subagent-complete", s.handleSubagentComplete)
 		r.Post("/sessions/{id}/summarize", s.handleSummarize)
+		r.Post("/api/sessions/{id}/extract-learnings", s.handleExtractLearnings)
 
 		// Event ingest (Level 0 deterministic pipeline)
 		r.Post("/api/events/ingest", s.handleIngestEvent)
