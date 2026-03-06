@@ -29,17 +29,21 @@ func (s *SchedulerSuite) SetupTest() {
 }
 
 type mockObservationStore struct {
-	getAllFn             func(context.Context) ([]*models.Observation, error)
-	getAllIteratorFn     func(context.Context, int, func([]*models.Observation) bool) error
-	getRecentFn          func(context.Context, string, int) ([]*models.Observation, error)
-	updateImportanceFn   func(context.Context, map[int64]float64) error
-	archiveObservationFn func(context.Context, int64, string) error
+	getAllFn               func(context.Context) ([]*models.Observation, error)
+	getAllIteratorFn       func(context.Context, int, func([]*models.Observation) bool) error
+	getRecentFn            func(context.Context, string, int) ([]*models.Observation, error)
+	getOldestFn            func(context.Context, string, int) ([]*models.Observation, error)
+	updateImportanceFn     func(context.Context, map[int64]float64) error
+	incrementImportanceFn  func(context.Context, map[int64]float64, float64) error
+	archiveObservationFn   func(context.Context, int64, string) error
 
-	getAllCalled            int
-	getAllIteratorCalled    int
-	getRecentCalled         int
-	updateImportanceCalled  int
-	archiveObservationCalls int
+	getAllCalled              int
+	getAllIteratorCalled      int
+	getRecentCalled           int
+	getOldestCalled           int
+	updateImportanceCalled    int
+	incrementImportanceCalled int
+	archiveObservationCalls   int
 }
 
 func (m *mockObservationStore) GetAllObservations(ctx context.Context) ([]*models.Observation, error) {
@@ -88,6 +92,22 @@ func (m *mockObservationStore) UpdateImportanceScores(ctx context.Context, score
 		return nil
 	}
 	return m.updateImportanceFn(ctx, scores)
+}
+
+func (m *mockObservationStore) GetOldestObservations(ctx context.Context, project string, limit int) ([]*models.Observation, error) {
+	m.getOldestCalled++
+	if m.getOldestFn == nil {
+		return []*models.Observation{}, nil
+	}
+	return m.getOldestFn(ctx, project, limit)
+}
+
+func (m *mockObservationStore) IncrementImportanceScores(ctx context.Context, deltas map[int64]float64, cap float64) error {
+	m.incrementImportanceCalled++
+	if m.incrementImportanceFn == nil {
+		return nil
+	}
+	return m.incrementImportanceFn(ctx, deltas, cap)
 }
 
 func (m *mockObservationStore) ArchiveObservation(ctx context.Context, id int64, reason string) error {
@@ -155,7 +175,7 @@ func (m *mockRelationStore) GetAvgConfidenceBatch(ctx context.Context, obsIDs []
 func (s *SchedulerSuite) TestDefaultSchedulerConfigValues() {
 	cfg := DefaultSchedulerConfig()
 	assert.Equal(s.T(), 24*time.Hour, cfg.DecayInterval)
-	assert.Equal(s.T(), 168*time.Hour, cfg.AssociationInterval)
+	assert.Equal(s.T(), 24*time.Hour, cfg.AssociationInterval)
 	assert.Equal(s.T(), 2160*time.Hour, cfg.ForgetInterval)
 	assert.False(s.T(), cfg.ForgetEnabled)
 	assert.InDelta(s.T(), 0.01, cfg.ForgetThreshold, 0)

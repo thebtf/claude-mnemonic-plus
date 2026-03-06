@@ -19,7 +19,7 @@ type Embedder interface {
 
 // AssociationConfig contains parameters for creative association discovery.
 type AssociationConfig struct {
-	// SampleSize is the number of observations to sample per run (default 20).
+	// SampleSize is the number of observations to sample per run (default 50).
 	SampleSize int `json:"sample_size"`
 	// ThemeSimilarity is the minimum cosine similarity for SHARES_THEME (default 0.7).
 	ThemeSimilarity float64 `json:"theme_similarity"`
@@ -33,18 +33,33 @@ type AssociationConfig struct {
 	ContradictMaxSim float64 `json:"contradict_max_sim"`
 	// MinConfidence is the minimum confidence threshold for storing a relation (default 0.4).
 	MinConfidence float64 `json:"min_confidence"`
+	// ContradictConfidence is the confidence for CONTRADICTS relations (default 0.6).
+	ContradictConfidence float64 `json:"contradict_confidence"`
+	// ExplainConfidence is the confidence for EXPLAINS relations (default 0.7).
+	ExplainConfidence float64 `json:"explain_confidence"`
+	// ParallelConfidence is the confidence for PARALLEL_CONTEXT relations (default 0.5).
+	ParallelConfidence float64 `json:"parallel_confidence"`
+	// EvolvesMinSimilarity is the min similarity for EVOLVES_FROM (default 0.6).
+	EvolvesMinSimilarity float64 `json:"evolves_min_similarity"`
+	// EvolvesMinAgeDays is the min age gap in days for EVOLVES_FROM (default 7).
+	EvolvesMinAgeDays int `json:"evolves_min_age_days"`
 }
 
 // DefaultAssociationConfig returns the default association configuration.
 func DefaultAssociationConfig() AssociationConfig {
 	return AssociationConfig{
-		SampleSize:        20,
-		ThemeSimilarity:   0.7,
-		ExplainSimilarity: 0.5,
-		ParallelMaxDays:   7,
-		ParallelMaxSim:    0.4,
-		ContradictMaxSim:  0.3,
-		MinConfidence:     0.4,
+		SampleSize:           50,
+		ThemeSimilarity:      0.7,
+		ExplainSimilarity:    0.5,
+		ParallelMaxDays:      7,
+		ParallelMaxSim:       0.4,
+		ContradictMaxSim:     0.3,
+		MinConfidence:        0.4,
+		ContradictConfidence: 0.6,
+		ExplainConfidence:    0.7,
+		ParallelConfidence:   0.5,
+		EvolvesMinSimilarity: 0.6,
+		EvolvesMinAgeDays:    7,
 	}
 }
 
@@ -129,13 +144,35 @@ func (e *AssociationEngine) DiscoverAssociations(ctx context.Context, observatio
 
 // applyTypePairRules checks type-pair rules for two observations and returns a relation if matched.
 func (e *AssociationEngine) applyTypePairRules(a, b *models.Observation, similarity float64) *models.RelationDetectionResult {
+	ageDiffDays := ageDifferenceDays(a.CreatedAtEpoch, b.CreatedAtEpoch)
+
+	// Rule 0: Same type + same project + high similarity + age gap > N days → EVOLVES_FROM
+	// The newer observation refines/supersedes the older one on the same topic.
+	if a.Type == b.Type && a.Project == b.Project &&
+		similarity >= e.config.EvolvesMinSimilarity &&
+		ageDiffDays >= float64(e.config.EvolvesMinAgeDays) {
+		// Source = newer, Target = older
+		source, target := a, b
+		if b.CreatedAtEpoch > a.CreatedAtEpoch {
+			source, target = b, a
+		}
+		return &models.RelationDetectionResult{
+			SourceID:        source.ID,
+			TargetID:        target.ID,
+			RelationType:    models.RelationEvolvesFrom,
+			Confidence:      similarity,
+			DetectionSource: models.DetectionSourceCreativeAssociation,
+			Reason:          fmt.Sprintf("same type (%s) evolves over %.0f days with similarity %.2f", a.Type, ageDiffDays, similarity),
+		}
+	}
+
 	// Rule 1: Two Decisions + low similarity → CONTRADICTS
 	if a.Type == models.ObsTypeDecision && b.Type == models.ObsTypeDecision && similarity < e.config.ContradictMaxSim {
 		return &models.RelationDetectionResult{
 			SourceID:        a.ID,
 			TargetID:        b.ID,
 			RelationType:    models.RelationContradicts,
-			Confidence:      0.6,
+			Confidence:      e.config.ContradictConfidence,
 			DetectionSource: models.DetectionSourceCreativeAssociation,
 			Reason:          fmt.Sprintf("two decisions with low similarity (%.2f)", similarity),
 		}
@@ -147,7 +184,7 @@ func (e *AssociationEngine) applyTypePairRules(a, b *models.Observation, similar
 			SourceID:        a.ID,
 			TargetID:        b.ID,
 			RelationType:    models.RelationExplains,
-			Confidence:      0.7,
+			Confidence:      e.config.ExplainConfidence,
 			DetectionSource: models.DetectionSourceCreativeAssociation,
 			Reason:          fmt.Sprintf("insight/pattern pair with high similarity (%.2f)", similarity),
 		}
@@ -166,13 +203,12 @@ func (e *AssociationEngine) applyTypePairRules(a, b *models.Observation, similar
 	}
 
 	// Rule 4: Within N days + low similarity → PARALLEL_CONTEXT
-	ageDiffDays := ageDifferenceDays(a.CreatedAtEpoch, b.CreatedAtEpoch)
 	if ageDiffDays <= float64(e.config.ParallelMaxDays) && similarity < e.config.ParallelMaxSim {
 		return &models.RelationDetectionResult{
 			SourceID:        a.ID,
 			TargetID:        b.ID,
 			RelationType:    models.RelationParallelCtx,
-			Confidence:      0.5,
+			Confidence:      e.config.ParallelConfidence,
 			DetectionSource: models.DetectionSourceCreativeAssociation,
 			Reason:          fmt.Sprintf("temporal proximity (%.0f days) with low similarity (%.2f)", ageDiffDays, similarity),
 		}

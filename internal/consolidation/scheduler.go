@@ -15,7 +15,9 @@ type ObservationProvider interface {
 	GetAllObservations(ctx context.Context) ([]*models.Observation, error)
 	GetAllObservationsIterator(ctx context.Context, batchSize int, callback func([]*models.Observation) bool) error
 	GetRecentObservations(ctx context.Context, project string, limit int) ([]*models.Observation, error)
+	GetOldestObservations(ctx context.Context, project string, limit int) ([]*models.Observation, error)
 	UpdateImportanceScores(ctx context.Context, scores map[int64]float64) error
+	IncrementImportanceScores(ctx context.Context, deltas map[int64]float64, cap float64) error
 	ArchiveObservation(ctx context.Context, id int64, reason string) error
 }
 
@@ -48,7 +50,7 @@ type SchedulerConfig struct {
 func DefaultSchedulerConfig() SchedulerConfig {
 	return SchedulerConfig{
 		DecayInterval:       24 * time.Hour,
-		AssociationInterval: 168 * time.Hour,
+		AssociationInterval: 24 * time.Hour, // Daily (was weekly)
 		ForgetInterval:      2160 * time.Hour,
 		ForgetEnabled:       false,
 		ForgetThreshold:     0.01,
@@ -238,7 +240,14 @@ func (s *Scheduler) RunDecay(ctx context.Context) error {
 	return nil
 }
 
+// ImportanceBoostPerRelation is the default importance score boost per new relation.
+const ImportanceBoostPerRelation = 0.05
+
+// ImportanceScoreCap is the maximum importance score after boosting.
+const ImportanceScoreCap = 1.0
+
 // RunAssociations discovers creative associations between sampled observations.
+// Uses stratified sampling: 50% recent + 50% oldest non-archived for cross-temporal discovery.
 func (s *Scheduler) RunAssociations(ctx context.Context) error {
 	if s.assocEngine == nil {
 		s.logger.Debug().Msg("Association engine not available, skipping")
@@ -246,11 +255,20 @@ func (s *Scheduler) RunAssociations(ctx context.Context) error {
 	}
 
 	start := time.Now()
+	halfLimit := 50 // Half of 100 total pool
 
-	observations, err := s.obsStore.GetRecentObservations(ctx, s.config.Project, 100)
+	// Stratified sampling: recent + oldest
+	recent, err := s.obsStore.GetRecentObservations(ctx, s.config.Project, halfLimit)
 	if err != nil {
 		return err
 	}
+	oldest, err := s.obsStore.GetOldestObservations(ctx, s.config.Project, halfLimit)
+	if err != nil {
+		return err
+	}
+
+	// Merge and deduplicate by ID
+	observations := mergeAndDedup(recent, oldest)
 
 	results, err := s.assocEngine.DiscoverAssociations(ctx, observations)
 	if err != nil {
@@ -258,6 +276,7 @@ func (s *Scheduler) RunAssociations(ctx context.Context) error {
 	}
 
 	stored := 0
+	relatedIDs := make(map[int64]int) // ID -> new relation count
 	for _, result := range results {
 		rel := models.NewObservationRelation(
 			result.SourceID,
@@ -275,15 +294,51 @@ func (s *Scheduler) RunAssociations(ctx context.Context) error {
 			continue
 		}
 		stored++
+		relatedIDs[result.SourceID]++
+		relatedIDs[result.TargetID]++
+	}
+
+	// Boost importance scores for observations that gained new relations
+	if len(relatedIDs) > 0 {
+		deltas := make(map[int64]float64, len(relatedIDs))
+		for id, count := range relatedIDs {
+			deltas[id] = float64(count) * ImportanceBoostPerRelation
+		}
+		if err := s.obsStore.IncrementImportanceScores(ctx, deltas, ImportanceScoreCap); err != nil {
+			s.logger.Warn().Err(err).Msg("Failed to boost importance scores after associations")
+		}
 	}
 
 	s.logger.Info().
+		Int("pool_size", len(observations)).
+		Int("recent", len(recent)).
+		Int("oldest", len(oldest)).
 		Int("discovered", len(results)).
 		Int("stored", stored).
+		Int("boosted", len(relatedIDs)).
 		Dur("elapsed", time.Since(start)).
 		Msg("Association cycle complete")
 
 	return nil
+}
+
+// mergeAndDedup combines two observation slices and removes duplicates by ID.
+func mergeAndDedup(a, b []*models.Observation) []*models.Observation {
+	seen := make(map[int64]bool, len(a)+len(b))
+	result := make([]*models.Observation, 0, len(a)+len(b))
+	for _, obs := range a {
+		if !seen[obs.ID] {
+			seen[obs.ID] = true
+			result = append(result, obs)
+		}
+	}
+	for _, obs := range b {
+		if !seen[obs.ID] {
+			seen[obs.ID] = true
+			result = append(result, obs)
+		}
+	}
+	return result
 }
 
 // RunForgetting archives observations below the relevance threshold.

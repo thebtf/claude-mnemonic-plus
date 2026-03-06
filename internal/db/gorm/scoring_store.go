@@ -371,3 +371,48 @@ func (s *ObservationStore) ResetObservationScores(ctx context.Context) error {
 
 	return result.Error
 }
+
+// GetOldestObservations retrieves the oldest non-archived observations for a project.
+// Used by consolidation for stratified sampling to find cross-temporal associations.
+func (s *ObservationStore) GetOldestObservations(ctx context.Context, project string, limit int) ([]*models.Observation, error) {
+	var dbObservations []Observation
+	query := s.db.WithContext(ctx).
+		Where("archived = ? OR archived IS NULL", false).
+		Order("created_at_epoch ASC").
+		Limit(limit)
+
+	if project != "" {
+		query = query.Where("project = ? OR scope = 'global'", project)
+	}
+
+	err := query.Find(&dbObservations).Error
+	if err != nil {
+		return nil, err
+	}
+
+	return toModelObservations(dbObservations), nil
+}
+
+// IncrementImportanceScores atomically increments importance scores for multiple observations.
+// Each observation's score is increased by its delta, capped at the given maximum.
+// Uses atomic SQL to avoid read-then-write race with concurrent decay cycles.
+func (s *ObservationStore) IncrementImportanceScores(ctx context.Context, deltas map[int64]float64, cap float64) error {
+	if len(deltas) == 0 {
+		return nil
+	}
+
+	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		now := time.Now().UnixMilli()
+		for id, delta := range deltas {
+			// Atomic: UPDATE SET importance_score = LEAST(importance_score + delta, cap)
+			err := tx.Exec(
+				"UPDATE observations SET importance_score = LEAST(COALESCE(importance_score, 1.0) + ?, ?), score_updated_at_epoch = ? WHERE id = ?",
+				delta, cap, now, id,
+			).Error
+			if err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
