@@ -40,6 +40,7 @@ jobs:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
             type=ref,event=branch
+            type=raw,value=latest,enable={{is_default_branch}}
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
             type=sha,prefix=
@@ -67,6 +68,7 @@ jobs:
           push: ${{ github.event_name != 'pull_request' }}
           tags: |
             ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-client:${{ github.ref_type == 'tag' && github.ref_name || 'main' }}
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-client:latest
             ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-client:${{ github.sha }}
           labels: ${{ steps.meta.outputs.labels }}
           build-args: |
