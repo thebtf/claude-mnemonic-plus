@@ -180,3 +180,78 @@ func TestCompactObservation_MinimalFields(t *testing.T) {
 		t.Error("should not include empty facts")
 	}
 }
+
+func TestCompactObservationsWithLimit(t *testing.T) {
+	obs := []*models.Observation{
+		makeObs(1, "First", "Narrative one.", []string{"fact1"}),
+		makeObs(2, "Second", "Narrative two.", []string{"fact2"}),
+		makeObs(3, "Third", "Narrative three.", []string{"fact3"}),
+	}
+
+	t.Run("all full detail when fullCount negative", func(t *testing.T) {
+		result := compactObservationsWithLimit(obs, -1)
+		for i, m := range result {
+			if _, ok := m["narrative"]; !ok {
+				t.Errorf("obs %d should have narrative in full detail mode", i)
+			}
+		}
+	})
+
+	t.Run("first N full, rest condensed", func(t *testing.T) {
+		result := compactObservationsWithLimit(obs, 1)
+		// First should have narrative
+		if _, ok := result[0]["narrative"]; !ok {
+			t.Error("obs 0 should have narrative (full detail)")
+		}
+		if _, ok := result[0]["facts"]; !ok {
+			t.Error("obs 0 should have facts (full detail)")
+		}
+		// Second and third should NOT have narrative or facts
+		for _, idx := range []int{1, 2} {
+			if _, ok := result[idx]["narrative"]; ok {
+				t.Errorf("obs %d should NOT have narrative (condensed)", idx)
+			}
+			if _, ok := result[idx]["facts"]; ok {
+				t.Errorf("obs %d should NOT have facts (condensed)", idx)
+			}
+			// But should still have id, type, title
+			if result[idx]["id"] == nil {
+				t.Errorf("obs %d should have id", idx)
+			}
+			if result[idx]["title"] == nil {
+				t.Errorf("obs %d should have title", idx)
+			}
+		}
+	})
+
+	t.Run("fullCount zero means all condensed", func(t *testing.T) {
+		result := compactObservationsWithLimit(obs, 0)
+		for i, m := range result {
+			if _, ok := m["narrative"]; ok {
+				t.Errorf("obs %d should NOT have narrative when fullCount=0", i)
+			}
+		}
+	})
+}
+
+func TestEstimateTokensWithLimit(t *testing.T) {
+	obs := []*models.Observation{
+		makeObs(1, "First observation", "Long narrative with many details about the system.", []string{"fact one", "fact two"}),
+		makeObs(2, "Second observation", "Another long narrative with more details.", []string{"fact three"}),
+		makeObs(3, "Third observation", "Yet another narrative.", nil),
+	}
+
+	allFull := estimateTokensWithLimit(obs, -1)
+	mixed := estimateTokensWithLimit(obs, 1)   // only first is full
+	allCondensed := estimateTokensWithLimit(obs, 0)
+
+	if mixed >= allFull {
+		t.Errorf("mixed (%d) should be less than allFull (%d)", mixed, allFull)
+	}
+	if allCondensed >= mixed {
+		t.Errorf("allCondensed (%d) should be less than mixed (%d)", allCondensed, mixed)
+	}
+	if allCondensed <= 0 {
+		t.Errorf("allCondensed should be positive, got %d", allCondensed)
+	}
+}

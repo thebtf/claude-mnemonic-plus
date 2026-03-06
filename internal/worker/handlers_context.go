@@ -537,7 +537,7 @@ func (s *Service) handleFileContext(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// estimateObsTokens estimates the token count for a single observation.
+// estimateObsTokens estimates the token count for a single observation (full detail).
 // Uses ~4 chars per token heuristic for English text.
 func estimateObsTokens(obs *models.Observation) int {
 	chars := len(obs.Title.String) + len(obs.Subtitle.String) + len(obs.Narrative.String)
@@ -549,11 +549,28 @@ func estimateObsTokens(obs *models.Observation) int {
 	return (chars + 3) / 4 // ceil(chars/4)
 }
 
+// estimateObsTokensCondensed estimates tokens for condensed format (title + subtitle only).
+func estimateObsTokensCondensed(obs *models.Observation) int {
+	chars := len(obs.Title.String) + len(obs.Subtitle.String) + 30 // type tag + formatting
+	return (chars + 3) / 4
+}
+
 // estimateTokens estimates total tokens for a slice of observations.
 func estimateTokens(observations []*models.Observation) int {
+	return estimateTokensWithLimit(observations, -1)
+}
+
+// estimateTokensWithLimit estimates tokens accounting for condensed format.
+// First `fullCount` observations use full detail, the rest use condensed (title+subtitle).
+// If fullCount < 0, all observations use full detail.
+func estimateTokensWithLimit(observations []*models.Observation, fullCount int) int {
 	total := 0
-	for _, obs := range observations {
-		total += estimateObsTokens(obs)
+	for i, obs := range observations {
+		if fullCount >= 0 && i >= fullCount {
+			total += estimateObsTokensCondensed(obs)
+		} else {
+			total += estimateObsTokens(obs)
+		}
 	}
 	return total
 }
@@ -607,10 +624,32 @@ func compactObservation(obs *models.Observation) map[string]any {
 }
 
 // compactObservations converts a slice of observations to compact format.
+// Uses compactObservationsWithLimit with fullCount=-1 (all full detail).
 func compactObservations(observations []*models.Observation) []map[string]any {
+	return compactObservationsWithLimit(observations, -1)
+}
+
+// compactObservationsWithLimit converts observations to compact format.
+// First `fullCount` observations get full detail (narrative + facts).
+// Remaining observations get condensed format (title + subtitle only).
+// If fullCount < 0, all observations get full detail.
+func compactObservationsWithLimit(observations []*models.Observation, fullCount int) []map[string]any {
 	result := make([]map[string]any, len(observations))
 	for i, obs := range observations {
-		result[i] = compactObservation(obs)
+		if fullCount >= 0 && i >= fullCount {
+			// Condensed: only id, type, title, subtitle
+			m := map[string]any{
+				"id":    obs.ID,
+				"type":  obs.Type,
+				"title": obs.Title.String,
+			}
+			if obs.Subtitle.Valid && obs.Subtitle.String != "" {
+				m["subtitle"] = obs.Subtitle.String
+			}
+			result[i] = m
+		} else {
+			result[i] = compactObservation(obs)
+		}
 	}
 	return result
 }
@@ -920,17 +959,21 @@ func (s *Service) handleContextInject(w http.ResponseWriter, r *http.Request) {
 	compact := r.URL.Query().Get("format") == "compact"
 
 	if compact {
-		// Compact format: only fields the hook actually uses
+		// Compact format: only fields the hook actually uses.
+		// Main observations use fullCount limit — condensed entries skip narrative/facts.
+		// Recalculate token estimate accounting for condensed format savings.
+		compactTokenEstimate := estimateTokensWithLimit(clusteredObservations, fullCount) +
+			estimateTokens(guidanceObservations)
 		writeJSON(w, map[string]any{
 			"project":            project,
-			"observations":       compactObservations(clusteredObservations),
+			"observations":       compactObservationsWithLimit(clusteredObservations, fullCount),
 			"recent":             compactObservations(recentFresh),
 			"relevant":           compactObservations(relevantObservations),
 			"guidance":           compactObservations(guidanceObservations),
 			"full_count":         fullCount,
 			"stale_excluded":     staleCount,
 			"duplicates_removed": duplicatesRemoved,
-			"token_estimate":     tokenEstimate,
+			"token_estimate":     compactTokenEstimate,
 			"budget_trimmed":     budgetTrimmed,
 		})
 	} else {
