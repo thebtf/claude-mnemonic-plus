@@ -742,6 +742,11 @@ func (s *Service) initializeAsync() {
 	mcpSSEHandler := mcp.NewSSEHandler(mcpServer)
 	mcpStreamableHandler := mcp.NewStreamableHandler(mcpServer)
 
+	// Wire graph store into search manager for graph-augmented expansion.
+	if s.graphStore != nil {
+		searchMgr.SetGraphStore(s.graphStore)
+	}
+
 	s.initMu.Lock()
 	s.searchMgr = searchMgr
 	s.collectionRegistry = collectionRegistry
