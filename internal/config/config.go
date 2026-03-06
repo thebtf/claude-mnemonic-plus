@@ -85,6 +85,7 @@ type Config struct {
 	RerankingAPIModel         string   `json:"reranking_api_model"`    // default: "rerank-english-v3.0"
 	RerankingTimeoutMS        int      `json:"reranking_timeout_ms"`   // default: 500
 	RerankingAPIKey           string   // env-only: ENGRAM_RERANKING_API_KEY
+	ContextMaxTokens          int      `json:"context_max_tokens"` // Token budget for context injection (default: 8000, 0=unlimited)
 	HyDEEnabled               bool     `json:"hyde_enabled"`       // Enable HyDE query expansion (default: false)
 	HyDEAPIURL                string   `json:"hyde_api_url"`       // OpenAI-compatible chat API URL
 	HyDEModel                 string   `json:"hyde_model"`         // LLM model (default: "gpt-4o-mini")
@@ -206,6 +207,7 @@ func Default() *Config {
 		MaintenanceIntervalHours:  6,     // Run every 6 hours
 		ObservationRetentionDays:  0,     // 0 = no age-based deletion (keep all)
 		CleanupStaleObservations:  false, // Don't auto-cleanup stale observations
+		ContextMaxTokens:          8000,               // ~8K tokens default budget for context injection
 		HyDEEnabled:               false,              // Opt-in: requires API configuration
 		HyDEModel:                 "gpt-4o-mini",      // Cost-efficient default
 		HyDEMaxTokens:             150,
@@ -362,6 +364,11 @@ func Load() (*Config, error) {
 	if v := strings.TrimSpace(os.Getenv("ENGRAM_RERANKING_TIMEOUT_MS")); v != "" {
 		if ms, err := strconv.Atoi(v); err == nil && ms > 0 {
 			cfg.RerankingTimeoutMS = ms
+		}
+	}
+	if v := strings.TrimSpace(os.Getenv("ENGRAM_CONTEXT_MAX_TOKENS")); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n >= 0 {
+			cfg.ContextMaxTokens = n
 		}
 	}
 	if v := strings.TrimSpace(os.Getenv("ENGRAM_HYDE_ENABLED")); v == "true" || v == "1" {

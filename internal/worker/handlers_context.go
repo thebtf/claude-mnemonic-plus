@@ -537,6 +537,84 @@ func (s *Service) handleFileContext(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// estimateObsTokens estimates the token count for a single observation.
+// Uses ~4 chars per token heuristic for English text.
+func estimateObsTokens(obs *models.Observation) int {
+	chars := len(obs.Title.String) + len(obs.Subtitle.String) + len(obs.Narrative.String)
+	for _, fact := range obs.Facts {
+		chars += len(fact)
+	}
+	// Add overhead for type tag, formatting, bullet points (~50 chars)
+	chars += 50
+	return (chars + 3) / 4 // ceil(chars/4)
+}
+
+// estimateTokens estimates total tokens for a slice of observations.
+func estimateTokens(observations []*models.Observation) int {
+	total := 0
+	for _, obs := range observations {
+		total += estimateObsTokens(obs)
+	}
+	return total
+}
+
+// trimToTokenBudget trims observations to fit within a token budget.
+// Returns the trimmed slice, number of observations removed, and estimated token count.
+func trimToTokenBudget(observations []*models.Observation, budget int) ([]*models.Observation, int, int) {
+	if budget <= 0 || len(observations) == 0 {
+		return observations, 0, estimateTokens(observations)
+	}
+
+	var totalTokens int
+	for i, obs := range observations {
+		tokens := estimateObsTokens(obs)
+		if totalTokens+tokens > budget {
+			return observations[:i], len(observations) - i, totalTokens
+		}
+		totalTokens += tokens
+	}
+	return observations, 0, totalTokens
+}
+
+// filterByIDs filters observations to only include those with IDs in the set.
+func filterByIDs(observations []*models.Observation, ids map[int64]struct{}) []*models.Observation {
+	result := make([]*models.Observation, 0, len(observations))
+	for _, obs := range observations {
+		if _, ok := ids[obs.ID]; ok {
+			result = append(result, obs)
+		}
+	}
+	return result
+}
+
+// compactObservation returns only the fields needed by the session-start hook.
+func compactObservation(obs *models.Observation) map[string]any {
+	m := map[string]any{
+		"id":    obs.ID,
+		"type":  obs.Type,
+		"title": obs.Title.String,
+	}
+	if obs.Subtitle.Valid && obs.Subtitle.String != "" {
+		m["subtitle"] = obs.Subtitle.String
+	}
+	if obs.Narrative.Valid && obs.Narrative.String != "" {
+		m["narrative"] = obs.Narrative.String
+	}
+	if len(obs.Facts) > 0 {
+		m["facts"] = obs.Facts
+	}
+	return m
+}
+
+// compactObservations converts a slice of observations to compact format.
+func compactObservations(observations []*models.Observation) []map[string]any {
+	result := make([]map[string]any, len(observations))
+	for i, obs := range observations {
+		result[i] = compactObservation(obs)
+	}
+	return result
+}
+
 // buildFileQuery extracts meaningful search terms from a file path.
 func buildFileQuery(filePath string) string {
 	// Remove common prefixes and extensions
@@ -794,6 +872,36 @@ func (s *Service) handleContextInject(w http.ResponseWriter, r *http.Request) {
 		s.incrementRetrievalCounts(ids)
 	}
 
+	// Apply token budget: estimate tokens and trim observations to fit
+	tokenBudget := s.config.ContextMaxTokens
+	var tokenEstimate int
+	var budgetTrimmed int
+
+	if tokenBudget > 0 {
+		// Estimate tokens per observation (~4 chars per token for English)
+		// Reserve 20% of budget for guidance
+		guidanceBudget := tokenBudget / 5
+		mainBudget := tokenBudget - guidanceBudget
+
+		// Trim guidance first
+		guidanceObservations, _, _ = trimToTokenBudget(guidanceObservations, guidanceBudget)
+
+		// Trim main observations
+		var mainTrimmed int
+		clusteredObservations, mainTrimmed, tokenEstimate = trimToTokenBudget(clusteredObservations, mainBudget)
+		budgetTrimmed = mainTrimmed
+
+		// Also trim recent and relevant sections to not exceed what's in clustered
+		clusteredIDs := make(map[int64]struct{}, len(clusteredObservations))
+		for _, obs := range clusteredObservations {
+			clusteredIDs[obs.ID] = struct{}{}
+		}
+		recentFresh = filterByIDs(recentFresh, clusteredIDs)
+		relevantObservations = filterByIDs(relevantObservations, clusteredIDs)
+	} else {
+		tokenEstimate = estimateTokens(clusteredObservations) + estimateTokens(guidanceObservations)
+	}
+
 	log.Info().
 		Str("project", project).
 		Int("total", len(allRecentRaw)).
@@ -801,21 +909,44 @@ func (s *Service) handleContextInject(w http.ResponseWriter, r *http.Request) {
 		Int("clustered", len(clusteredObservations)).
 		Int("duplicates", duplicatesRemoved).
 		Int("stale_excluded", staleCount).
+		Int("budget_trimmed", budgetTrimmed).
+		Int("token_estimate", tokenEstimate).
 		Int("recent_section", len(recentFresh)).
 		Int("relevant_section", len(relevantObservations)).
 		Int("guidance_section", len(guidanceObservations)).
 		Msg("Context injection with clustering")
 
-	writeJSON(w, map[string]any{
-		"project":            project,
-		"observations":       clusteredObservations,
-		"recent":             recentFresh,
-		"relevant":           relevantObservations,
-		"guidance":           guidanceObservations,
-		"full_count":         fullCount,
-		"stale_excluded":     staleCount,
-		"duplicates_removed": duplicatesRemoved,
-	})
+	// Check if compact format is requested
+	compact := r.URL.Query().Get("format") == "compact"
+
+	if compact {
+		// Compact format: only fields the hook actually uses
+		writeJSON(w, map[string]any{
+			"project":            project,
+			"observations":       compactObservations(clusteredObservations),
+			"recent":             compactObservations(recentFresh),
+			"relevant":           compactObservations(relevantObservations),
+			"guidance":           compactObservations(guidanceObservations),
+			"full_count":         fullCount,
+			"stale_excluded":     staleCount,
+			"duplicates_removed": duplicatesRemoved,
+			"token_estimate":     tokenEstimate,
+			"budget_trimmed":     budgetTrimmed,
+		})
+	} else {
+		writeJSON(w, map[string]any{
+			"project":            project,
+			"observations":       clusteredObservations,
+			"recent":             recentFresh,
+			"relevant":           relevantObservations,
+			"guidance":           guidanceObservations,
+			"full_count":         fullCount,
+			"stale_excluded":     staleCount,
+			"duplicates_removed": duplicatesRemoved,
+			"token_estimate":     tokenEstimate,
+			"budget_trimmed":     budgetTrimmed,
+		})
+	}
 }
 
 // handleContextCount returns the count of observations for a project.

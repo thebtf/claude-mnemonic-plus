@@ -32,7 +32,7 @@ func main() {
 
 func handleSessionStart(ctx *hooks.HookContext, input *Input) (string, error) {
 	// Fetch observations for context injection
-	endpoint := fmt.Sprintf("/api/context/inject?project=%s&cwd=%s",
+	endpoint := fmt.Sprintf("/api/context/inject?project=%s&cwd=%s&format=compact",
 		url.QueryEscape(ctx.Project),
 		url.QueryEscape(ctx.CWD))
 
@@ -55,9 +55,24 @@ func handleSessionStart(ctx *hooks.HookContext, input *Input) (string, error) {
 		fullCount = int(fc)
 	}
 
+	// Get token estimate and budget info
+	tokenEstimate := 0
+	budgetTrimmed := 0
+	if te, ok := result["token_estimate"].(float64); ok {
+		tokenEstimate = int(te)
+	}
+	if bt, ok := result["budget_trimmed"].(float64); ok {
+		budgetTrimmed = int(bt)
+	}
+
 	// Show count to user via stderr
-	fmt.Fprintf(os.Stderr, "[engram] Injecting %d observations from project memory (%d detailed, %d condensed)\n",
-		len(obsData), min(fullCount, len(obsData)), max(0, len(obsData)-fullCount))
+	if budgetTrimmed > 0 {
+		fmt.Fprintf(os.Stderr, "[engram] Injecting %d observations (~%d tokens, %d trimmed by budget)\n",
+			len(obsData), tokenEstimate, budgetTrimmed)
+	} else {
+		fmt.Fprintf(os.Stderr, "[engram] Injecting %d observations (~%d tokens)\n",
+			len(obsData), tokenEstimate)
+	}
 
 	// Extract observation IDs and mark as injected (non-blocking, fire-and-forget)
 	go func() {
