@@ -28,7 +28,9 @@ jobs:
           lfs: true
 
       - name: Fetch tags
-        run: git fetch --force --tags
+        run: |
+          git config --global --add safe.directory /__w/engram/engram
+          git fetch --force --tags
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
