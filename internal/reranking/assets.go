@@ -1,3 +1,5 @@
+//go:build !windows
+
 // Package reranking provides cross-encoder reranking for search results.
 package reranking
 

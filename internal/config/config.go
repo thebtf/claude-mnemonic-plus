@@ -80,6 +80,11 @@ type Config struct {
 	RerankingEnabled          bool     `json:"reranking_enabled"`
 	ContextShowLastSummary    bool     `json:"context_show_last_summary"`
 	CleanupStaleObservations  bool     `json:"cleanup_stale_observations"`
+	RerankingProvider         string   `json:"reranking_provider"`     // "onnx" | "api" (default: "api")
+	RerankingAPIBaseURL       string   `json:"reranking_api_base_url"` // Cohere-compatible rerank endpoint
+	RerankingAPIModel         string   `json:"reranking_api_model"`    // default: "rerank-english-v3.0"
+	RerankingTimeoutMS        int      `json:"reranking_timeout_ms"`   // default: 500
+	RerankingAPIKey           string   // env-only: ENGRAM_RERANKING_API_KEY
 	WorkerHost                string   // env-only
 	WorkerToken               string   // env-only
 	CollectionConfigPath      string   // env-only
@@ -161,11 +166,14 @@ func Default() *Config {
 		MaxConns:                  4,
 		Model:                     DefaultModel,
 		EmbeddingModel:            DefaultEmbeddingModel,
-		RerankingEnabled:          true,  // Enable by default for improved relevance
-		RerankingCandidates:       100,   // Retrieve top 100 candidates
-		RerankingResults:          10,    // Return top 10 after reranking
-		RerankingAlpha:            0.7,   // Favor cross-encoder score
-		RerankingMinImprovement:   0,     // Always apply reranking
+		RerankingEnabled:          true,             // Enable by default for improved relevance
+		RerankingProvider:         "api",            // Use API reranker by default (ONNX is dead on Windows)
+		RerankingAPIModel:         "rerank-english-v3.0", // Cohere Rerank v3
+		RerankingTimeoutMS:        500,              // 500ms hard timeout for search path
+		RerankingCandidates:       100,              // Retrieve top 100 candidates
+		RerankingResults:          10,               // Return top 10 after reranking
+		RerankingAlpha:            0.7,              // Favor cross-encoder score
+		RerankingMinImprovement:   0,                // Always apply reranking
 		GraphEnabled:              true,  // Enable graph-aware search by default
 		GraphMaxHops:              2,     // Two-hop traversal
 		GraphBranchFactor:         5,     // Expand top 5 neighbors per node
@@ -327,6 +335,23 @@ func Load() (*Config, error) {
 	if v := envFirstOf("ENGRAM_EMBEDDING_DIMENSIONS", "EMBEDDING_DIMENSIONS"); v != "" {
 		if d, err := strconv.Atoi(v); err == nil && d > 0 {
 			cfg.EmbeddingDimensions = d
+		}
+	}
+	if v := strings.TrimSpace(os.Getenv("ENGRAM_RERANKING_PROVIDER")); v != "" {
+		cfg.RerankingProvider = v
+	}
+	if v := strings.TrimSpace(os.Getenv("ENGRAM_RERANKING_API_URL")); v != "" {
+		cfg.RerankingAPIBaseURL = v
+	}
+	if v := strings.TrimSpace(os.Getenv("ENGRAM_RERANKING_API_KEY")); v != "" {
+		cfg.RerankingAPIKey = v
+	}
+	if v := strings.TrimSpace(os.Getenv("ENGRAM_RERANKING_API_MODEL")); v != "" {
+		cfg.RerankingAPIModel = v
+	}
+	if v := strings.TrimSpace(os.Getenv("ENGRAM_RERANKING_TIMEOUT_MS")); v != "" {
+		if ms, err := strconv.Atoi(v); err == nil && ms > 0 {
+			cfg.RerankingTimeoutMS = ms
 		}
 	}
 	if v := strings.TrimSpace(os.Getenv("DATABASE_DSN")); v != "" {

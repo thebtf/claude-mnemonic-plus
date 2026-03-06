@@ -111,7 +111,7 @@ type Service struct {
 	ctx                    context.Context
 	initError              error
 	server                 *http.Server
-	reranker               *reranking.Service
+	reranker               reranking.Reranker
 	observationStore       *gorm.ObservationStore
 	summaryStore           *gorm.SummaryStore
 	promptStore            *gorm.PromptStore
@@ -404,6 +404,75 @@ func NewService(version string) (*Service, error) {
 	return svc, nil
 }
 
+// createReranker creates a reranker based on the configured provider.
+// Returns nil if creation fails (graceful degradation — reranking disabled).
+func (s *Service) createReranker() reranking.Reranker {
+	provider := s.config.RerankingProvider
+	if provider == "" {
+		provider = "api"
+	}
+
+	alpha := s.config.RerankingAlpha
+	if alpha <= 0 || alpha > 1 {
+		alpha = 0.7
+	}
+
+	switch provider {
+	case "api":
+		if s.config.RerankingAPIKey == "" {
+			log.Warn().Msg("Reranking API key not set (ENGRAM_RERANKING_API_KEY) - reranking disabled")
+			return nil
+		}
+		if s.config.RerankingAPIBaseURL == "" {
+			log.Warn().Msg("Reranking API URL not set (ENGRAM_RERANKING_API_URL) - reranking disabled")
+			return nil
+		}
+
+		timeout := time.Duration(s.config.RerankingTimeoutMS) * time.Millisecond
+		if timeout <= 0 {
+			timeout = 500 * time.Millisecond
+		}
+
+		ranker, err := reranking.NewAPIService(reranking.APIConfig{
+			BaseURL: s.config.RerankingAPIBaseURL,
+			APIKey:  s.config.RerankingAPIKey,
+			Model:   s.config.RerankingAPIModel,
+			Alpha:   alpha,
+			Timeout: timeout,
+		})
+		if err != nil {
+			log.Warn().Err(err).Msg("API reranker creation failed - reranking disabled")
+			return nil
+		}
+		log.Info().
+			Str("provider", "api").
+			Str("model", s.config.RerankingAPIModel).
+			Float64("alpha", alpha).
+			Msg("API reranking enabled")
+		return ranker
+
+	case "onnx":
+		if reranking.NewONNXReranker == nil {
+			log.Warn().Msg("ONNX reranker not available on this platform - reranking disabled")
+			return nil
+		}
+		ranker, err := reranking.NewONNXReranker(alpha)
+		if err != nil {
+			log.Warn().Err(err).Msg("ONNX reranker creation failed - reranking disabled")
+			return nil
+		}
+		log.Info().
+			Str("provider", "onnx").
+			Float64("alpha", alpha).
+			Msg("ONNX cross-encoder reranking enabled")
+		return ranker
+
+	default:
+		log.Warn().Str("provider", provider).Msg("Unknown reranking provider - reranking disabled")
+		return nil
+	}
+}
+
 // initializeAsync performs heavy initialization in the background.
 func (s *Service) initializeAsync() {
 	log.Info().Msg("Starting async initialization...")
@@ -443,7 +512,7 @@ func (s *Service) initializeAsync() {
 	var vectorClient vector.Client
 	var vectorSync *pgvector.Sync
 
-	var reranker *reranking.Service
+	var reranker reranking.Reranker
 
 	emb, err := embedding.NewServiceFromConfig()
 	if err != nil {
@@ -465,22 +534,9 @@ func (s *Service) initializeAsync() {
 				Msg("pgvector vector search enabled")
 		}
 
-		// Create cross-encoder reranking service if enabled
+		// Create reranking service if enabled (API or ONNX)
 		if s.config.RerankingEnabled {
-			rerankCfg := reranking.DefaultConfig()
-			if s.config.RerankingAlpha > 0 && s.config.RerankingAlpha <= 1 {
-				rerankCfg.Alpha = s.config.RerankingAlpha
-			}
-
-			ranker, err := reranking.NewService(rerankCfg)
-			if err != nil {
-				log.Warn().Err(err).Msg("Cross-encoder reranking service creation failed - reranking disabled")
-			} else {
-				reranker = ranker
-				log.Info().
-					Float64("alpha", rerankCfg.Alpha).
-					Msg("Cross-encoder reranking enabled")
-			}
+			reranker = s.createReranker()
 		}
 
 		// Create query expander for improved search recall
@@ -767,7 +823,7 @@ func (s *Service) reinitializeDatabase() {
 	var vectorClient vector.Client
 	var vectorSync *pgvector.Sync
 
-	var reranker *reranking.Service
+	var reranker reranking.Reranker
 
 	emb, err := embedding.NewServiceFromConfig()
 	if err != nil {
@@ -786,20 +842,9 @@ func (s *Service) reinitializeDatabase() {
 			log.Info().Msg("pgvector reconnected after reinit")
 		}
 
-		// Recreate cross-encoder reranking service if enabled
+		// Recreate reranking service if enabled (API or ONNX)
 		if s.config.RerankingEnabled {
-			rerankCfg := reranking.DefaultConfig()
-			if s.config.RerankingAlpha > 0 && s.config.RerankingAlpha <= 1 {
-				rerankCfg.Alpha = s.config.RerankingAlpha
-			}
-
-			ranker, err := reranking.NewService(rerankCfg)
-			if err != nil {
-				log.Warn().Err(err).Msg("Cross-encoder reranking service creation failed after reinit")
-			} else {
-				reranker = ranker
-				log.Info().Msg("Cross-encoder reranking reconnected after reinit")
-			}
+			reranker = s.createReranker()
 		}
 
 		// Recreate query expander

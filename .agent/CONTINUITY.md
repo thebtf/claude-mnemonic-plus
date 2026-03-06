@@ -1,38 +1,35 @@
 # Continuity State
 
 **Last Updated:** 2026-03-06
-**Session:** Self-Learning Plan — Deep Planning Complete
+**Session:** RAG Improvements — Phase 1: API Reranker
 
 ## Done
-- Self-learning spec: `.agent/specs/self-learning.md` (10 FRs, 7 NFRs, 8 ACs)
-- Multi-model consensus (gemini + claude): Approach B "Minimal Viable Learning" selected
-- Implementation plan: `.agent/plans/self-learning.md` — 3 phases + 1 deferred
-- Challenging-plans critique: REVISE → 7 findings → all resolved → GO
-- Found MemTypeGuidance already exists in codebase
+- Self-learning plan: all 3 phases complete (Phase 4 deferred to v1.1)
+  - Phase 1: Guidance observations (ObsTypeGuidance)
+  - Phase 2: Utility tracking (EMA, injection count, utility signals)
+  - Phase 3: LLM extraction at session end (`internal/learning/`)
+- Self-learning spec: `.agent/specs/self-learning.md`
+- RAG improvements plan: `.agent/plans/rag-improvements.md` — 3 phases
 
 ## Now
-Plan approved, ready for Phase 1 implementation.
+RAG Improvements Phase 1: API Reranker (replacing dead ONNX)
+- Task 1.1: Extract Reranker interface — IN PROGRESS
+- Task 1.2: Implement API reranker client
+- Task 1.3: Config & factory
+- Task 1.4: Tests
 
 ## Next
-1. **Phase 1**: Guidance observations (ObsTypeGuidance, ClassifyMemoryType, `<engram-guidance>` block)
-2. **Phase 2**: Utility tracking (parseTranscript rewrite, InjectionCount, UtilityScore, EMA)
-3. **Phase 3**: LLM extraction at session end (new `internal/learning/` package)
-4. Phase 4: Shadow scoring — DEFERRED to v1.1
+- RAG Phase 2: Enhanced Consolidation (stratified sampling, EVOLVES rule)
+- RAG Phase 3: HyDE (Hypothetical Document Embeddings)
 
-## Pending (from previous sessions)
-- Commit `/simplify` refactoring (8 files: `pkg/strutil` created, truncate deduplication)
-- Re-Genesis Phase 1 steps (see `.agent/plans/re-genesis-phase1-implementation.md`)
+## Key Files (RAG Phase 1)
+- Existing reranker: `internal/reranking/service.go` (ONNX-based, dead on Windows)
+- Worker service: `internal/worker/service.go` (field: `*reranking.Service` at line 114)
+- Context handler: `internal/worker/handlers_context.go` (calls Rerank/RerankByScore)
+- Health handler: `internal/worker/handlers_update.go` (calls Score)
+- Config: `internal/config/config.go`
 
 ## Plan Documents
+- RAG Improvements: `.agent/plans/rag-improvements.md`
 - Self-Learning Plan: `.agent/plans/self-learning.md`
-- Self-Learning Spec: `.agent/specs/self-learning.md`
-- Re-Genesis Architecture: `.agent/plans/re-genesis-architecture.md`
-- Re-Genesis Phase 1: `.agent/plans/re-genesis-phase1-implementation.md`
-
-## Key Files (Self-Learning)
-- Observation model: `pkg/models/observation.go` (MemTypeGuidance already exists)
-- Scoring: `pkg/models/scoring.go` + `internal/scoring/calculator.go`
-- Feedback API: `internal/worker/handlers_scoring.go`
-- Session hooks: `cmd/hooks/session-start/main.go`, `cmd/hooks/stop/main.go`
-- Context inject: `internal/worker/handlers_context.go`
-- Sessions: `internal/worker/handlers_sessions.go`
+- Global Roadmap: `.agent/plans/global-roadmap.md`
