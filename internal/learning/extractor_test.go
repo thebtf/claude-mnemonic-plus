@@ -44,7 +44,7 @@ func TestExtractGuidance_ValidResponse(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, obs, 1)
 	assert.Equal(t, models.ObsTypeGuidance, obs[0].Type)
-	assert.Equal(t, "Always use snake_case for Go variables", obs[0].Title.String)
+	assert.Equal(t, "Always use snake_case for Go variables", obs[0].Title)
 	assert.Contains(t, obs[0].Concepts, "best-practice")
 }
 
@@ -119,7 +119,7 @@ func TestExtractGuidance_FiltersInvalidConcepts(t *testing.T) {
 
 	require.NoError(t, err)
 	require.Len(t, obs, 1)
-	assert.Equal(t, models.JSONStringArray{"security", "performance"}, obs[0].Concepts)
+	assert.Equal(t, []string{"security", "performance"}, obs[0].Concepts)
 }
 
 func TestExtractGuidance_CapsAt5Learnings(t *testing.T) {

@@ -413,8 +413,8 @@ func (s *Service) handleExtractLearnings(w http.ResponseWriter, r *http.Request)
 	// Store extracted observations
 	stored := 0
 	for _, obs := range observations {
-		if err := observationStore.CreateObservation(r.Context(), obs); err != nil {
-			log.Warn().Err(err).Str("title", obs.Title.String).Msg("Failed to store extracted guidance")
+		if _, _, err := observationStore.StoreObservation(r.Context(), "", req.Project, obs, 0, 0); err != nil {
+			log.Warn().Err(err).Str("title", obs.Title).Msg("Failed to store extracted guidance")
 			continue
 		}
 		stored++

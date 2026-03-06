@@ -41,7 +41,7 @@ func IsEnabled() bool {
 }
 
 // ExtractGuidance analyzes a session transcript and returns guidance observations.
-func (e *Extractor) ExtractGuidance(ctx context.Context, messages []Message, project string) ([]*models.Observation, error) {
+func (e *Extractor) ExtractGuidance(ctx context.Context, messages []Message, project string) ([]*models.ParsedObservation, error) {
 	if len(messages) == 0 {
 		return nil, nil
 	}
@@ -72,22 +72,19 @@ func (e *Extractor) ExtractGuidance(ctx context.Context, messages []Message, pro
 		return nil, nil
 	}
 
-	// Convert to observations
-	observations := make([]*models.Observation, 0, len(learnings))
+	// Convert to parsed observations
+	observations := make([]*models.ParsedObservation, 0, len(learnings))
 	for _, l := range learnings {
 		// Validate concepts against allowed list
 		validConcepts := filterValidConcepts(l.Concepts)
 
-		parsed := &models.ParsedObservation{
+		observations = append(observations, &models.ParsedObservation{
 			Type:      models.ObsTypeGuidance,
 			Title:     l.Title,
 			Narrative: l.Narrative,
 			Concepts:  validConcepts,
 			Scope:     models.ScopeGlobal,
-		}
-
-		obs := models.NewObservation("", project, parsed, 0, 0)
-		observations = append(observations, obs)
+		})
 	}
 
 	return observations, nil
