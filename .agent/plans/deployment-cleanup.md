@@ -42,8 +42,8 @@ They CAN: ask user about their OS, generate platform-specific commands, call MCP
 - [x] Task 1.5: Add client variables section (ENGRAM_URL, ENGRAM_API_TOKEN)
 - [x] Task 1.6: Update architecture diagram to show Streamable HTTP
 
-### Phase 2: Plugin setup command + doctor update
-- Task 2.1: Create `plugin/commands/setup.md` -- `/engram:setup` interactive guide
+### Phase 2: Plugin setup command + doctor update -- DONE
+- [x] Task 2.1: Create `plugin/commands/setup.md` -- `/engram:setup` interactive guide
   - Ask user for their OS (or infer from conversation context)
   - Ask for server URL (default: http://localhost:37777/mcp)
   - Ask for API token (or empty for no auth)
@@ -53,27 +53,27 @@ They CAN: ask user about their OS, generate platform-specific commands, call MCP
     - Windows: `[Environment]::SetEnvironmentVariable("ENGRAM_URL", "...", "User")`
   - Instruct user to restart Claude Code
   - After restart, verify with `check_system_health()` MCP tool
-- Task 2.2: Update `plugin/commands/doctor.md`
+- [x] Task 2.2: Update `plugin/commands/doctor.md`
   - If MCP connection fails, suggest: "Run `/engram:setup` to configure your connection"
   - Note: doctor command cannot read env vars directly -- it relies on MCP tool calls
     and user-reported error messages for diagnosis
 
-### Phase 4: Goreleaser + release cleanup (before Phase 3 -- unblocks scripts)
-- Task 4.1: Add `mcp-stdio-proxy` build to `.goreleaser.yaml`
+### Phase 4: Goreleaser + release cleanup -- DONE
+- [x] Task 4.1: Add `mcp-stdio-proxy` build to `.goreleaser.yaml`
   - `CGO_ENABLED=0` (VERIFIED: pure Go, stdlib-only imports in cmd/mcp-stdio-proxy/main.go)
   - All 3 platforms: darwin/arm64, linux/amd64, windows/amd64
   - Binary name: `engram-mcp-stdio-proxy`
-- Task 4.2: Update release header template
+- [x] Task 4.2: Update release header template
   - Primary: plugin marketplace (`/plugin marketplace add thebtf/engram-marketplace`)
   - Secondary: manual install script
   - Tertiary: direct download for advanced users
-- Task 4.3: Verify archive includes all plugin files (already confirmed in goreleaser)
+- [x] Task 4.3: Verify archive includes all plugin files (already confirmed in goreleaser)
 
-### Phase 3: Refactor install scripts (refactor, not rewrite)
+### Phase 3: Refactor install scripts -- DONE
 The existing scripts have solid download, registration, and error handling.
 Actual work: delete dead functions, fix binary names, add env var prompting.
 
-- Task 3.1: Refactor `scripts/install.sh` (currently 554 lines)
+- [x] Task 3.1: Refactor `scripts/install.sh` (554 -> ~410 lines)
   - KEEP: `detect_platform()`, `get_latest_version()`, `download_release()`, `register_plugin()`
   - DELETE: `start_worker()`, `check_optional_deps()` (Python/uvx checks from SQLite era)
   - FIX: binary name references `worker` -> `engram-server`, `mcp-server` -> `engram-mcp`
@@ -81,7 +81,7 @@ Actual work: delete dead functions, fix binary names, add env var prompting.
   - ADD: verify server health with `curl $ENGRAM_URL/../health`
   - PRESERVE: temp-file-and-rename pattern for JSON file writes (atomic, safe for concurrency)
   - REMOVE: MCP server registration in `settings.json` (plugin handles this now via .mcp.json)
-- Task 3.2: Refactor `scripts/install.ps1` (currently 377 lines)
+- [x] Task 3.2: Refactor `scripts/install.ps1` (377 -> ~275 lines)
   - Same changes as install.sh but PowerShell native
   - FIX: `$env:MNEMONIC_VERSION` -> `$env:ENGRAM_VERSION` (line 5, old project name)
   - FIX: binary name references to match goreleaser output
