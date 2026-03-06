@@ -45,6 +45,54 @@ func (s *ObservationStore) IncrementRetrievalCount(ctx context.Context, ids []in
 	return result.Error
 }
 
+// IncrementInjectionCounts increments the injection counter for the given observation IDs.
+// Called when observations are injected into Claude Code context.
+func (s *ObservationStore) IncrementInjectionCounts(ctx context.Context, ids []int64) error {
+	if len(ids) == 0 {
+		return nil
+	}
+
+	result := s.db.WithContext(ctx).
+		Exec("UPDATE observations SET injection_count = COALESCE(injection_count, 0) + 1 WHERE id IN ?", ids)
+
+	return result.Error
+}
+
+// UpdateUtilityScore updates the utility score for a single observation using EMA.
+// signal: 1.0 = used, 0.0 = corrected/ignored
+// alpha: EMA smoothing factor (default 0.1 for slow adaptation)
+// maxDelta: maximum score change per session (default 0.05 for confidence cap)
+func (s *ObservationStore) UpdateUtilityScore(ctx context.Context, id int64, signal, alpha, maxDelta float64) error {
+	// Fetch current score
+	var obs Observation
+	if err := s.db.WithContext(ctx).Select("utility_score").First(&obs, id).Error; err != nil {
+		return err
+	}
+
+	// EMA: new = alpha * signal + (1-alpha) * old
+	newScore := alpha*signal + (1-alpha)*obs.UtilityScore
+
+	// Apply confidence cap: limit change per session
+	delta := newScore - obs.UtilityScore
+	if delta > maxDelta {
+		newScore = obs.UtilityScore + maxDelta
+	} else if delta < -maxDelta {
+		newScore = obs.UtilityScore - maxDelta
+	}
+
+	// Clamp to [0, 1]
+	if newScore < 0 {
+		newScore = 0
+	} else if newScore > 1 {
+		newScore = 1
+	}
+
+	return s.db.WithContext(ctx).
+		Model(&Observation{}).
+		Where("id = ?", id).
+		Update("utility_score", newScore).Error
+}
+
 // UpdateImportanceScore updates the importance score for a single observation.
 func (s *ObservationStore) UpdateImportanceScore(ctx context.Context, id int64, score float64) error {
 	now := time.Now().UnixMilli()
@@ -273,6 +321,28 @@ func (s *ObservationStore) GetMostRetrievedObservations(ctx context.Context, pro
 	query := s.db.WithContext(ctx).
 		Where("retrieval_count > 0").
 		Order("retrieval_count DESC, created_at_epoch DESC").
+		Limit(limit)
+
+	if project != "" {
+		query = query.Where("project = ? OR scope = 'global'", project)
+	}
+
+	err := query.Find(&observations).Error
+	if err != nil {
+		return nil, err
+	}
+
+	return toModelObservations(observations), nil
+}
+
+// GetRecentlyInjectedObservations returns observations that have been injected at least once.
+// Used by the stop hook to detect utility signals in the transcript.
+func (s *ObservationStore) GetRecentlyInjectedObservations(ctx context.Context, project string, limit int) ([]*models.Observation, error) {
+	var observations []Observation
+
+	query := s.db.WithContext(ctx).
+		Where("injection_count > 0").
+		Order("injection_count DESC, created_at_epoch DESC").
 		Limit(limit)
 
 	if project != "" {

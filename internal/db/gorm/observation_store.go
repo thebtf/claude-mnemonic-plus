@@ -1176,8 +1176,10 @@ func toModelObservation(o *Observation) *models.Observation {
 		CreatedAt:       o.CreatedAt,
 		CreatedAtEpoch:  o.CreatedAtEpoch,
 		ImportanceScore: o.ImportanceScore,
+		UtilityScore:    o.UtilityScore,
 		UserFeedback:    o.UserFeedback,
 		RetrievalCount:  o.RetrievalCount,
+		InjectionCount:  o.InjectionCount,
 		LastRetrievedAt: o.LastRetrievedAt,
 		ScoreUpdatedAt:  o.ScoreUpdatedAt,
 		IsSuperseded:    o.IsSuperseded != 0, // Convert int to bool

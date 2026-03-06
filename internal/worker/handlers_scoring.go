@@ -90,6 +90,96 @@ func (s *Service) handleObservationFeedback(w http.ResponseWriter, r *http.Reque
 	})
 }
 
+// handleMarkInjected records that observations were injected into Claude Code context.
+// POST /api/observations/mark-injected
+func (s *Service) handleMarkInjected(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		IDs []int64 `json:"ids"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	if len(req.IDs) == 0 {
+		writeJSON(w, map[string]any{"status": "ok", "count": 0})
+		return
+	}
+
+	s.initMu.RLock()
+	observationStore := s.observationStore
+	s.initMu.RUnlock()
+
+	if observationStore == nil {
+		http.Error(w, "service not ready", http.StatusServiceUnavailable)
+		return
+	}
+
+	if err := observationStore.IncrementInjectionCounts(r.Context(), req.IDs); err != nil {
+		http.Error(w, "failed to mark injected", http.StatusInternalServerError)
+		return
+	}
+
+	writeJSON(w, map[string]any{"status": "ok", "count": len(req.IDs)})
+}
+
+// UtilityRequest represents a utility signal for an observation.
+type UtilityRequest struct {
+	Signal string `json:"signal"` // "used", "corrected", "ignored"
+}
+
+// handleObservationUtility records a utility signal for an observation.
+// POST /api/observations/{id}/utility
+func (s *Service) handleObservationUtility(w http.ResponseWriter, r *http.Request) {
+	idStr := chi.URLParam(r, "id")
+	id, err := strconv.ParseInt(idStr, 10, 64)
+	if err != nil {
+		http.Error(w, "invalid observation id", http.StatusBadRequest)
+		return
+	}
+
+	var req UtilityRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	// Map signal to numeric value
+	var signal float64
+	switch req.Signal {
+	case "used":
+		signal = 1.0
+	case "corrected":
+		signal = 0.0
+	case "ignored":
+		signal = 0.3 // Slightly negative — not as bad as correction
+	default:
+		http.Error(w, "signal must be 'used', 'corrected', or 'ignored'", http.StatusBadRequest)
+		return
+	}
+
+	s.initMu.RLock()
+	observationStore := s.observationStore
+	s.initMu.RUnlock()
+
+	if observationStore == nil {
+		http.Error(w, "service not ready", http.StatusServiceUnavailable)
+		return
+	}
+
+	// EMA with alpha=0.1, max delta=0.05 per session
+	if err := observationStore.UpdateUtilityScore(r.Context(), id, signal, 0.1, 0.05); err != nil {
+		http.Error(w, "failed to update utility", http.StatusInternalServerError)
+		return
+	}
+
+	writeJSON(w, map[string]any{
+		"status": "ok",
+		"id":     id,
+		"signal": req.Signal,
+	})
+}
+
 // handleGetScoringStats returns scoring statistics and configuration.
 // GET /api/scoring/stats
 func (s *Service) handleGetScoringStats(w http.ResponseWriter, r *http.Request) {
@@ -295,6 +385,36 @@ func (s *Service) handleGetConceptWeights(w http.ResponseWriter, r *http.Request
 	}
 
 	writeJSON(w, weights)
+}
+
+// handleGetRecentlyInjected returns observations that have been injected into context.
+// GET /api/observations/recently-injected
+func (s *Service) handleGetRecentlyInjected(w http.ResponseWriter, r *http.Request) {
+	limit := parseIntParam(r, "limit", 50)
+	project := r.URL.Query().Get("project")
+
+	s.initMu.RLock()
+	observationStore := s.observationStore
+	s.initMu.RUnlock()
+
+	if observationStore == nil {
+		http.Error(w, "service not ready", http.StatusServiceUnavailable)
+		return
+	}
+
+	observations, err := observationStore.GetRecentlyInjectedObservations(r.Context(), project, limit)
+	if err != nil {
+		http.Error(w, "failed to get recently injected observations", http.StatusInternalServerError)
+		return
+	}
+
+	if observations == nil {
+		observations = []*models.Observation{}
+	}
+
+	writeJSON(w, map[string]interface{}{
+		"observations": observations,
+	})
 }
 
 // handleTriggerRecalculation triggers an immediate score recalculation.

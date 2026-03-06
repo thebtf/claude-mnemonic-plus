@@ -26,7 +26,7 @@ func NewCalculator(config *models.ScoringConfig) *Calculator {
 //
 // The scoring formula:
 //
-//	FinalScore = (BaseScore × TypeWeight × RecencyDecay) + FeedbackContrib + ConceptContrib + RetrievalContrib
+//	FinalScore = (BaseScore × TypeWeight × RecencyDecay) + FeedbackContrib + ConceptContrib + RetrievalContrib + UtilityContrib
 //
 // Where:
 //   - BaseScore = 1.0
@@ -76,8 +76,11 @@ func (c *Calculator) CalculateComponents(obs *models.Observation, now time.Time)
 		retrievalContrib = retrievalBoost * c.config.RetrievalWeight
 	}
 
+	// 6. Utility contribution: (utility_score - 0.5) × weight, centered around neutral
+	utilityContrib := (obs.UtilityScore - 0.5) * c.config.UtilityWeight
+
 	// Final score with minimum threshold
-	finalScore := coreScore + feedbackContrib + conceptContrib + retrievalContrib
+	finalScore := coreScore + feedbackContrib + conceptContrib + retrievalContrib + utilityContrib
 	if finalScore < c.config.MinScore {
 		finalScore = c.config.MinScore
 	}
@@ -89,6 +92,7 @@ func (c *Calculator) CalculateComponents(obs *models.Observation, now time.Time)
 		FeedbackContrib:  feedbackContrib,
 		ConceptContrib:   conceptContrib,
 		RetrievalContrib: retrievalContrib,
+		UtilityContrib:   utilityContrib,
 		FinalScore:       finalScore,
 		AgeDays:          ageDays,
 	}
@@ -102,6 +106,7 @@ type ScoreComponents struct {
 	FeedbackContrib  float64 `json:"feedback_contrib"`
 	ConceptContrib   float64 `json:"concept_contrib"`
 	RetrievalContrib float64 `json:"retrieval_contrib"`
+	UtilityContrib   float64 `json:"utility_contrib"`
 	FinalScore       float64 `json:"final_score"`
 	AgeDays          float64 `json:"age_days"`
 }

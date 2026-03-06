@@ -875,6 +875,40 @@ func runMigrations(db *gorm.DB, embeddingDims int) error {
 				return tx.Exec("DROP TABLE IF EXISTS memory_blocks").Error
 			},
 		},
+		// Migration 025: Self-learning utility tracking fields
+		{
+			ID: "025_utility_tracking",
+			Migrate: func(tx *gorm.DB) error {
+				sqls := []string{
+					// Add utility_score with neutral prior (0.5)
+					`ALTER TABLE observations ADD COLUMN IF NOT EXISTS utility_score REAL NOT NULL DEFAULT 0.5`,
+					// Add injection count
+					`ALTER TABLE observations ADD COLUMN IF NOT EXISTS injection_count INT NOT NULL DEFAULT 0`,
+					// Update type CHECK constraint to include 'guidance'
+					`ALTER TABLE observations DROP CONSTRAINT IF EXISTS chk_observations_type`,
+					`ALTER TABLE observations ADD CONSTRAINT chk_observations_type
+					 CHECK (type IN ('decision', 'bugfix', 'feature', 'refactor', 'discovery', 'change', 'guidance'))`,
+				}
+				for _, s := range sqls {
+					if err := tx.Exec(s).Error; err != nil {
+						return fmt.Errorf("migration 025: %w", err)
+					}
+				}
+				return nil
+			},
+			Rollback: func(tx *gorm.DB) error {
+				sqls := []string{
+					`ALTER TABLE observations DROP COLUMN IF EXISTS utility_score`,
+					`ALTER TABLE observations DROP COLUMN IF EXISTS injection_count`,
+				}
+				for _, s := range sqls {
+					if err := tx.Exec(s).Error; err != nil {
+						return err
+					}
+				}
+				return nil
+			},
+		},
 	})
 	if err := m.Migrate(); err != nil {
 		return fmt.Errorf("run gormigrate migrations: %w", err)

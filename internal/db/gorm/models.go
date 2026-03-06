@@ -51,7 +51,7 @@ type Observation struct {
 	SDKSessionID    string                  `gorm:"index;not null"`
 	Project         string                  `gorm:"index:idx_observations_project;index:idx_observations_project_created,priority:1;not null"`
 	Scope           models.ObservationScope `gorm:"type:text;default:'project';check:scope IN ('project', 'global');index:idx_observations_scope;index:idx_observations_project_scope,priority:2"`
-	Type            models.ObservationType  `gorm:"type:text;check:type IN ('decision', 'bugfix', 'feature', 'refactor', 'discovery', 'change');index;not null"`
+	Type            models.ObservationType  `gorm:"type:text;check:type IN ('decision', 'bugfix', 'feature', 'refactor', 'discovery', 'change', 'guidance');index;not null"`
 	MemoryType      models.MemoryType       `gorm:"type:text;index:idx_observations_memory_type"`
 	CreatedAt       string                  `gorm:"not null"`
 	Facts           models.JSONStringArray  `gorm:"type:text"`
@@ -68,8 +68,10 @@ type Observation struct {
 	LastRetrievedAt sql.NullInt64 `gorm:"column:last_retrieved_at_epoch"`
 	ID              int64         `gorm:"primaryKey;autoIncrement"`
 	ImportanceScore float64       `gorm:"type:real;default:1.0;index:idx_observations_importance,priority:1,sort:desc"`
+	UtilityScore    float64       `gorm:"type:real;default:0.5"`
 	UserFeedback    int           `gorm:"default:0"`
 	RetrievalCount  int           `gorm:"default:0"`
+	InjectionCount  int           `gorm:"default:0"`
 	CreatedAtEpoch  int64         `gorm:"index:idx_observations_created,sort:desc;index:idx_observations_project_created,priority:2,sort:desc;not null"`
 	DiscoveryTokens int64         `gorm:"default:0"`
 	IsSuperseded    int           `gorm:"default:0;index:idx_observations_superseded;index:idx_observations_active,priority:2"`

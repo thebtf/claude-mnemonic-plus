@@ -36,6 +36,7 @@ func TestCalculatorSuite(t *testing.T) {
 func (s *CalculatorSuite) TestCalculate_GoodScenarios_NewObservation() {
 	// A brand new observation should have score close to type weight
 	obs := &models.Observation{
+		UtilityScore: 0.5,
 		ID:             1,
 		Type:           models.ObsTypeBugfix,
 		CreatedAtEpoch: s.now.UnixMilli(),
@@ -43,13 +44,14 @@ func (s *CalculatorSuite) TestCalculate_GoodScenarios_NewObservation() {
 
 	score := s.calc.Calculate(obs, s.now)
 
-	// Expected: 1.0 × 1.3 (bugfix weight) × 1.0 (no decay) = 1.3
+	// Expected: 1.0 Г— 1.3 (bugfix weight) Г— 1.0 (no decay) = 1.3
 	s.InDelta(1.3, score, 0.01, "new bugfix should score ~1.3")
 }
 
 func (s *CalculatorSuite) TestCalculate_GoodScenarios_OneWeekOld() {
 	// One week old observation should have half the recency score
 	obs := &models.Observation{
+		UtilityScore: 0.5,
 		ID:             1,
 		Type:           models.ObsTypeDiscovery,
 		CreatedAtEpoch: s.now.Add(-7 * 24 * time.Hour).UnixMilli(),
@@ -57,13 +59,14 @@ func (s *CalculatorSuite) TestCalculate_GoodScenarios_OneWeekOld() {
 
 	score := s.calc.Calculate(obs, s.now)
 
-	// Expected: 1.0 × 1.1 (discovery) × 0.5 (7 days half-life) = 0.55
+	// Expected: 1.0 Г— 1.1 (discovery) Г— 0.5 (7 days half-life) = 0.55
 	s.InDelta(0.55, score, 0.05, "7-day old discovery should score ~0.55")
 }
 
 func (s *CalculatorSuite) TestCalculate_GoodScenarios_TwoWeeksOld() {
 	// Two weeks old should have 1/4 recency score
 	obs := &models.Observation{
+		UtilityScore: 0.5,
 		ID:             1,
 		Type:           models.ObsTypeFeature,
 		CreatedAtEpoch: s.now.Add(-14 * 24 * time.Hour).UnixMilli(),
@@ -71,13 +74,14 @@ func (s *CalculatorSuite) TestCalculate_GoodScenarios_TwoWeeksOld() {
 
 	score := s.calc.Calculate(obs, s.now)
 
-	// Expected: 1.0 × 1.2 (feature) × 0.25 (14 days = 2 half-lives) = 0.30
+	// Expected: 1.0 Г— 1.2 (feature) Г— 0.25 (14 days = 2 half-lives) = 0.30
 	s.InDelta(0.30, score, 0.05, "14-day old feature should score ~0.30")
 }
 
 func (s *CalculatorSuite) TestCalculate_GoodScenarios_PositiveFeedback() {
 	// Positive feedback should boost score
 	obs := &models.Observation{
+		UtilityScore: 0.5,
 		ID:             1,
 		Type:           models.ObsTypeChange,
 		CreatedAtEpoch: s.now.UnixMilli(),
@@ -86,13 +90,14 @@ func (s *CalculatorSuite) TestCalculate_GoodScenarios_PositiveFeedback() {
 
 	score := s.calc.Calculate(obs, s.now)
 
-	// Expected: (1.0 × 0.9) + 0.30 (feedback) = 1.20
+	// Expected: (1.0 Г— 0.9) + 0.30 (feedback) = 1.20
 	s.InDelta(1.20, score, 0.01, "thumbs up should boost score by 0.30")
 }
 
 func (s *CalculatorSuite) TestCalculate_GoodScenarios_NegativeFeedback() {
 	// Negative feedback should reduce score
 	obs := &models.Observation{
+		UtilityScore: 0.5,
 		ID:             1,
 		Type:           models.ObsTypeChange,
 		CreatedAtEpoch: s.now.UnixMilli(),
@@ -101,13 +106,14 @@ func (s *CalculatorSuite) TestCalculate_GoodScenarios_NegativeFeedback() {
 
 	score := s.calc.Calculate(obs, s.now)
 
-	// Expected: (1.0 × 0.9) - 0.30 (feedback) = 0.60
+	// Expected: (1.0 Г— 0.9) - 0.30 (feedback) = 0.60
 	s.InDelta(0.60, score, 0.01, "thumbs down should reduce score by 0.30")
 }
 
 func (s *CalculatorSuite) TestCalculate_GoodScenarios_WithConcepts() {
 	// Observation with valuable concepts should get boost
 	obs := &models.Observation{
+		UtilityScore: 0.5,
 		ID:             1,
 		Type:           models.ObsTypeBugfix,
 		CreatedAtEpoch: s.now.UnixMilli(),
@@ -116,7 +122,7 @@ func (s *CalculatorSuite) TestCalculate_GoodScenarios_WithConcepts() {
 
 	score := s.calc.Calculate(obs, s.now)
 
-	// Concept boost: (0.30 + 0.25) × 0.20 = 0.11
+	// Concept boost: (0.30 + 0.25) Г— 0.20 = 0.11
 	// Expected: 1.3 + 0.11 = 1.41
 	s.InDelta(1.41, score, 0.05, "security+gotcha concepts should boost score")
 }
@@ -124,6 +130,7 @@ func (s *CalculatorSuite) TestCalculate_GoodScenarios_WithConcepts() {
 func (s *CalculatorSuite) TestCalculate_GoodScenarios_WithRetrievals() {
 	// Popular observations should get retrieval boost
 	obs := &models.Observation{
+		UtilityScore: 0.5,
 		ID:             1,
 		Type:           models.ObsTypeDiscovery,
 		CreatedAtEpoch: s.now.UnixMilli(),
@@ -132,14 +139,15 @@ func (s *CalculatorSuite) TestCalculate_GoodScenarios_WithRetrievals() {
 
 	score := s.calc.Calculate(obs, s.now)
 
-	// Retrieval boost: log2(7+1) × 0.1 × 0.15 = 3 × 0.1 × 0.15 = 0.045
-	// Expected: 1.1 + 0.045 ≈ 1.145
+	// Retrieval boost: log2(7+1) Г— 0.1 Г— 0.15 = 3 Г— 0.1 Г— 0.15 = 0.045
+	// Expected: 1.1 + 0.045 в‰€ 1.145
 	s.InDelta(1.145, score, 0.05, "7 retrievals should add small boost")
 }
 
 func (s *CalculatorSuite) TestCalculate_GoodScenarios_CombinedFactors() {
 	// Test with all factors combined
 	obs := &models.Observation{
+		UtilityScore: 0.5,
 		ID:             1,
 		Type:           models.ObsTypeBugfix,
 		CreatedAtEpoch: s.now.Add(-7 * 24 * time.Hour).UnixMilli(), // 7 days old
@@ -150,11 +158,11 @@ func (s *CalculatorSuite) TestCalculate_GoodScenarios_CombinedFactors() {
 
 	score := s.calc.Calculate(obs, s.now)
 
-	// Core: 1.0 × 1.3 × 0.5 = 0.65
+	// Core: 1.0 Г— 1.3 Г— 0.5 = 0.65
 	// Feedback: 0.30
-	// Concept: 0.30 × 0.20 = 0.06
-	// Retrieval: log2(4) × 0.1 × 0.15 = 2 × 0.1 × 0.15 = 0.03
-	// Total ≈ 1.04
+	// Concept: 0.30 Г— 0.20 = 0.06
+	// Retrieval: log2(4) Г— 0.1 Г— 0.15 = 2 Г— 0.1 Г— 0.15 = 0.03
+	// Total в‰€ 1.04
 	s.InDelta(1.04, score, 0.1, "combined factors should result in ~1.04")
 }
 
@@ -165,6 +173,7 @@ func (s *CalculatorSuite) TestCalculate_GoodScenarios_CombinedFactors() {
 func (s *CalculatorSuite) TestCalculate_WorseScenarios_VeryOldObservation() {
 	// Very old observation should have low but non-zero score
 	obs := &models.Observation{
+		UtilityScore: 0.5,
 		ID:             1,
 		Type:           models.ObsTypeChange,
 		CreatedAtEpoch: s.now.Add(-90 * 24 * time.Hour).UnixMilli(), // 90 days old
@@ -172,8 +181,8 @@ func (s *CalculatorSuite) TestCalculate_WorseScenarios_VeryOldObservation() {
 
 	score := s.calc.Calculate(obs, s.now)
 
-	// 90 days = ~12.86 half-lives → decay ≈ 0.00014
-	// Core: 1.0 × 0.9 × 0.00014 = 0.000126
+	// 90 days = ~12.86 half-lives в†’ decay в‰€ 0.00014
+	// Core: 1.0 Г— 0.9 Г— 0.00014 = 0.000126
 	// But minimum score is 0.01
 	s.GreaterOrEqual(score, 0.01, "very old observation should still meet minimum")
 	s.Less(score, 0.1, "very old observation should be low scoring")
@@ -182,6 +191,7 @@ func (s *CalculatorSuite) TestCalculate_WorseScenarios_VeryOldObservation() {
 func (s *CalculatorSuite) TestCalculate_WorseScenarios_NegativeFeedbackOld() {
 	// Old observation with negative feedback should still have minimum score
 	obs := &models.Observation{
+		UtilityScore: 0.5,
 		ID:             1,
 		Type:           models.ObsTypeChange,
 		CreatedAtEpoch: s.now.Add(-60 * 24 * time.Hour).UnixMilli(),
@@ -196,6 +206,7 @@ func (s *CalculatorSuite) TestCalculate_WorseScenarios_NegativeFeedbackOld() {
 func (s *CalculatorSuite) TestCalculate_WorseScenarios_UnknownConcepts() {
 	// Unknown concepts should not affect score negatively
 	obs := &models.Observation{
+		UtilityScore: 0.5,
 		ID:             1,
 		Type:           models.ObsTypeDiscovery,
 		CreatedAtEpoch: s.now.UnixMilli(),
@@ -211,6 +222,7 @@ func (s *CalculatorSuite) TestCalculate_WorseScenarios_UnknownConcepts() {
 func (s *CalculatorSuite) TestCalculate_WorseScenarios_MixedConcepts() {
 	// Mix of known and unknown concepts
 	obs := &models.Observation{
+		UtilityScore: 0.5,
 		ID:             1,
 		Type:           models.ObsTypeDiscovery,
 		CreatedAtEpoch: s.now.UnixMilli(),
@@ -220,7 +232,7 @@ func (s *CalculatorSuite) TestCalculate_WorseScenarios_MixedConcepts() {
 	score := s.calc.Calculate(obs, s.now)
 
 	// Only security should contribute
-	// Expected: 1.1 + (0.30 × 0.20) = 1.16
+	// Expected: 1.1 + (0.30 Г— 0.20) = 1.16
 	s.InDelta(1.16, score, 0.05, "only known concepts should boost score")
 }
 
@@ -231,6 +243,7 @@ func (s *CalculatorSuite) TestCalculate_WorseScenarios_MixedConcepts() {
 func (s *CalculatorSuite) TestCalculate_BadScenarios_FutureTimestamp() {
 	// Observation created in the future (clock skew)
 	obs := &models.Observation{
+		UtilityScore: 0.5,
 		ID:             1,
 		Type:           models.ObsTypeBugfix,
 		CreatedAtEpoch: s.now.Add(24 * time.Hour).UnixMilli(), // 1 day in future
@@ -245,6 +258,7 @@ func (s *CalculatorSuite) TestCalculate_BadScenarios_FutureTimestamp() {
 func (s *CalculatorSuite) TestCalculate_BadScenarios_ZeroEpoch() {
 	// Missing creation timestamp
 	obs := &models.Observation{
+		UtilityScore: 0.5,
 		ID:             1,
 		Type:           models.ObsTypeDiscovery,
 		CreatedAtEpoch: 0, // Missing timestamp
@@ -259,6 +273,7 @@ func (s *CalculatorSuite) TestCalculate_BadScenarios_ZeroEpoch() {
 func (s *CalculatorSuite) TestCalculate_BadScenarios_EmptyObservation() {
 	// Minimal observation with defaults
 	obs := &models.Observation{
+		UtilityScore: 0.5,
 		ID:             1,
 		Type:           "", // Empty type
 		CreatedAtEpoch: s.now.UnixMilli(),
@@ -273,6 +288,7 @@ func (s *CalculatorSuite) TestCalculate_BadScenarios_EmptyObservation() {
 func (s *CalculatorSuite) TestCalculate_BadScenarios_ExtremeRetrievalCount() {
 	// Very high retrieval count
 	obs := &models.Observation{
+		UtilityScore: 0.5,
 		ID:             1,
 		Type:           models.ObsTypeDiscovery,
 		CreatedAtEpoch: s.now.UnixMilli(),
@@ -281,7 +297,7 @@ func (s *CalculatorSuite) TestCalculate_BadScenarios_ExtremeRetrievalCount() {
 
 	score := s.calc.Calculate(obs, s.now)
 
-	// log2(1000001) ≈ 19.93, so boost = 19.93 × 0.1 × 0.15 ≈ 0.30
+	// log2(1000001) в‰€ 19.93, so boost = 19.93 Г— 0.1 Г— 0.15 в‰€ 0.30
 	// Score should be reasonable, not exploding
 	s.Less(score, 2.0, "extreme retrieval count should not explode score")
 }
@@ -289,6 +305,7 @@ func (s *CalculatorSuite) TestCalculate_BadScenarios_ExtremeRetrievalCount() {
 func (s *CalculatorSuite) TestCalculate_BadScenarios_NegativeRetrievalCount() {
 	// Negative retrieval count (should not happen but test defensively)
 	obs := &models.Observation{
+		UtilityScore: 0.5,
 		ID:             1,
 		Type:           models.ObsTypeDiscovery,
 		CreatedAtEpoch: s.now.UnixMilli(),
@@ -307,6 +324,7 @@ func (s *CalculatorSuite) TestCalculate_BadScenarios_NegativeRetrievalCount() {
 
 func (s *CalculatorSuite) TestCalculate_EdgeCases_ExactlyOneHalfLife() {
 	obs := &models.Observation{
+		UtilityScore: 0.5,
 		ID:             1,
 		Type:           models.ObsTypeChange, // 0.9 weight
 		CreatedAtEpoch: s.now.Add(-7 * 24 * time.Hour).UnixMilli(),
@@ -318,6 +336,7 @@ func (s *CalculatorSuite) TestCalculate_EdgeCases_ExactlyOneHalfLife() {
 
 func (s *CalculatorSuite) TestCalculate_EdgeCases_ExactlyTwoHalfLives() {
 	obs := &models.Observation{
+		UtilityScore: 0.5,
 		ID:             1,
 		Type:           models.ObsTypeChange,
 		CreatedAtEpoch: s.now.Add(-14 * 24 * time.Hour).UnixMilli(),
@@ -343,6 +362,7 @@ func (s *CalculatorSuite) TestCalculate_EdgeCases_AllTypeWeights() {
 	for _, tt := range types {
 		s.Run(string(tt.t), func() {
 			obs := &models.Observation{
+		UtilityScore: 0.5,
 				ID:             1,
 				Type:           tt.t,
 				CreatedAtEpoch: s.now.UnixMilli(),
@@ -356,6 +376,7 @@ func (s *CalculatorSuite) TestCalculate_EdgeCases_AllTypeWeights() {
 func (s *CalculatorSuite) TestCalculate_EdgeCases_MinimumScoreEnforced() {
 	// Create worst case scenario
 	obs := &models.Observation{
+		UtilityScore: 0.5,
 		ID:             1,
 		Type:           models.ObsTypeChange,                                    // Lowest weight 0.9
 		CreatedAtEpoch: time.Date(2000, 1, 1, 0, 0, 0, 0, time.UTC).UnixMilli(), // Very old
@@ -370,6 +391,7 @@ func (s *CalculatorSuite) TestCalculate_EdgeCases_MinimumScoreEnforced() {
 func (s *CalculatorSuite) TestCalculate_EdgeCases_AllConceptsMaxWeight() {
 	// Observation with all high-value concepts
 	obs := &models.Observation{
+		UtilityScore: 0.5,
 		ID:             1,
 		Type:           models.ObsTypeBugfix,
 		CreatedAtEpoch: s.now.UnixMilli(),
@@ -379,7 +401,7 @@ func (s *CalculatorSuite) TestCalculate_EdgeCases_AllConceptsMaxWeight() {
 	score := s.calc.Calculate(obs, s.now)
 
 	// security=0.30, gotcha=0.25, best-practice=0.20, anti-pattern=0.20 = 0.95
-	// Concept contrib: 0.95 × 0.20 = 0.19
+	// Concept contrib: 0.95 Г— 0.20 = 0.19
 	// Total: 1.3 + 0.19 = 1.49
 	s.InDelta(1.49, score, 0.05, "all high-value concepts should boost significantly")
 }
@@ -390,6 +412,7 @@ func (s *CalculatorSuite) TestCalculate_EdgeCases_AllConceptsMaxWeight() {
 
 func (s *CalculatorSuite) TestCalculateComponents_ReturnsAllComponents() {
 	obs := &models.Observation{
+		UtilityScore: 0.5,
 		ID:             1,
 		Type:           models.ObsTypeBugfix,
 		CreatedAtEpoch: s.now.Add(-7 * 24 * time.Hour).UnixMilli(),
@@ -412,6 +435,7 @@ func (s *CalculatorSuite) TestCalculateComponents_ReturnsAllComponents() {
 
 func (s *CalculatorSuite) TestCalculateComponents_MatchesCalculate() {
 	obs := &models.Observation{
+		UtilityScore: 0.5,
 		ID:             1,
 		Type:           models.ObsTypeFeature,
 		CreatedAtEpoch: s.now.Add(-3 * 24 * time.Hour).UnixMilli(),
@@ -440,9 +464,9 @@ func (s *CalculatorSuite) TestBatchCalculate_Empty() {
 
 func (s *CalculatorSuite) TestBatchCalculate_Multiple() {
 	obs := []*models.Observation{
-		{ID: 1, Type: models.ObsTypeBugfix, CreatedAtEpoch: s.now.UnixMilli()},
-		{ID: 2, Type: models.ObsTypeFeature, CreatedAtEpoch: s.now.Add(-7 * 24 * time.Hour).UnixMilli()},
-		{ID: 3, Type: models.ObsTypeChange, CreatedAtEpoch: s.now.Add(-14 * 24 * time.Hour).UnixMilli()},
+		{ID: 1, Type: models.ObsTypeBugfix, CreatedAtEpoch: s.now.UnixMilli(), UtilityScore: 0.5},
+		{ID: 2, Type: models.ObsTypeFeature, CreatedAtEpoch: s.now.Add(-7 * 24 * time.Hour).UnixMilli(), UtilityScore: 0.5},
+		{ID: 3, Type: models.ObsTypeChange, CreatedAtEpoch: s.now.Add(-14 * 24 * time.Hour).UnixMilli(), UtilityScore: 0.5},
 	}
 
 	scores := s.calc.BatchCalculate(obs, s.now)
@@ -481,6 +505,7 @@ func (s *CalculatorSuite) TestUpdateConfig() {
 	s.calc.UpdateConfig(newConfig)
 
 	obs := &models.Observation{
+		UtilityScore: 0.5,
 		ID:             1,
 		Type:           models.ObsTypeChange,
 		CreatedAtEpoch: s.now.Add(-14 * 24 * time.Hour).UnixMilli(),
@@ -489,7 +514,7 @@ func (s *CalculatorSuite) TestUpdateConfig() {
 	score := s.calc.Calculate(obs, s.now)
 
 	// With 14-day half-life, 14 days = exactly one half-life
-	// Expected: 1.0 × 0.9 × 0.5 = 0.45
+	// Expected: 1.0 Г— 0.9 Г— 0.5 = 0.45
 	s.InDelta(0.45, score, 0.01)
 }
 
@@ -531,6 +556,7 @@ func TestCalculator_ConcurrentAccess(t *testing.T) {
 	for i := 0; i < 10; i++ {
 		go func(id int64) {
 			obs := &models.Observation{
+		UtilityScore: 0.5,
 				ID:             id,
 				Type:           models.ObsTypeBugfix,
 				CreatedAtEpoch: now.UnixMilli(),
@@ -565,6 +591,7 @@ func TestCalculator_DecayPrecision(t *testing.T) {
 	for _, tc := range testCases {
 		t.Run(string(rune('0'+tc.days/7))+"_half_lives", func(t *testing.T) {
 			obs := &models.Observation{
+		UtilityScore: 0.5,
 				ID:             1,
 				Type:           models.ObsTypeRefactor, // 1.0 weight
 				CreatedAtEpoch: now.Add(-time.Duration(tc.days) * 24 * time.Hour).UnixMilli(),
@@ -588,6 +615,7 @@ func TestTypeBaseScore_AllKnownTypes(t *testing.T) {
 		models.ObsTypeDecision:  1.1,
 		models.ObsTypeRefactor:  1.0,
 		models.ObsTypeChange:    0.9,
+		models.ObsTypeGuidance:  1.4,
 	}
 
 	for obsType, expectedScore := range expected {
@@ -611,6 +639,7 @@ func TestCalculator_RetrievalBoostDiminishingReturns(t *testing.T) {
 
 	for _, count := range retrievalCounts {
 		obs := &models.Observation{
+		UtilityScore: 0.5,
 			ID:             1,
 			Type:           models.ObsTypeRefactor,
 			CreatedAtEpoch: now.UnixMilli(),
@@ -636,3 +665,73 @@ func TestCalculator_RetrievalBoostDiminishingReturns(t *testing.T) {
 		}
 	}
 }
+
+// =============================================================================
+// UTILITY SCORE TESTS
+// =============================================================================
+
+func TestCalculator_UtilityScore_NeutralHasNoEffect(t *testing.T) {
+	calc := NewCalculator(nil)
+	now := time.Now()
+
+	obs := &models.Observation{
+		ID:             1,
+		Type:           models.ObsTypeRefactor, // 1.0 weight
+		CreatedAtEpoch: now.UnixMilli(),
+		UtilityScore:   0.5, // Neutral
+	}
+
+	score := calc.Calculate(obs, now)
+	// Utility contrib: (0.5 - 0.5) * 0.20 = 0.0
+	assert.InDelta(t, 1.0, score, 0.01, "neutral utility should have zero effect")
+}
+
+func TestCalculator_UtilityScore_HighBoostsScore(t *testing.T) {
+	calc := NewCalculator(nil)
+	now := time.Now()
+
+	obs := &models.Observation{
+		ID:             1,
+		Type:           models.ObsTypeRefactor,
+		CreatedAtEpoch: now.UnixMilli(),
+		UtilityScore:   1.0, // Maximum utility
+	}
+
+	score := calc.Calculate(obs, now)
+	// Utility contrib: (1.0 - 0.5) * 0.20 = 0.10
+	assert.InDelta(t, 1.10, score, 0.01, "high utility should boost score by 0.10")
+}
+
+func TestCalculator_UtilityScore_LowReducesScore(t *testing.T) {
+	calc := NewCalculator(nil)
+	now := time.Now()
+
+	obs := &models.Observation{
+		ID:             1,
+		Type:           models.ObsTypeRefactor,
+		CreatedAtEpoch: now.UnixMilli(),
+		UtilityScore:   0.0, // Minimum utility
+	}
+
+	score := calc.Calculate(obs, now)
+	// Utility contrib: (0.0 - 0.5) * 0.20 = -0.10
+	assert.InDelta(t, 0.90, score, 0.01, "low utility should reduce score by 0.10")
+}
+
+func TestCalculator_UtilityScore_Components(t *testing.T) {
+	calc := NewCalculator(nil)
+	now := time.Now()
+
+	obs := &models.Observation{
+		ID:             1,
+		Type:           models.ObsTypeBugfix,
+		CreatedAtEpoch: now.UnixMilli(),
+		UtilityScore:   0.8,
+	}
+
+	components := calc.CalculateComponents(obs, now)
+	// Utility contrib: (0.8 - 0.5) * 0.20 = 0.06
+	assert.InDelta(t, 0.06, components.UtilityContrib, 0.01, "utility contrib should be 0.06")
+	assert.InDelta(t, 1.36, components.FinalScore, 0.01, "final score should include utility")
+}
+

@@ -1361,9 +1361,12 @@ func (s *Service) setupRoutes() {
 
 		// Observation scoring and feedback routes
 		r.Post("/api/observations/{id}/feedback", s.handleObservationFeedback)
+		r.Post("/api/observations/{id}/utility", s.handleObservationUtility)
 		r.Get("/api/observations/{id}/score", s.handleExplainScore)
+		r.Post("/api/observations/mark-injected", s.handleMarkInjected)
 		r.Get("/api/observations/top", s.handleGetTopObservations)
 		r.Get("/api/observations/most-retrieved", s.handleGetMostRetrieved)
+		r.Get("/api/observations/recently-injected", s.handleGetRecentlyInjected)
 
 		// Scoring configuration routes
 		r.Get("/api/scoring/stats", s.handleGetScoringStats)

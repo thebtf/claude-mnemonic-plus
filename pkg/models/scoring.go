@@ -68,6 +68,7 @@ type ScoringConfig struct {
 	FeedbackWeight      float64            `json:"feedback_weight"`
 	ConceptWeight       float64            `json:"concept_weight"`
 	RetrievalWeight     float64            `json:"retrieval_weight"`
+	UtilityWeight       float64            `json:"utility_weight"`
 	MinScore            float64            `json:"min_score"`
 }
 
@@ -83,6 +84,7 @@ func DefaultScoringConfig() *ScoringConfig {
 		FeedbackWeight:      0.30, // Feedback has moderate impact
 		ConceptWeight:       0.20, // Concept weights have smaller impact
 		RetrievalWeight:     0.15, // Retrieval has smallest impact
+		UtilityWeight:       0.20, // Utility tracking has moderate impact
 		ConceptWeights:      conceptWeights,
 		MinScore:            0.01, // Never completely disappear
 	}

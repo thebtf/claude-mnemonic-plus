@@ -168,8 +168,10 @@ type Observation struct {
 	ID              int64            `db:"id" json:"id"`
 	CreatedAtEpoch  int64            `db:"created_at_epoch" json:"created_at_epoch"`
 	ImportanceScore float64          `db:"importance_score" json:"importance_score"`
+	UtilityScore    float64          `db:"utility_score" json:"utility_score"`
 	UserFeedback    int              `db:"user_feedback" json:"user_feedback"`
 	RetrievalCount  int              `db:"retrieval_count" json:"retrieval_count"`
+	InjectionCount  int              `db:"injection_count" json:"injection_count"`
 	IsStale         bool             `db:"-" json:"is_stale,omitempty"`
 	IsSuperseded    bool             `db:"is_superseded" json:"is_superseded,omitempty"`
 	EnrichmentLevel int              `db:"enrichment_level" json:"enrichment_level"`
@@ -269,8 +271,10 @@ type ObservationJSON struct {
 	ID              int64            `json:"id"`
 	PromptNumber    int64            `json:"prompt_number,omitempty"`
 	ImportanceScore float64          `json:"importance_score"`
+	UtilityScore    float64          `json:"utility_score"`
 	UserFeedback    int              `json:"user_feedback"`
 	RetrievalCount  int              `json:"retrieval_count"`
+	InjectionCount  int              `json:"injection_count"`
 	LastRetrievedAt int64            `json:"last_retrieved_at_epoch,omitempty"`
 	ScoreUpdatedAt  int64            `json:"score_updated_at_epoch,omitempty"`
 	IsStale         bool             `json:"is_stale,omitempty"`
@@ -298,8 +302,10 @@ func (o *Observation) MarshalJSON() ([]byte, error) {
 		IsStale:         o.IsStale,
 		// Importance scoring fields
 		ImportanceScore: o.ImportanceScore,
+		UtilityScore:    o.UtilityScore,
 		UserFeedback:    o.UserFeedback,
 		RetrievalCount:  o.RetrievalCount,
+		InjectionCount:  o.InjectionCount,
 		// Conflict detection fields
 		IsSuperseded: o.IsSuperseded,
 	}
@@ -354,8 +360,10 @@ func NewObservation(sdkSessionID, project string, parsed *ParsedObservation, pro
 		CreatedAtEpoch:  now.UnixMilli(),
 		// Importance scoring: new observations start with score 1.0
 		ImportanceScore: 1.0,
+		UtilityScore:    0.5, // Neutral prior
 		UserFeedback:    0,
 		RetrievalCount:  0,
+		InjectionCount:  0,
 	}
 }
 
