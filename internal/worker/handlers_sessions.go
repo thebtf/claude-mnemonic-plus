@@ -280,7 +280,7 @@ func (s *Service) handleSubagentComplete(w http.ResponseWriter, r *http.Request)
 		for _, msg := range messages {
 			if msg.Type == session.MessageTypeObservation && msg.Observation != nil {
 				err := s.processor.ProcessObservation(
-					r.Context(),
+					context.Background(),
 					sess.SDKSessionID.String,
 					sess.Project,
 					msg.Observation.ToolName,

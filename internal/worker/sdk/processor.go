@@ -645,8 +645,9 @@ func (p *Processor) callLLM(ctx context.Context, prompt string) (string, error) 
 	prompt = sanitizePrompt(prompt)
 
 	// Try LLM API first (OpenAI-compatible — works in Docker without Claude CLI)
+	// Use background context — parent ctx may have a shorter deadline (e.g. HTTP request context)
 	if p.llmClient != nil {
-		llmCtx, cancel := context.WithTimeout(ctx, 120*time.Second)
+		llmCtx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
 		defer cancel()
 
 		response, err := p.llmClient.Complete(llmCtx, systemPrompt, prompt)
