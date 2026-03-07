@@ -483,8 +483,8 @@ func (s *Service) handleSessionMarkInjected(w http.ResponseWriter, r *http.Reque
 	}
 
 	if err := observationStore.RecordSessionInjections(r.Context(), sessionID, req.IDs); err != nil {
-		log.Warn().Err(err).Int64("sessionID", sessionID).Msg("Failed to record session injections")
-		// Continue to global counter even if per-session tracking fails
+		http.Error(w, "failed to record session injections", http.StatusInternalServerError)
+		return
 	}
 
 	if err := observationStore.IncrementInjectionCounts(r.Context(), req.IDs); err != nil {
@@ -528,12 +528,16 @@ func (s *Service) handleGetSessionInjectedObservations(w http.ResponseWriter, r 
 		return
 	}
 
-	result := make([]InjectedObservationResponse, 0, len(ids))
-	for _, id := range ids {
-		obs, err := observationStore.GetObservationByID(r.Context(), id)
-		if err != nil || obs == nil {
-			continue
-		}
+	// Batch fetch all observations in a single query to avoid N+1 DB calls.
+	observations, err := observationStore.GetObservationsByIDsPreserveOrder(r.Context(), ids)
+	if err != nil {
+		log.Warn().Err(err).Int64("sessionID", sessionID).Msg("Failed to load injected observations")
+		http.Error(w, "failed to load injected observations", http.StatusInternalServerError)
+		return
+	}
+
+	result := make([]InjectedObservationResponse, 0, len(observations))
+	for _, obs := range observations {
 		title := ""
 		if obs.Title.Valid {
 			title = obs.Title.String
@@ -543,7 +547,7 @@ func (s *Service) handleGetSessionInjectedObservations(w http.ResponseWriter, r 
 			facts = []string{}
 		}
 		result = append(result, InjectedObservationResponse{
-			ID:    id,
+			ID:    obs.ID,
 			Title: title,
 			Type:  string(obs.Type),
 			Facts: facts,

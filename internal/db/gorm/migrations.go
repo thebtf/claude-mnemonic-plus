@@ -1006,8 +1006,8 @@ func runMigrations(db *gorm.DB, embeddingDims int) error {
 			sqls := []string{
 				`CREATE TABLE IF NOT EXISTS session_observation_injections (
 					id BIGSERIAL PRIMARY KEY,
-					session_id BIGINT NOT NULL,
-					observation_id BIGINT NOT NULL,
+					session_id BIGINT NOT NULL REFERENCES sdk_sessions(id) ON DELETE CASCADE,
+					observation_id BIGINT NOT NULL REFERENCES observations(id) ON DELETE CASCADE,
 					injected_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
 					UNIQUE(session_id, observation_id)
 				)`,

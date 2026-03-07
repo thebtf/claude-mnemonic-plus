@@ -23,7 +23,7 @@ Hooks are JS scripts in `plugin/hooks/` (NOT Go binaries — migrated from `cmd/
 ### Phase 1: Guidance Observations — DONE
 - `MemTypeGuidance` exists in `pkg/models/observation.go`
 - `ObsTypeGuidance` added with TypeBaseScores = 1.4
-- Guidance observations injected via `<relevant-memory>` block in user-prompt.js
+- Guidance observations rendered in `<engram-guidance>` block in session-start.js
 - Context search returns guidance observations alongside regular ones
 
 ### Phase 2: Utility Tracking — DONE

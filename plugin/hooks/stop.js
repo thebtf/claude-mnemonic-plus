@@ -166,35 +166,41 @@ function detectUtilitySignal(obs, assistantTextLower) {
 
   if (!cited) return 'ignored';
 
-  // Check for correction patterns near cited content
+  // Check for explicit correction patterns in a local window around each cited term.
+  // Only use unambiguous correction markers to avoid false positives from normal prose.
   const correctionPatterns = [
     'actually,',
     "that's not",
     'that is not',
-    'not quite',
+    'not quite right',
     'incorrect',
     "that's wrong",
     'that is wrong',
     'correction:',
-    'outdated',
-    'no longer',
-    'has changed',
     'was wrong',
-    'instead,',
-    'rather,',
-    'however,',
     'but actually',
+    'outdated',
   ];
 
-  for (const pattern of correctionPatterns) {
-    if (assistantTextLower.includes(pattern)) {
-      const patternIdx = assistantTextLower.indexOf(pattern);
-      for (const term of searchTerms) {
-        const termIdx = assistantTextLower.indexOf(term);
-        if (termIdx >= 0 && Math.abs(patternIdx - termIdx) < 500) {
+  const WINDOW_SIZE = 200;
+  for (const term of searchTerms) {
+    let searchFrom = 0;
+    // Find all occurrences of this term and check local window around each
+    while (searchFrom < assistantTextLower.length) {
+      const termIdx = assistantTextLower.indexOf(term, searchFrom);
+      if (termIdx < 0) break;
+
+      const windowStart = Math.max(0, termIdx - WINDOW_SIZE);
+      const windowEnd = Math.min(assistantTextLower.length, termIdx + term.length + WINDOW_SIZE);
+      const window = assistantTextLower.slice(windowStart, windowEnd);
+
+      for (const pattern of correctionPatterns) {
+        if (window.includes(pattern)) {
           return 'corrected';
         }
       }
+
+      searchFrom = termIdx + term.length;
     }
   }
 

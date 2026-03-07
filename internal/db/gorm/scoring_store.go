@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 
 	"github.com/thebtf/engram/pkg/models"
 )
@@ -393,6 +394,18 @@ func (s *ObservationStore) GetOldestObservations(ctx context.Context, project st
 	return toModelObservations(dbObservations), nil
 }
 
+// sessionObservationInjection maps to the session_observation_injections table.
+type sessionObservationInjection struct {
+	ID            int64     `gorm:"primaryKey"`
+	SessionID     int64     `gorm:"column:session_id;not null"`
+	ObservationID int64     `gorm:"column:observation_id;not null"`
+	InjectedAt    time.Time `gorm:"column:injected_at;autoCreateTime"`
+}
+
+func (sessionObservationInjection) TableName() string {
+	return "session_observation_injections"
+}
+
 // RecordSessionInjections records which observations were injected into a specific session.
 // Uses ON CONFLICT DO NOTHING for idempotency (safe to call multiple times per session).
 func (s *ObservationStore) RecordSessionInjections(ctx context.Context, sessionID int64, observationIDs []int64) error {
@@ -400,13 +413,17 @@ func (s *ObservationStore) RecordSessionInjections(ctx context.Context, sessionI
 		return nil
 	}
 
-	placeholders := make([]string, len(observationIDs))
+	rows := make([]sessionObservationInjection, len(observationIDs))
 	for i, oid := range observationIDs {
-		placeholders[i] = fmt.Sprintf("(%d, %d)", sessionID, oid)
+		rows[i] = sessionObservationInjection{
+			SessionID:     sessionID,
+			ObservationID: oid,
+		}
 	}
-	query := "INSERT INTO session_observation_injections (session_id, observation_id) VALUES " +
-		strings.Join(placeholders, ", ") + " ON CONFLICT DO NOTHING"
-	return s.db.WithContext(ctx).Exec(query).Error
+
+	return s.db.WithContext(ctx).
+		Clauses(clause.OnConflict{DoNothing: true}).
+		Create(&rows).Error
 }
 
 // GetSessionInjectedObservations returns observation IDs that were injected into a specific session.
