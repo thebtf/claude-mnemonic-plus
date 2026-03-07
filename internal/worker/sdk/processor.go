@@ -252,7 +252,7 @@ func (p *Processor) broadcast(event map[string]any) {
 
 // DefaultConcurrentLLMCalls is the default number of concurrent LLM calls.
 // Override with ENGRAM_LLM_CONCURRENCY env var.
-const DefaultConcurrentLLMCalls = 2
+const DefaultConcurrentLLMCalls = 4
 
 // NewProcessor creates a new SDK processor.
 // It requires at least one LLM backend: either an OpenAI-compatible API (ENGRAM_LLM_URL)
