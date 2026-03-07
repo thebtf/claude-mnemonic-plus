@@ -250,9 +250,9 @@ func (p *Processor) broadcast(event map[string]any) {
 	}
 }
 
-// MaxConcurrentLLMCalls is the maximum number of concurrent LLM calls.
-// Keep low for local models (e.g. 9B on GPU with limited parallelism).
-const MaxConcurrentLLMCalls = 2
+// DefaultConcurrentLLMCalls is the default number of concurrent LLM calls.
+// Override with ENGRAM_LLM_CONCURRENCY env var.
+const DefaultConcurrentLLMCalls = 4
 
 // NewProcessor creates a new SDK processor.
 // It requires at least one LLM backend: either an OpenAI-compatible API (ENGRAM_LLM_URL)
@@ -289,13 +289,23 @@ func NewProcessor(observationStore *gorm.ObservationStore, summaryStore *gorm.Su
 		return nil, fmt.Errorf("no LLM backend available: set ENGRAM_LLM_URL for API access, or install Claude CLI")
 	}
 
+	// Configurable concurrency
+	concurrency := DefaultConcurrentLLMCalls
+	if v := os.Getenv("ENGRAM_LLM_CONCURRENCY"); v != "" {
+		if n, err := fmt.Sscanf(v, "%d", &concurrency); n == 1 && err == nil && concurrency > 0 {
+			// valid
+		} else {
+			concurrency = DefaultConcurrentLLMCalls
+		}
+	}
+
 	return &Processor{
 		claudePath:       claudePath,
 		model:            cfg.Model,
 		llmClient:        llmClient,
 		observationStore: observationStore,
 		summaryStore:     summaryStore,
-		sem:              make(chan struct{}, MaxConcurrentLLMCalls),
+		sem:              make(chan struct{}, concurrency),
 		circuitBreaker:   NewCircuitBreaker(5, 60),                               // Open after 5 failures, reset after 60s
 		deduplicator:     NewRequestDeduplicator(300, 1000),                      // 5-minute TTL, 1000 max entries
 		vectorSyncChan:   make(chan *models.Observation, MaxVectorSyncWorkers*2), // Buffered channel
