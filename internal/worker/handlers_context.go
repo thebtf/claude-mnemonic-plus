@@ -76,7 +76,7 @@ func (s *Service) handleSearchByPrompt(w http.ResponseWriter, r *http.Request) {
 	var expandedQueries []expansion.ExpandedQuery
 	var detectedIntent string
 	if s.queryExpander != nil {
-		expandCtx, expandCancel := context.WithTimeout(r.Context(), 5*time.Second)
+		expandCtx, expandCancel := context.WithTimeout(r.Context(), 15*time.Second)
 		cfg := expansion.DefaultConfig()
 		cfg.EnableVocabularyExpansion = false // Vocabulary expansion is optional
 		cfg.EnableHyDE = s.config.HyDEEnabled

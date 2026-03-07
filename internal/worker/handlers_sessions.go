@@ -122,7 +122,7 @@ func (s *Service) handleSessionInit(w http.ResponseWriter, r *http.Request) {
 		}
 		s.asyncVectorSync(func() {
 			// Use service context as parent to respect shutdown signals
-			ctx, cancel := context.WithTimeout(s.ctx, 10*time.Second)
+			ctx, cancel := context.WithTimeout(s.ctx, 30*time.Second)
 			defer cancel()
 			if err := s.vectorSync.SyncUserPrompt(ctx, promptWithSession); err != nil {
 				if s.ctx.Err() == nil { // Don't log during shutdown
