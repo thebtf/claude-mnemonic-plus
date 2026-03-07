@@ -83,7 +83,7 @@ func (cb *CircuitBreaker) RecordFailure() {
 
 	if failures >= cb.threshold {
 		atomic.StoreInt32(&cb.state, circuitOpen)
-		log.Warn().Int64("failures", failures).Msg("Circuit breaker opened - Claude CLI calls temporarily disabled")
+		log.Warn().Int64("failures", failures).Msg("Circuit breaker opened - LLM calls temporarily disabled")
 	}
 }
 
@@ -365,7 +365,7 @@ func (p *Processor) CircuitBreakerMetrics() CircuitBreakerMetrics {
 	return p.circuitBreaker.Metrics()
 }
 
-// IsAvailable checks if the Claude CLI is available for processing.
+// IsAvailable checks if an LLM backend (API or CLI) is available for processing.
 func (p *Processor) IsAvailable() bool {
 	if p.llmClient != nil {
 		return true
@@ -402,13 +402,13 @@ func (p *Processor) ProcessObservation(ctx context.Context, sdkSessionID, projec
 		return nil
 	}
 
-	// Check circuit breaker before making CLI call
+	// Check circuit breaker before making LLM call
 	if !p.circuitBreaker.Allow() {
-		log.Warn().Str("tool", toolName).Msg("Circuit breaker open - skipping CLI call")
+		log.Warn().Str("tool", toolName).Msg("Circuit breaker open - skipping LLM call")
 		return fmt.Errorf("circuit breaker open")
 	}
 
-	log.Info().Str("tool", toolName).Msg("Processing tool execution with Claude CLI")
+	log.Info().Str("tool", toolName).Msg("Processing tool execution via LLM")
 
 	// Record this request to prevent duplicates
 	p.deduplicator.Record(reqHash)
@@ -422,7 +422,7 @@ func (p *Processor) ProcessObservation(ctx context.Context, sdkSessionID, projec
 	}
 	prompt := BuildObservationPrompt(exec)
 
-	// Acquire semaphore slot (limits concurrent CLI calls)
+	// Acquire semaphore slot (limits concurrent LLM calls)
 	select {
 	case p.sem <- struct{}{}:
 		defer func() { <-p.sem }()
@@ -560,7 +560,7 @@ func (p *Processor) ProcessSummary(ctx context.Context, sessionDBID int64, sdkSe
 	}
 	prompt := BuildSummaryPrompt(req)
 
-	// Acquire semaphore slot (limits concurrent CLI calls)
+	// Acquire semaphore slot (limits concurrent LLM calls)
 	select {
 	case p.sem <- struct{}{}:
 		defer func() { <-p.sem }()
