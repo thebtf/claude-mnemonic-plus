@@ -1,12 +1,12 @@
 {
-  "description": "Engram - Persistent memory hooks for observations, prompts, and session summaries",
+  "description": "Engram — persistent memory hooks for observations, context injection, and session summaries",
   "hooks": {
     "SessionStart": [
       {
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/session-start",
+            "command": "node ${CLAUDE_PLUGIN_ROOT}/hooks/session-start.js",
             "timeout": 30
           }
         ]
@@ -17,7 +17,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/user-prompt",
+            "command": "node ${CLAUDE_PLUGIN_ROOT}/hooks/user-prompt.js",
             "timeout": 10
           }
         ]
@@ -29,7 +29,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/post-tool-use",
+            "command": "node ${CLAUDE_PLUGIN_ROOT}/hooks/post-tool-use.js",
             "timeout": 10
           }
         ]
@@ -40,7 +40,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/subagent-stop",
+            "command": "node ${CLAUDE_PLUGIN_ROOT}/hooks/subagent-stop.js",
             "timeout": 10
           }
         ]
@@ -51,7 +51,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/stop",
+            "command": "node ${CLAUDE_PLUGIN_ROOT}/hooks/stop.js",
             "timeout": 30
           }
         ]
