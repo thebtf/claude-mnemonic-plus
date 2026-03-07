@@ -61,7 +61,7 @@ func NewOpenAIClient(cfg OpenAIConfig) *OpenAIClient {
 		baseURL: cfg.BaseURL,
 		apiKey:  cfg.APIKey,
 		model:   cfg.Model,
-		client:  &http.Client{Timeout: 30 * time.Second},
+		client:  &http.Client{Timeout: 120 * time.Second},
 	}
 }
 

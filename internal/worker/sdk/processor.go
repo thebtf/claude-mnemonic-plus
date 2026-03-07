@@ -636,10 +636,10 @@ func (p *Processor) callLLM(ctx context.Context, prompt string) (string, error) 
 
 	// Try LLM API first (OpenAI-compatible — works in Docker without Claude CLI)
 	if p.llmClient != nil {
-		ctx, cancel := context.WithTimeout(ctx, 60*time.Second)
+		llmCtx, cancel := context.WithTimeout(ctx, 120*time.Second)
 		defer cancel()
 
-		response, err := p.llmClient.Complete(ctx, systemPrompt, prompt)
+		response, err := p.llmClient.Complete(llmCtx, systemPrompt, prompt)
 		if err != nil {
 			log.Warn().Err(err).Msg("LLM API call failed, trying CLI fallback")
 		} else {
