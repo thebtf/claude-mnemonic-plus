@@ -1,48 +1,53 @@
-# Engram
+[English](README.md) | [Русский](README.ru.md)
 
-[![Go](https://img.shields.io/badge/Go-1.24+-00ADD8?logo=go)](https://go.dev/)
+[![Go](https://img.shields.io/badge/Go-1.25+-00ADD8?logo=go)](https://go.dev/)
 [![PostgreSQL](https://img.shields.io/badge/PostgreSQL-17-4169E1?logo=postgresql)](https://www.postgresql.org/)
 [![Docker](https://img.shields.io/badge/Docker-ready-2496ED?logo=docker)](https://www.docker.com/)
+[![CI](https://github.com/thebtf/engram/actions/workflows/docker-publish.yml/badge.svg)](https://github.com/thebtf/engram/actions/workflows/docker-publish.yml)
 [![License](https://img.shields.io/github/license/thebtf/engram)](LICENSE)
+
+# Engram
 
 Persistent shared memory infrastructure for Claude Code workstations.
 
-Engram captures observations from coding sessions, stores them in PostgreSQL + pgvector, and exposes **48 MCP tools** through the MCP server — hybrid search, knowledge graph, memory consolidation, and session indexing across multiple workstations.
+Engram captures observations from coding sessions, stores them in PostgreSQL with pgvector, and exposes **48 MCP tools** — hybrid search, knowledge graph, memory consolidation, and session indexing across multiple workstations.
 
 ---
 
 ## Architecture
 
-Single server port (`37777`) serves HTTP API, MCP transports, and web dashboard.
+Single server port (`37777`) serves the HTTP API, MCP transports, and web dashboard placeholder.
 
+```mermaid
+graph TB
+    subgraph "Workstation A"
+        CC_A[Claude Code]
+        H_A[Hooks / MCP Plugin]
+        CC_A --> H_A
+    end
+
+    subgraph "Workstation B"
+        CC_B[Claude Code]
+        H_B[Hooks / MCP Plugin]
+        CC_B --> H_B
+    end
+
+    H_A -- "Streamable HTTP / SSE" --> Server
+    H_B -- "Streamable HTTP / SSE" --> Server
+
+    subgraph "Engram Server :37777"
+        Server[Worker]
+        Server --> |HTTP API| API[REST Endpoints]
+        Server --> |MCP| MCP_T["SSE + Streamable HTTP"]
+        Server --> |Web| Dash["Dashboard *"]
+    end
+
+    Server --> PG[(PostgreSQL 17\n+ pgvector)]
+
+    style Dash stroke-dasharray: 5 5
 ```
-  Workstation A                 Workstation B
-  ┌──────────────┐              ┌──────────────┐
-  │  Claude Code  │              │  Claude Code  │
-  │  ┌─────────┐  │              │  ┌─────────┐  │
-  │  │  Hooks  │  │              │  │  Hooks  │  │
-  │  │MCP Proxy│  │              │  │MCP Proxy│  │
-  │  └────┬────┘  │              │  └────┬────┘  │
-  └───────┼───────┘              └───────┼───────┘
-          │ HTTP                         │ HTTP
-          └──────────┐    ┌──────────────┘
-                     ▼    ▼
-            ┌─────────────────────┐
-            │   Engram Server     │
-            │  ┌───────────────┐  │
-            │  │ Worker :37777 │  │
-            │  │  HTTP API     │  │
-            │  │  MCP SSE      │  │
-            │  │  MCP HTTP     │  │
-            │  │  Dashboard    │  │
-            │  └───────┬───────┘  │
-            │          │          │
-            │  ┌───────▼───────┐  │
-            │  │  PostgreSQL   │  │
-            │  │  + pgvector   │  │
-            │  └───────────────┘  │
-            └─────────────────────┘
-```
+
+\* Dashboard is a placeholder — planned for a future release.
 
 **Server** (Docker on remote host / Unraid / NAS):
 - PostgreSQL 17 with pgvector extension
@@ -50,13 +55,32 @@ Single server port (`37777`) serves HTTP API, MCP transports, and web dashboard.
 
 **Client** (each workstation):
 - Hooks — capture observations from Claude Code sessions
-- MCP Stdio Proxy — bridges Claude Code's stdio MCP to the remote server
+- MCP Plugin — connects Claude Code to the remote server via Streamable HTTP or SSE
+
+---
+
+## Features
+
+| Feature | Description |
+|---------|-------------|
+| **PostgreSQL + pgvector** | Concurrent storage with HNSW cosine vector index |
+| **Hybrid Search** | tsvector GIN + vector similarity + BM25, RRF fusion |
+| **48 MCP Tools** | Search, context, relations, bulk ops, sessions, maintenance, collections |
+| **Memory Consolidation** | Daily decay, daily associations, quarterly forgetting |
+| **17 Relation Types** | Knowledge graph: causes, fixes, supersedes, contradicts, explains, shares_theme... |
+| **Session Indexing** | JSONL parser with workstation isolation, incremental indexing |
+| **Collections** | YAML-configurable knowledge bases with smart chunking (Markdown, Go, Python, TypeScript via tree-sitter) |
+| **MCP Transports** | SSE + Streamable HTTP (`POST /mcp`) on single port |
+| **Embeddings** | Local ONNX BGE (384D) or OpenAI-compatible REST API |
+| **Cross-encoder Reranking** | ONNX reranker for search result quality |
+| **Token Auth** | Bearer authentication for all endpoints |
+| **Instinct Import** | Import ECC instincts as guidance observations with semantic dedup |
+| **Self-Learning** | Per-session utility signal detection for adaptive memory |
+| **Dashboard** | Web dashboard at worker port *(placeholder — planned)* |
 
 ---
 
 ## Quick Start
-
-### 1. Deploy the Server
 
 ```bash
 git clone https://github.com/thebtf/engram.git
@@ -83,14 +107,18 @@ DATABASE_DSN="postgres://user:pass@your-pg:5432/engram?sslmode=disable" \
   docker compose up -d server
 ```
 
-### 2. Configure MCP
+Then configure MCP (see [Installation](#installation) below).
 
-#### With Plugin (recommended)
+---
 
-The plugin registers the MCP server automatically via `.mcp.json`. Set two environment variables and install:
+## Installation
+
+### Plugin Install (recommended)
+
+The plugin registers the MCP server automatically. Set two environment variables and install:
 
 ```bash
-# Set environment variables (these are read by Claude Code at runtime)
+# Set environment variables (read by Claude Code at runtime)
 # Linux/macOS: add to shell profile; Windows: set as System Environment Variables
 ENGRAM_URL=http://your-server:37777/mcp
 ENGRAM_API_TOKEN=your-api-token
@@ -103,7 +131,7 @@ ENGRAM_API_TOKEN=your-api-token
 
 Restart Claude Code. The plugin provides hooks, skills, and MCP connection — all configured.
 
-#### Without Plugin (manual)
+### Manual MCP Configuration
 
 If not using the plugin, configure MCP directly. Engram exposes three transports on the same port:
 
@@ -111,9 +139,11 @@ If not using the plugin, configure MCP directly. Engram exposes three transports
 |-----------|----------|----------|----------|
 | **Streamable HTTP** | `POST /mcp` | JSON-RPC over HTTP | Direct connection (recommended) |
 | **SSE** | `GET /sse` + `POST /message` | Server-Sent Events | Long-lived streaming |
-| **Stdio Proxy** | local binary | stdio ↔ SSE bridge | Clients that only support stdio |
+| **Stdio Proxy** | local binary | stdio to SSE bridge | Clients that only support stdio |
 
-**Streamable HTTP** — add to `~/.claude/settings.json` (user scope) or `.claude/settings.json` (project scope):
+#### Streamable HTTP (recommended)
+
+Add to `~/.claude/settings.json` (user scope) or `.claude/settings.json` (project scope):
 
 ```json
 {
@@ -137,9 +167,27 @@ Claude Code expands `${VAR}` references from your environment at runtime. You ca
 claude mcp add-json engram '{"type":"http","url":"http://your-server:37777/mcp","headers":{"Authorization":"Bearer ${ENGRAM_API_TOKEN}"}}' -s user
 ```
 
-**SSE Transport** — use `http://your-server:37777/sse` as the URL instead.
+#### SSE Transport
 
-**Stdio Proxy (legacy)** — for clients that only support stdio. Requires `mcp-stdio-proxy` binary:
+Use `http://your-server:37777/sse` as the URL:
+
+```json
+{
+  "mcpServers": {
+    "engram": {
+      "type": "url",
+      "url": "http://your-server:37777/sse",
+      "headers": {
+        "Authorization": "Bearer ${ENGRAM_API_TOKEN}"
+      }
+    }
+  }
+}
+```
+
+#### Stdio Proxy (legacy)
+
+For clients that only support stdio. Requires `mcp-stdio-proxy` binary:
 
 ```json
 {
@@ -152,24 +200,17 @@ claude mcp add-json engram '{"type":"http","url":"http://your-server:37777/mcp",
 }
 ```
 
-### 3. Install Client Binaries (optional)
+### Client Binaries (optional)
 
 Only needed if using the **stdio proxy** or **hooks**. Streamable HTTP / SSE transports work without any client-side binaries.
 
-#### Plugin Install
-
-```
-/plugin marketplace add thebtf/engram-marketplace
-/plugin install engram
-```
-
-#### Script Install (macOS / Linux)
+**Script install (macOS / Linux):**
 
 ```bash
 curl -sSL https://raw.githubusercontent.com/thebtf/engram/main/scripts/install.sh | bash
 ```
 
-#### Build from Source (Windows PowerShell)
+**Build from source (Windows PowerShell):**
 
 ```powershell
 git clone https://github.com/thebtf/engram.git && cd engram
@@ -182,26 +223,44 @@ Hooks are JavaScript and come pre-configured with the plugin. No build needed.
 
 ---
 
-## Features
+## Configuration
 
-| Feature | Description |
-|---------|-------------|
-| **PostgreSQL + pgvector** | Concurrent storage with HNSW cosine vector index |
-| **Hybrid Search** | tsvector GIN + vector similarity + BM25, RRF fusion |
-| **48 MCP Tools** | Search, context, relations, bulk ops, sessions, maintenance |
-| **Memory Consolidation** | Daily decay, weekly associations, quarterly forgetting |
-| **17 Relation Types** | Knowledge graph: causes, fixes, supersedes, contradicts, explains, shares_theme... |
-| **Session Indexing** | JSONL parser with workstation isolation, incremental indexing |
-| **Collections** | YAML-configurable knowledge bases with smart chunking |
-| **MCP Transports** | SSE + Streamable HTTP (`POST /mcp`) |
-| **Embeddings** | Local ONNX BGE (384D) or OpenAI-compatible REST API |
-| **Token Auth** | Bearer authentication for all endpoints |
-| **Instinct Import** | Import ECC instincts as guidance observations |
-| **Dashboard** | Vue-based web dashboard at worker port |
+### Server
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `DATABASE_DSN` | — | PostgreSQL connection string **(required)** |
+| `DATABASE_MAX_CONNS` | `10` | Maximum database connections |
+| `WORKER_PORT` | `37777` | Worker port |
+| `WORKER_HOST` | `0.0.0.0` | Worker bind address |
+| `API_TOKEN` | — | Bearer token (recommended for remote) |
+| `EMBEDDING_PROVIDER` | `onnx` | `onnx` (local BGE) or `openai` (REST API) |
+| `EMBEDDING_BASE_URL` | — | OpenAI-compatible endpoint URL |
+| `EMBEDDING_API_KEY` | — | API key for OpenAI provider |
+| `EMBEDDING_MODEL_NAME` | — | Model name for OpenAI provider |
+| `EMBEDDING_DIMENSIONS` | `384` | Embedding vector dimensions |
+| `RERANKING_ENABLED` | `true` | Enable cross-encoder reranking |
+
+### Client (hooks only)
+
+These variables are used by the client-side hooks, **not** for MCP transport configuration. MCP connection is configured in `settings.json` (see [Installation](#installation)).
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `ENGRAM_URL` | — | Full MCP endpoint URL for plugin |
+| `ENGRAM_API_TOKEN` | — | API token for plugin |
+| `ENGRAM_WORKER_HOST` | `127.0.0.1` | Worker address for hooks |
+| `ENGRAM_WORKER_PORT` | `37777` | Worker port for hooks |
+| `ENGRAM_SESSIONS_DIR` | `~/.claude/projects/` | Session JSONL directory |
+| `ENGRAM_WORKSTATION_ID` | auto-generated | Override workstation ID (8-char hex) |
+| `ENGRAM_CONTEXT_OBSERVATIONS` | `100` | Max memories per session |
+| `ENGRAM_CONTEXT_FULL_COUNT` | `25` | Memories with full detail |
 
 ---
 
 ## MCP Tools (48)
+
+44 always-available tools, 4 conditional (require document store), plus `import_instincts` (always available, uses embeddings for dedup).
 
 <details>
 <summary><strong>Search & Discovery (11)</strong></summary>
@@ -320,66 +379,53 @@ Hooks are JavaScript and come pre-configured with the plugin. No build needed.
 
 ## Memory Consolidation
 
-The consolidation scheduler runs three automated cycles:
+### Importance Score (write-time)
 
-### Relevance Decay (daily)
+Each observation receives an importance score when created:
+
+```
+importance = typeWeight * (1 + conceptBonus + feedbackBonus + retrievalBonus + utilityBonus)
+```
+
+Type weights: `discovery=0.9`, `decision=0.85`, `pattern=0.8`, `insight=0.75`, `guidance=0.7`, `observation=0.5`, `question=0.4`
+
+### Relevance Score (consolidation)
+
+The consolidation scheduler recalculates relevance periodically:
 
 ```
 relevance = decay * (0.3 + 0.3*access) * relations * (0.5 + importance) * (0.7 + 0.3*confidence)
 ```
 
-### Creative Associations (weekly)
+Where `decay = exp(-0.01 * daysSinceCreation)`.
 
-Samples observations, computes embedding similarity, discovers relations:
+### Consolidation Cycles
 
-| Relation | Condition |
-|----------|-----------|
-| **CONTRADICTS** | Two decisions with low similarity |
-| **EXPLAINS** | Insight/pattern pair with moderate similarity |
-| **SHARES_THEME** | Any pair with high similarity (>0.7) |
-| **PARALLEL_CONTEXT** | Temporal proximity with low similarity |
+| Cycle | Frequency | Description |
+|-------|-----------|-------------|
+| **Relevance Decay** | Every 24h | Exponential time decay with access frequency boost |
+| **Creative Associations** | Every 24h | Samples observations, computes embedding similarity, discovers relations (CONTRADICTS, EXPLAINS, SHARES_THEME, PARALLEL_CONTEXT) |
+| **Forgetting** | Every 90 days | Archives observations below relevance threshold (disabled by default) |
 
-### Forgetting (quarterly, opt-in)
-
-Archives observations below relevance threshold. Protected:
+**Forgetting protections** — observations are never archived if:
 - Importance score >= 0.7
 - Age < 90 days
-- Type: `decision` or `discovery`
+- Type is `decision` or `discovery`
 
 ---
 
-## Configuration
+## Session Indexing
 
-All server variables use the `ENGRAM_` prefix. Config file: `~/.engram/settings.json`.
+Sessions are indexed from Claude Code JSONL files with workstation isolation:
 
-### Server
+```
+workstation_id = sha256(hostname + machine_id)[:8]
+project_id     = sha256(cwd_path)[:8]
+session_id     = UUID from JSONL filename
+composite_key  = workstation_id:project_id:session_id
+```
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `DATABASE_DSN` | — | PostgreSQL connection string **(required)** |
-| `DATABASE_MAX_CONNS` | `10` | Maximum database connections |
-| `WORKER_PORT` | `37777` | Worker port |
-| `WORKER_HOST` | `0.0.0.0` | Worker bind address |
-| `API_TOKEN` | — | Bearer token (recommended for remote) |
-| `EMBEDDING_PROVIDER` | `onnx` | `onnx` (local BGE) or `openai` (REST API) |
-| `EMBEDDING_BASE_URL` | — | OpenAI-compatible endpoint URL |
-| `EMBEDDING_API_KEY` | — | API key for OpenAI provider |
-| `EMBEDDING_MODEL_NAME` | — | Model name for OpenAI provider |
-| `EMBEDDING_DIMENSIONS` | `384` | Embedding vector dimensions |
-| `RERANKING_ENABLED` | `true` | Enable cross-encoder reranking |
-
-### Client (hooks only)
-
-These variables are used by the client-side hooks, **not** for MCP transport configuration. MCP connection is configured in `settings.json` (see [Configure MCP](#2-configure-mcp) above).
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `ENGRAM_WORKER_HOST` | `127.0.0.1` | Worker address for hooks |
-| `ENGRAM_WORKER_PORT` | `37777` | Worker port for hooks |
-| `ENGRAM_SESSIONS_DIR` | `~/.claude/projects/` | Session JSONL directory |
-| `ENGRAM_WORKSTATION_ID` | auto-generated | Override workstation ID (8-char hex) |
-| `ENGRAM_CONTEXT_OBSERVATIONS` | `100` | Max memories per session |
-| `ENGRAM_CONTEXT_FULL_COUNT` | `25` | Memories with full detail |
+Multiple workstations sharing one server keep sessions isolated while search works across all of them.
 
 ---
 
@@ -402,7 +448,7 @@ make clean            # Clean build artifacts
 cmd/
   mcp/                MCP stdio server (local direct access)
   mcp-sse/            MCP SSE HTTP server (standalone)
-  mcp-stdio-proxy/    stdio → SSE bridge (client-side)
+  mcp-stdio-proxy/    stdio -> SSE bridge (client-side)
   worker/             HTTP API + MCP SSE + MCP Streamable HTTP + dashboard
   hooks/              Claude Code lifecycle hooks (legacy Go, see plugin/hooks/)
 internal/
@@ -415,6 +461,7 @@ internal/
   embedding/          ONNX BGE + OpenAI REST providers
   graph/              In-memory CSR graph traversal
   mcp/                MCP protocol (server, SSE, Streamable HTTP)
+  reranking/          ONNX cross-encoder reranker
   scoring/            Importance + relevance scoring
   search/             Hybrid retrieval + RRF fusion
   sessions/           JSONL parser + indexer
@@ -423,25 +470,11 @@ internal/
 pkg/
   hooks/              Hook event client
   models/             Domain models + relation types
+  strutil/            Shared string utilities
 plugin/               Claude Code plugin definition + marketplace
 ```
 
 </details>
-
----
-
-## Session Indexing
-
-Sessions are indexed from Claude Code JSONL files with workstation isolation:
-
-```
-workstation_id = sha256(hostname + machine_id)[:8]
-project_id     = sha256(cwd_path)[:8]
-session_id     = UUID from JSONL filename
-composite_key  = workstation_id:project_id:session_id
-```
-
-Multiple workstations sharing one server keep sessions isolated while search works across all of them.
 
 ---
 
@@ -460,14 +493,27 @@ Multiple workstations sharing one server keep sessions isolated while search wor
 
 ## Uninstall
 
-**Server:** `docker compose down` (add `-v` to remove data)
+**Server:**
 
-**Client (macOS/Linux):**
+```bash
+docker compose down       # stop containers
+docker compose down -v    # stop containers and remove data
+```
+
+**Client (plugin):**
+
+```
+/plugin uninstall engram
+```
+
+**Client (script install, macOS/Linux):**
+
 ```bash
 curl -sSL https://raw.githubusercontent.com/thebtf/engram/main/scripts/install.sh | bash -s -- --uninstall
 ```
 
 **Client (Windows):**
+
 ```powershell
 Remove-Item -Recurse -Force "$env:USERPROFILE\.claude\plugins\marketplaces\engram"
 ```
@@ -476,8 +522,8 @@ Remove-Item -Recurse -Force "$env:USERPROFILE\.claude\plugins\marketplaces\engra
 
 ## License
 
-MIT
+[MIT](LICENSE)
 
 ---
 
-Originally based on [claude-mnemonic](https://github.com/lukaszraczylo/claude-mnemonic) by Lukasz Raczylo
+Originally based on [claude-mnemonic](https://github.com/lukaszraczylo/claude-mnemonic) by Lukasz Raczylo.
