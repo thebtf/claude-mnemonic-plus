@@ -601,7 +601,7 @@ func (s *Service) initializeAsync() {
 	var processor *sdk.Processor
 	proc, err := sdk.NewProcessor(observationStore, summaryStore)
 	if err != nil {
-		log.Warn().Err(err).Msg("SDK processor not available - observations will be queued but not processed")
+		log.Debug().Err(err).Msg("SDK processor not available (expected in Docker)")
 	} else {
 		processor = proc
 		// Set broadcast callback for SSE events
@@ -974,7 +974,7 @@ func (s *Service) reinitializeDatabase() {
 	var processor *sdk.Processor
 	proc, err := sdk.NewProcessor(observationStore, summaryStore)
 	if err != nil {
-		log.Warn().Err(err).Msg("SDK processor not available after reinit")
+		log.Debug().Err(err).Msg("SDK processor not available after reinit")
 	} else {
 		processor = proc
 		processor.SetBroadcastFunc(func(event map[string]any) {
