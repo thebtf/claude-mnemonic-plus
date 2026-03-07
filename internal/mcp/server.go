@@ -11,9 +11,11 @@ import (
 	"strings"
 	"time"
 
+	"github.com/thebtf/engram/internal/chunking"
 	"github.com/thebtf/engram/internal/collections"
 	"github.com/thebtf/engram/internal/consolidation"
 	"github.com/thebtf/engram/internal/db/gorm"
+	"github.com/thebtf/engram/internal/embedding"
 	graphpkg "github.com/thebtf/engram/internal/graph"
 	"github.com/thebtf/engram/internal/maintenance"
 	"github.com/thebtf/engram/internal/scoring"
@@ -41,6 +43,9 @@ type Server struct {
 	collectionRegistry     *collections.Registry
 	sessionIdxStore        *sessions.Store
 	consolidationScheduler *consolidation.Scheduler
+	documentStore          *gorm.DocumentStore
+	embedSvc               *embedding.Service
+	chunkManager           *chunking.Manager
 	graphStore             graphpkg.GraphStore
 	version                string
 }
@@ -60,6 +65,9 @@ func NewServer(
 	collectionRegistry *collections.Registry,
 	sessionIdxStore *sessions.Store,
 	consolidationScheduler *consolidation.Scheduler,
+	documentStore *gorm.DocumentStore,
+	embedSvc *embedding.Service,
+	chunkManager *chunking.Manager,
 ) *Server {
 	return &Server{
 		searchMgr:              searchMgr,
@@ -77,6 +85,9 @@ func NewServer(
 		collectionRegistry:     collectionRegistry,
 		sessionIdxStore:        sessionIdxStore,
 		consolidationScheduler: consolidationScheduler,
+		documentStore:          documentStore,
+		embedSvc:               embedSvc,
+		chunkManager:           chunkManager,
 	}
 }
 
@@ -856,6 +867,87 @@ func (s *Server) handleToolsList(req *Request) *Response {
 				},
 			},
 		},
+		// Document / Collection tools
+		{
+			Name:        "list_collections",
+			Description: "List all configured document collections with active document counts.",
+			InputSchema: map[string]any{
+				"type":       "object",
+				"properties": map[string]any{},
+			},
+		},
+		{
+			Name:        "list_documents",
+			Description: "List documents in a collection with metadata (path, title, hash, timestamps).",
+			InputSchema: map[string]any{
+				"type":     "object",
+				"required": []string{"collection"},
+				"properties": map[string]any{
+					"collection": map[string]any{"type": "string", "description": "Collection name to list documents from"},
+				},
+			},
+		},
+		{
+			Name:        "get_document",
+			Description: "Retrieve full document content by collection and path.",
+			InputSchema: map[string]any{
+				"type":     "object",
+				"required": []string{"collection", "path"},
+				"properties": map[string]any{
+					"collection": map[string]any{"type": "string", "description": "Collection name"},
+					"path":       map[string]any{"type": "string", "description": "Document path within the collection"},
+				},
+			},
+		},
+		{
+			Name:        "ingest_document",
+			Description: "Ingest a document into a collection. Chunks the content, generates embeddings, and stores for semantic search. Skips re-embedding if content hash unchanged.",
+			InputSchema: map[string]any{
+				"type":     "object",
+				"required": []string{"collection", "path", "content"},
+				"properties": map[string]any{
+					"collection": map[string]any{"type": "string", "description": "Target collection name"},
+					"path":       map[string]any{"type": "string", "description": "Document path (used as identifier within the collection)"},
+					"content":    map[string]any{"type": "string", "description": "Full document content to ingest"},
+					"title":      map[string]any{"type": "string", "description": "Optional document title"},
+				},
+			},
+		},
+		{
+			Name:        "search_collection",
+			Description: "Semantic search across document chunks in a collection. Returns ranked results with chunk text.",
+			InputSchema: map[string]any{
+				"type":     "object",
+				"required": []string{"query"},
+				"properties": map[string]any{
+					"query":      map[string]any{"type": "string", "description": "Natural language search query"},
+					"collection": map[string]any{"type": "string", "description": "Collection to search (omit to search all collections)"},
+					"limit":      map[string]any{"type": "number", "default": 10, "minimum": 1, "maximum": 50},
+				},
+			},
+		},
+		{
+			Name:        "remove_document",
+			Description: "Deactivate (soft delete) a document from a collection. The document and its chunks remain in storage but are excluded from search.",
+			InputSchema: map[string]any{
+				"type":     "object",
+				"required": []string{"collection", "path"},
+				"properties": map[string]any{
+					"collection": map[string]any{"type": "string", "description": "Collection name"},
+					"path":       map[string]any{"type": "string", "description": "Document path to deactivate"},
+				},
+			},
+		},
+		{
+			Name:        "import_instincts",
+			Description: "Import ECC instinct files from a directory into Engram as guidance observations. Idempotent — duplicates are skipped via vector similarity check.",
+			InputSchema: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"path": map[string]any{"type": "string", "description": "Path to instincts directory (defaults to ~/.claude/homunculus/instincts/)"},
+				},
+			},
+		},
 	}
 
 	return &Response{
@@ -975,6 +1067,21 @@ func (s *Server) callTool(ctx context.Context, name string, args json.RawMessage
 		return s.handleListSessions(ctx, args)
 	case "run_consolidation":
 		return s.handleRunConsolidation(ctx, args)
+	// Document / Collection tools
+	case "list_collections":
+		return s.handleListCollections(ctx)
+	case "list_documents":
+		return s.handleListDocuments(ctx, args)
+	case "get_document":
+		return s.handleGetDocument(ctx, args)
+	case "ingest_document":
+		return s.handleIngestDocument(ctx, args)
+	case "search_collection":
+		return s.handleSearchCollection(ctx, args)
+	case "remove_document":
+		return s.handleRemoveDocument(ctx, args)
+	case "import_instincts":
+		return s.handleImportInstincts(ctx, args)
 	}
 
 	// Original search-based tools

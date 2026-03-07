@@ -12,6 +12,9 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
+	"github.com/thebtf/engram/internal/chunking"
+	gochunking "github.com/thebtf/engram/internal/chunking/golang"
+	mdchunking "github.com/thebtf/engram/internal/chunking/markdown"
 	"github.com/thebtf/engram/internal/collections"
 	"github.com/thebtf/engram/internal/config"
 	graphpkg "github.com/thebtf/engram/internal/graph"
@@ -513,6 +516,16 @@ func (s *Service) createHyDEGenerator() *expansion.HyDEGenerator {
 	return gen
 }
 
+// createChunkManager creates a chunking manager with all available language chunkers.
+func (s *Service) createChunkManager() *chunking.Manager {
+	opts := chunking.DefaultChunkOptions()
+	chunkers := []chunking.Chunker{
+		mdchunking.NewChunker(opts),
+		gochunking.NewChunker(opts),
+	}
+	return chunking.NewManager(chunkers, opts)
+}
+
 // initializeAsync performs heavy initialization in the background.
 func (s *Service) initializeAsync() {
 	log.Info().Msg("Starting async initialization...")
@@ -775,6 +788,12 @@ func (s *Service) initializeAsync() {
 	searchMgr := search.NewManager(observationStore, summaryStore, promptStore, vectorClient)
 
 	// Initialize MCP server and SSE handler (serves /sse and /message on the worker port)
+	// Create document store for collection MCP tools
+	documentStore := gorm.NewDocumentStore(store)
+
+	// Create chunking manager for document ingestion
+	chunkManager := s.createChunkManager()
+
 	mcpServer := mcp.NewServer(
 		searchMgr,
 		s.version,
@@ -789,6 +808,9 @@ func (s *Service) initializeAsync() {
 		collectionRegistry,
 		sessionIdxStore,
 		consolidationScheduler,
+		documentStore,
+		embedSvc,
+		chunkManager,
 	)
 	// Wire graph store into MCP server and search manager.
 	if s.graphStore != nil {
@@ -1478,6 +1500,9 @@ func (s *Service) setupRoutes() {
 
 	// Log viewer endpoint (works before DB is ready, supports SSE follow mode)
 	s.router.Get("/api/logs", s.handleGetLogs)
+
+	// Instinct import endpoint
+	s.router.Post("/api/instincts/import", s.handleInstinctsImport)
 
 	// MCP routes (require DB ready, no timeout — long-lived SSE connections)
 	s.router.Group(func(r chi.Router) {

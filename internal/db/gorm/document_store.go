@@ -106,41 +106,77 @@ func (s *DocumentStore) ListDocuments(ctx context.Context, collection string, ac
 }
 
 // UpsertChunks replaces existing chunks for a content hash with new chunk rows.
+// Uses raw SQL to include the pgvector embedding column which is excluded from GORM mapping.
 func (s *DocumentStore) UpsertChunks(ctx context.Context, hash string, chunks []ContentChunk) error {
-	if err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		if err := tx.WithContext(ctx).Where("hash = ?", hash).Delete(&ContentChunk{}).Error; err != nil {
-			return fmt.Errorf("delete existing chunks: %w", err)
-		}
+	tx, err := s.rawDB.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin tx: %w", err)
+	}
+	defer tx.Rollback() //nolint:errcheck
 
-		if len(chunks) == 0 {
-			return nil
-		}
+	if _, err := tx.ExecContext(ctx, "DELETE FROM content_chunks WHERE hash = $1", hash); err != nil {
+		return fmt.Errorf("delete existing chunks: %w", err)
+	}
 
-		if err := tx.WithContext(ctx).Create(&chunks).Error; err != nil {
-			return fmt.Errorf("insert chunks: %w", err)
-		}
+	if len(chunks) == 0 {
+		return tx.Commit()
+	}
 
-		return nil
-	}); err != nil {
-		return fmt.Errorf("upsert chunks: %w", err)
+	stmt, err := tx.PrepareContext(ctx,
+		`INSERT INTO content_chunks (hash, seq, text, pos, model, embedding)
+		 VALUES ($1, $2, $3, $4, $5, $6)`)
+	if err != nil {
+		return fmt.Errorf("prepare insert: %w", err)
+	}
+	defer stmt.Close()
+
+	for _, c := range chunks {
+		var embArg any
+		if len(c.Embedding.Slice()) > 0 {
+			embArg = c.Embedding
+		}
+		if _, err := stmt.ExecContext(ctx, c.Hash, c.Seq, c.Text, c.Pos, c.Model, embArg); err != nil {
+			return fmt.Errorf("insert chunk %d: %w", c.Seq, err)
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit chunks: %w", err)
 	}
 
 	return nil
 }
 
 // SearchChunks performs vector similarity search across content chunks.
+// If collection is empty, searches all active documents.
 func (s *DocumentStore) SearchChunks(ctx context.Context, embedding []float32, collection string, limit int) ([]ContentChunk, error) {
-	query := `
-		SELECT cc.hash, cc.seq, cc.pos, cc.model, cc.created_at
-		FROM content_chunks cc
-		JOIN documents d ON d.hash = cc.hash
-		WHERE d.collection = $2
-		  AND d.active = true
-		ORDER BY cc.embedding <=> $1
-		LIMIT $3
-	`
+	var query string
+	var args []any
 
-	rows, err := s.rawDB.QueryContext(ctx, query, pgvec.NewVector(embedding), collection, limit)
+	if collection != "" {
+		query = `
+			SELECT cc.hash, cc.seq, cc.text, cc.pos, cc.model, cc.created_at
+			FROM content_chunks cc
+			JOIN documents d ON d.hash = cc.hash
+			WHERE d.collection = $2
+			  AND d.active = true
+			ORDER BY cc.embedding <=> $1
+			LIMIT $3
+		`
+		args = []any{pgvec.NewVector(embedding), collection, limit}
+	} else {
+		query = `
+			SELECT cc.hash, cc.seq, cc.text, cc.pos, cc.model, cc.created_at
+			FROM content_chunks cc
+			JOIN documents d ON d.hash = cc.hash
+			WHERE d.active = true
+			ORDER BY cc.embedding <=> $1
+			LIMIT $2
+		`
+		args = []any{pgvec.NewVector(embedding), limit}
+	}
+
+	rows, err := s.rawDB.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("search chunks: %w", err)
 	}
@@ -149,7 +185,7 @@ func (s *DocumentStore) SearchChunks(ctx context.Context, embedding []float32, c
 	chunks := make([]ContentChunk, 0)
 	for rows.Next() {
 		var chunk ContentChunk
-		if err := rows.Scan(&chunk.Hash, &chunk.Seq, &chunk.Pos, &chunk.Model, &chunk.CreatedAt); err != nil {
+		if err := rows.Scan(&chunk.Hash, &chunk.Seq, &chunk.Text, &chunk.Pos, &chunk.Model, &chunk.CreatedAt); err != nil {
 			return nil, fmt.Errorf("scan chunk row: %w", err)
 		}
 

@@ -1024,6 +1024,16 @@ func runMigrations(db *gorm.DB, embeddingDims int) error {
 			return tx.Exec("DROP TABLE IF EXISTS session_observation_injections").Error
 		},
 	},
+	// Migration 029: Add text column to content_chunks for readable search results.
+	{
+		ID: "029_content_chunks_text",
+		Migrate: func(tx *gorm.DB) error {
+			return tx.Exec(`ALTER TABLE content_chunks ADD COLUMN IF NOT EXISTS text TEXT NOT NULL DEFAULT ''`).Error
+		},
+		Rollback: func(tx *gorm.DB) error {
+			return tx.Exec(`ALTER TABLE content_chunks DROP COLUMN IF EXISTS text`).Error
+		},
+	},
 	})
 	if err := m.Migrate(); err != nil {
 		return fmt.Errorf("run gormigrate migrations: %w", err)

@@ -164,6 +164,9 @@ func main() {
 		collectionRegistry,
 		sessionIdxStore,
 		nil, // consolidationScheduler - not available in standalone MCP mode
+		nil, // documentStore - not available in standalone MCP mode
+		nil, // embedSvc - not available in standalone MCP mode
+		nil, // chunkManager - not available in standalone MCP mode
 	)
 
 	sseHandler := mcp.NewSSEHandler(server)
