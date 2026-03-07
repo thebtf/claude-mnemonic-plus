@@ -449,6 +449,114 @@ func parseIntParam(r *http.Request, name string, defaultVal int) int {
 	return defaultVal
 }
 
+// handleSessionMarkInjected records which observations were injected into a specific session.
+// POST /api/sessions/{sessionId}/mark-injected
+// Dual-writes: per-session table AND global injection_count counter.
+func (s *Service) handleSessionMarkInjected(w http.ResponseWriter, r *http.Request) {
+	sessionIdStr := chi.URLParam(r, "sessionId")
+	sessionID, err := strconv.ParseInt(sessionIdStr, 10, 64)
+	if err != nil {
+		http.Error(w, "invalid session id", http.StatusBadRequest)
+		return
+	}
+
+	var req struct {
+		IDs []int64 `json:"ids"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	if len(req.IDs) == 0 {
+		writeJSON(w, map[string]any{"status": "ok", "count": 0})
+		return
+	}
+
+	s.initMu.RLock()
+	observationStore := s.observationStore
+	s.initMu.RUnlock()
+
+	if observationStore == nil {
+		http.Error(w, "service not ready", http.StatusServiceUnavailable)
+		return
+	}
+
+	if err := observationStore.RecordSessionInjections(r.Context(), sessionID, req.IDs); err != nil {
+		http.Error(w, "failed to record session injections", http.StatusInternalServerError)
+		return
+	}
+
+	if err := observationStore.IncrementInjectionCounts(r.Context(), req.IDs); err != nil {
+		http.Error(w, "failed to increment injection counts", http.StatusInternalServerError)
+		return
+	}
+
+	writeJSON(w, map[string]any{"status": "ok", "count": len(req.IDs)})
+}
+
+// InjectedObservationResponse is the response shape for injected observation data.
+type InjectedObservationResponse struct {
+	ID    int64    `json:"id"`
+	Title string   `json:"title"`
+	Type  string   `json:"type"`
+	Facts []string `json:"facts"`
+}
+
+// handleGetSessionInjectedObservations returns observations injected into a specific session.
+// GET /api/sessions/{sessionId}/injected-observations
+func (s *Service) handleGetSessionInjectedObservations(w http.ResponseWriter, r *http.Request) {
+	sessionIdStr := chi.URLParam(r, "sessionId")
+	sessionID, err := strconv.ParseInt(sessionIdStr, 10, 64)
+	if err != nil {
+		http.Error(w, "invalid session id", http.StatusBadRequest)
+		return
+	}
+
+	s.initMu.RLock()
+	observationStore := s.observationStore
+	s.initMu.RUnlock()
+
+	if observationStore == nil {
+		http.Error(w, "service not ready", http.StatusServiceUnavailable)
+		return
+	}
+
+	ids, err := observationStore.GetSessionInjectedObservations(r.Context(), sessionID)
+	if err != nil {
+		http.Error(w, "failed to get injected observations", http.StatusInternalServerError)
+		return
+	}
+
+	// Batch fetch all observations in a single query to avoid N+1 DB calls.
+	observations, err := observationStore.GetObservationsByIDsPreserveOrder(r.Context(), ids)
+	if err != nil {
+		log.Warn().Err(err).Int64("sessionID", sessionID).Msg("Failed to load injected observations")
+		http.Error(w, "failed to load injected observations", http.StatusInternalServerError)
+		return
+	}
+
+	result := make([]InjectedObservationResponse, 0, len(observations))
+	for _, obs := range observations {
+		title := ""
+		if obs.Title.Valid {
+			title = obs.Title.String
+		}
+		facts := []string(obs.Facts)
+		if facts == nil {
+			facts = []string{}
+		}
+		result = append(result, InjectedObservationResponse{
+			ID:    obs.ID,
+			Title: title,
+			Type:  string(obs.Type),
+			Facts: facts,
+		})
+	}
+
+	writeJSON(w, map[string]any{"observations": result})
+}
+
 // incrementRetrievalCounts increments retrieval counts for observations.
 // Called after search results are returned to track popularity.
 func (s *Service) incrementRetrievalCounts(ids []int64) {

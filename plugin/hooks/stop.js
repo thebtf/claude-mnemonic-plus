@@ -56,15 +56,24 @@ function expandTranscriptPath(transcriptPath) {
   return transcriptPath;
 }
 
+const MAX_MESSAGES = 50;
+const MAX_MESSAGE_LENGTH = 5000;
+
+function truncateText(text, maxLen) {
+  if (typeof text !== 'string') return '';
+  return text.length <= maxLen ? text : text.slice(0, maxLen);
+}
+
 async function parseTranscript(transcriptPath) {
   const expandedPath = expandTranscriptPath(transcriptPath);
   if (!expandedPath) {
-    return { lastUser: '', lastAssistant: '' };
+    return { lastUser: '', lastAssistant: '', messages: [] };
   }
 
   return new Promise((resolve) => {
     let lastUser = '';
     let lastAssistant = '';
+    const messages = [];
 
     const stream = fs.createReadStream(expandedPath, {
       encoding: 'utf8',
@@ -73,7 +82,7 @@ async function parseTranscript(transcriptPath) {
 
     stream.on('error', (error) => {
       console.error(`[stop] Failed to read transcript: ${error.message}`);
-      resolve({ lastUser, lastAssistant });
+      resolve({ lastUser, lastAssistant, messages });
     });
 
     const rl = readline.createInterface({
@@ -107,15 +116,95 @@ async function parseTranscript(transcriptPath) {
 
       if (messageRole === 'user') {
         lastUser = messageText;
+        messages.push({ role: 'user', text: truncateText(messageText, MAX_MESSAGE_LENGTH) });
       } else if (messageRole === 'assistant') {
         lastAssistant = messageText;
+        messages.push({ role: 'assistant', text: truncateText(messageText, MAX_MESSAGE_LENGTH) });
+      }
+
+      // Ring buffer: keep only last MAX_MESSAGES
+      if (messages.length > MAX_MESSAGES) {
+        messages.shift();
       }
     });
 
     rl.on('close', () => {
-      resolve({ lastUser, lastAssistant });
+      resolve({ lastUser, lastAssistant, messages });
     });
   });
+}
+
+/**
+ * Detect whether an injected observation was used or corrected in assistant messages.
+ * Returns: "used" | "corrected" | "ignored"
+ */
+function detectUtilitySignal(obs, assistantTextLower) {
+  const title = typeof obs.title === 'string' ? obs.title : '';
+  const facts = Array.isArray(obs.facts) ? obs.facts : [];
+
+  // Build search terms from title and facts (min length to avoid false positives)
+  const searchTerms = [];
+  if (title.length >= 10) {
+    searchTerms.push(title.toLowerCase());
+  }
+  for (const fact of facts) {
+    if (typeof fact === 'string' && fact.length >= 15) {
+      searchTerms.push(fact.toLowerCase());
+    }
+  }
+
+  if (searchTerms.length === 0) return 'ignored';
+
+  // Check for verbatim citation (any search term appears in assistant text)
+  let cited = false;
+  for (const term of searchTerms) {
+    if (assistantTextLower.includes(term)) {
+      cited = true;
+      break;
+    }
+  }
+
+  if (!cited) return 'ignored';
+
+  // Check for explicit correction patterns in a local window around each cited term.
+  // Only use unambiguous correction markers to avoid false positives from normal prose.
+  const correctionPatterns = [
+    'actually,',
+    "that's not",
+    'that is not',
+    'not quite right',
+    'incorrect',
+    "that's wrong",
+    'that is wrong',
+    'correction:',
+    'was wrong',
+    'but actually',
+    'outdated',
+  ];
+
+  const WINDOW_SIZE = 200;
+  for (const term of searchTerms) {
+    let searchFrom = 0;
+    // Find all occurrences of this term and check local window around each
+    while (searchFrom < assistantTextLower.length) {
+      const termIdx = assistantTextLower.indexOf(term, searchFrom);
+      if (termIdx < 0) break;
+
+      const windowStart = Math.max(0, termIdx - WINDOW_SIZE);
+      const windowEnd = Math.min(assistantTextLower.length, termIdx + term.length + WINDOW_SIZE);
+      const window = assistantTextLower.slice(windowStart, windowEnd);
+
+      for (const pattern of correctionPatterns) {
+        if (window.includes(pattern)) {
+          return 'corrected';
+        }
+      }
+
+      searchFrom = termIdx + term.length;
+    }
+  }
+
+  return 'used';
 }
 
 async function handleStop(ctx, input) {
@@ -142,7 +231,7 @@ async function handleStop(ctx, input) {
       ? input.TranscriptPath
       : '';
 
-  const { lastUser, lastAssistant } = await parseTranscript(transcriptPath);
+  const { lastUser, lastAssistant, messages } = await parseTranscript(transcriptPath);
 
   console.error(`[stop] Transcript path: ${transcriptPath}`);
   console.error(`[stop] Last user message length: ${String(lastUser).length}`);
@@ -164,6 +253,56 @@ async function handleStop(ctx, input) {
     });
   } catch (error) {
     console.error(`[stop] Warning: summary request failed: ${error.message}`);
+  }
+
+  // Extract learnings from session transcript (LLM-based, may take seconds)
+  if (messages.length > 0) {
+    const project = typeof ctx.Project === 'string' ? ctx.Project : '';
+    try {
+      const learnResult = await lib.requestPost(
+        `/api/sessions/${sessionID}/extract-learnings`,
+        { messages, project },
+        30000
+      );
+      const count = (learnResult && learnResult.count) || 0;
+      const status = (learnResult && learnResult.status) || 'unknown';
+      console.error(`[stop] extract-learnings: status=${status}, count=${count}`);
+    } catch (error) {
+      console.error(`[stop] Warning: extract-learnings failed: ${error.message}`);
+    }
+  }
+
+  // Detect utility signals for injected observations
+  try {
+    const injectedResult = await lib.requestGet(
+      `/api/sessions/${sessionID}/injected-observations`
+    );
+    const injectedObs = Array.isArray(injectedResult && injectedResult.observations)
+      ? injectedResult.observations
+      : [];
+
+    if (injectedObs.length > 0 && messages.length > 0) {
+      const assistantText = messages
+        .filter((m) => m.role === 'assistant')
+        .map((m) => m.text)
+        .join('\n');
+      const assistantTextLower = assistantText.toLowerCase();
+
+      for (const obs of injectedObs) {
+        if (!obs || typeof obs !== 'object' || typeof obs.id !== 'number') continue;
+
+        const signal = detectUtilitySignal(obs, assistantTextLower);
+        if (signal === 'ignored') continue;
+
+        lib.requestPost(`/api/observations/${obs.id}/utility`, { signal }, 3000).catch((err) => {
+          console.error(`[stop] utility signal failed for obs ${obs.id}: ${err.message}`);
+        });
+      }
+
+      console.error(`[stop] Checked ${injectedObs.length} injected observations for utility signals`);
+    }
+  } catch (error) {
+    console.error(`[stop] Warning: utility signal detection failed: ${error.message}`);
   }
 
   return '';

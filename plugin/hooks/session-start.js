@@ -7,13 +7,18 @@ function getString(value) {
   return typeof value === 'string' ? value : '';
 }
 
+function escapeXmlTags(text) {
+  if (typeof text !== 'string') return '';
+  return text.replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
 function formatFactsLine(items) {
   if (!Array.isArray(items) || items.length === 0) return '';
 
   let out = 'Key facts:\n';
   for (const fact of items) {
     if (typeof fact === 'string' && fact !== '') {
-      out += `- ${fact}\n`;
+      out += `- ${escapeXmlTags(fact)}\n`;
     }
   }
 
@@ -62,12 +67,12 @@ async function handleSessionStart(ctx, input) {
       continue;
     }
 
-    const obsType = getString(observation.type);
-    const title = getString(observation.title);
+    const obsType = escapeXmlTags(getString(observation.type));
+    const title = escapeXmlTags(getString(observation.title));
     const typeLabel = obsType.toUpperCase();
 
     if (i < fullCount) {
-      const narrative = getString(observation.narrative);
+      const narrative = escapeXmlTags(getString(observation.narrative));
       contextBuilder += `## ${i + 1}. [${typeLabel}] ${title}\n`;
       if (narrative !== '') {
         contextBuilder += `${narrative}\n`;
@@ -75,7 +80,7 @@ async function handleSessionStart(ctx, input) {
       contextBuilder += formatFactsLine(observation.facts);
       contextBuilder += '\n';
     } else {
-      const subtitle = getString(observation.subtitle);
+      const subtitle = escapeXmlTags(getString(observation.subtitle));
       if (subtitle !== '') {
         contextBuilder += `- [${typeLabel}] ${title}: ${subtitle}\n`;
       } else {
@@ -85,6 +90,73 @@ async function handleSessionStart(ctx, input) {
   }
 
   contextBuilder += '</engram-context>\n';
+
+  // Render guidance block if server provides guidance observations
+  const guidance = Array.isArray(result.guidance) ? result.guidance : [];
+  if (guidance.length > 0) {
+    contextBuilder += '<engram-guidance>\n';
+    contextBuilder += '# Learned Behavioral Guidance\n';
+    contextBuilder += 'These are patterns learned from previous sessions. Follow them unless context demands otherwise.\n\n';
+
+    for (let i = 0; i < guidance.length; i++) {
+      const g = guidance[i];
+      if (!g || typeof g !== 'object') continue;
+
+      const gType = escapeXmlTags(getString(g.type)).toUpperCase();
+      const gTitle = escapeXmlTags(getString(g.title));
+      const gNarrative = escapeXmlTags(getString(g.narrative));
+
+      contextBuilder += `${i + 1}. [${gType}] ${gTitle}\n`;
+      if (gNarrative !== '') {
+        contextBuilder += `${gNarrative}\n`;
+      }
+      contextBuilder += formatFactsLine(g.facts);
+      contextBuilder += '\n';
+    }
+
+    contextBuilder += '</engram-guidance>\n';
+  }
+
+  // Mark all injected observation IDs (fire-and-forget).
+  // Use per-session endpoint when possible so stop hook can detect utility signals.
+  const allObs = [...observations, ...guidance];
+  const ids = [];
+  for (const obs of allObs) {
+    if (obs && typeof obs === 'object' && typeof obs.id === 'number' && obs.id > 0) {
+      ids.push(obs.id);
+    }
+  }
+  if (ids.length > 0) {
+    // Try to resolve Claude session ID to DB session ID for per-session tracking
+    let dbSessionId = null;
+    if (ctx.SessionID) {
+      try {
+        const sessionResult = await lib.requestGet(
+          `/api/sessions?claudeSessionId=${encodeURIComponent(ctx.SessionID)}`,
+          3000
+        );
+        const candidateId = Number(sessionResult && sessionResult.id);
+        if (Number.isFinite(candidateId) && candidateId > 0) {
+          dbSessionId = candidateId;
+        }
+      } catch {
+        // Session may not exist yet — fall through to global-only tracking
+      }
+    }
+
+    if (dbSessionId !== null) {
+      // Per-session endpoint does dual-write: session table + global injection_count
+      lib.requestPost(`/api/sessions/${dbSessionId}/mark-injected`, { ids }, 3000).catch((err) => {
+        console.error(`[engram] session mark-injected failed: ${err.message}`);
+      });
+    } else {
+      // Fallback: global-only tracking when session isn't in DB yet
+      lib.requestPost('/api/observations/mark-injected', { ids }, 3000).catch((err) => {
+        console.error(`[engram] mark-injected failed: ${err.message}`);
+      });
+    }
+  }
+
   return contextBuilder;
 }
 
