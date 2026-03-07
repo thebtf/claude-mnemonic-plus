@@ -94,9 +94,47 @@ type rerankResponseResult struct {
 	RelevanceScore float64 `json:"relevance_score"`
 }
 
+// maxBatchSize is the maximum number of documents per rerank API call.
+// TEI (Text Embeddings Inference) limits batch size to 32.
+const maxBatchSize = 32
+
 // callAPI sends a rerank request to the API and returns scored results.
+// If documents exceed maxBatchSize, splits into batches and merges results.
 // On any error (timeout, 429, 5xx), returns nil to signal graceful degradation.
 func (s *APIService) callAPI(query string, documents []string, topN int) ([]rerankResponseResult, error) {
+	if len(documents) <= maxBatchSize {
+		return s.callAPIBatch(query, documents, topN, 0)
+	}
+
+	// Split into batches, merge results with corrected indices
+	var allResults []rerankResponseResult
+	for offset := 0; offset < len(documents); offset += maxBatchSize {
+		end := offset + maxBatchSize
+		if end > len(documents) {
+			end = len(documents)
+		}
+		batch := documents[offset:end]
+
+		results, err := s.callAPIBatch(query, batch, 0, 0)
+		if err != nil {
+			return nil, err
+		}
+		if results == nil {
+			return nil, nil // graceful degradation
+		}
+
+		// Remap indices to global document positions
+		for i := range results {
+			results[i].Index += offset
+		}
+		allResults = append(allResults, results...)
+	}
+
+	return allResults, nil
+}
+
+// callAPIBatch sends a single rerank request batch to the API.
+func (s *APIService) callAPIBatch(query string, documents []string, topN int, _ int) ([]rerankResponseResult, error) {
 	reqBody := rerankRequest{
 		Model:     s.model,
 		Query:     query,
