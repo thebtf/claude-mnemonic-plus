@@ -17,6 +17,7 @@ import (
 	graphpkg "github.com/thebtf/engram/internal/graph"
 	"github.com/thebtf/engram/internal/graph/falkordb"
 	"github.com/thebtf/engram/internal/consolidation"
+	"github.com/thebtf/engram/internal/logbuf"
 	"github.com/thebtf/engram/internal/db/gorm"
 	"github.com/thebtf/engram/internal/embedding"
 	"github.com/thebtf/engram/internal/maintenance"
@@ -161,6 +162,7 @@ type Service struct {
 	rateLimiter            *PerClientRateLimiter
 	tokenAuth              *TokenAuth
 	expensiveOpLimiter     *ExpensiveOperationLimiter
+	logBuffer              *logbuf.RingBuffer
 	version                string
 	recentQueriesBuf       [maxRecentQueries]RecentSearchQuery
 	wg                     sync.WaitGroup
@@ -359,7 +361,7 @@ func (s *Service) setupVectorSyncCallbacks(
 // NewService creates a new worker service with deferred initialization.
 // The service starts immediately with health endpoint available,
 // while database and SDK initialization happens in the background.
-func NewService(version string) (*Service, error) {
+func NewService(version string, logBuffer *logbuf.RingBuffer) (*Service, error) {
 	cfg := config.Get()
 
 	// Create context
@@ -396,6 +398,7 @@ func NewService(version string) (*Service, error) {
 		tokenAuth:          tokenAuth,
 		expensiveOpLimiter: NewExpensiveOperationLimiter(),
 		bulkOpLimiter:      NewBulkOperationLimiter(60), // 60 second cooldown for bulk operations
+		logBuffer:          logBuffer,
 		cachedObsCounts:    make(map[string]cachedCount),
 		statsCacheTTL:      time.Minute,             // Cache stats for 1 minute
 		vectorSyncSem:      make(chan struct{}, 10), // Limit to 10 concurrent vector syncs
@@ -1472,6 +1475,9 @@ func (s *Service) setupRoutes() {
 
 	// Dashboard SSE endpoint (works before DB is ready)
 	s.router.Get("/api/events", s.sseBroadcaster.HandleSSE)
+
+	// Log viewer endpoint (works before DB is ready, supports SSE follow mode)
+	s.router.Get("/api/logs", s.handleGetLogs)
 
 	// MCP routes (require DB ready, no timeout — long-lived SSE connections)
 	s.router.Group(func(r chi.Router) {

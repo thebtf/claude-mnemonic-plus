@@ -106,6 +106,7 @@ type Config struct {
 	SmartGCEnabled            bool     `json:"smart_gc_enabled"`
 	SmartGCThreshold          float64  `json:"smart_gc_threshold"`
 	SmartGCMinAgeDays         int      `json:"smart_gc_min_age_days"`
+	LogBufferSize             int      `json:"log_buffer_size"` // Ring buffer capacity for /api/logs (default: 10000)
 }
 
 var (
@@ -454,6 +455,11 @@ func Load() (*Config, error) {
 	if v := strings.TrimSpace(os.Getenv("ENGRAM_SMART_GC_MIN_AGE_DAYS")); v != "" {
 		if n, err := strconv.Atoi(v); err == nil && n > 0 {
 			cfg.SmartGCMinAgeDays = n
+		}
+	}
+	if v := strings.TrimSpace(os.Getenv("ENGRAM_LOG_BUFFER_SIZE")); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			cfg.LogBufferSize = n
 		}
 	}
 

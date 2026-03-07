@@ -8,6 +8,8 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/thebtf/engram/internal/config"
+	"github.com/thebtf/engram/internal/logbuf"
 	"github.com/thebtf/engram/internal/worker"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
@@ -16,16 +18,24 @@ import (
 var Version = "dev"
 
 func main() {
-	// Setup logging
+	// Setup logging with ring buffer for /api/logs endpoint
 	zerolog.TimeFieldFormat = zerolog.TimeFormatUnix
-	log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stderr})
+	cfg := config.Get()
+	bufSize := cfg.LogBufferSize
+	if bufSize <= 0 {
+		bufSize = logbuf.DefaultCapacity
+	}
+	logRing := logbuf.NewRingBuffer(bufSize)
+	consoleWriter := zerolog.ConsoleWriter{Out: os.Stderr}
+	multi := zerolog.MultiLevelWriter(consoleWriter, logRing)
+	log.Logger = log.Output(multi)
 
 	log.Info().
 		Str("version", Version).
 		Msg("Starting engram server")
 
-	// Create service with version
-	svc, err := worker.NewService(Version)
+	// Create service with version and log buffer
+	svc, err := worker.NewService(Version, logRing)
 	if err != nil {
 		log.Fatal().Err(err).Msg("Failed to create service")
 	}
