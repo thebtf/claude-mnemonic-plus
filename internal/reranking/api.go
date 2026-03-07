@@ -47,9 +47,7 @@ func NewAPIService(cfg APIConfig) (*APIService, error) {
 	if cfg.BaseURL == "" {
 		return nil, fmt.Errorf("reranking API base URL is required")
 	}
-	if cfg.APIKey == "" {
-		return nil, fmt.Errorf("reranking API key is required")
-	}
+
 
 	alpha := cfg.Alpha
 	if alpha <= 0 || alpha > 1 {
@@ -162,7 +160,9 @@ func (s *APIService) callAPIBatch(query string, documents []string, topN int, _ 
 		return nil, fmt.Errorf("create rerank request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+s.apiKey)
+	if s.apiKey != "" {
+		req.Header.Set("Authorization", "Bearer "+s.apiKey)
+	}
 
 	resp, err := s.client.Do(req)
 	if err != nil {

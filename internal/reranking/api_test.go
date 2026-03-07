@@ -304,10 +304,12 @@ func TestNewAPIService_Validation(t *testing.T) {
 	_, err := NewAPIService(APIConfig{APIKey: "key"})
 	assert.Error(t, err, "should require BaseURL")
 
-	_, err = NewAPIService(APIConfig{BaseURL: "http://example.com"})
-	assert.Error(t, err, "should require APIKey")
+	// API key is optional (TEI doesn't require auth)
+	svc, err := NewAPIService(APIConfig{BaseURL: "http://example.com"})
+	require.NoError(t, err)
+	assert.NotNil(t, svc)
 
-	svc, err := NewAPIService(APIConfig{BaseURL: "http://example.com", APIKey: "key"})
+	svc, err = NewAPIService(APIConfig{BaseURL: "http://example.com", APIKey: "key"})
 	require.NoError(t, err)
 	assert.NotNil(t, svc)
 }

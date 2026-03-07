@@ -433,10 +433,7 @@ func (s *Service) createReranker() reranking.Reranker {
 
 	switch provider {
 	case "api":
-		if s.config.RerankingAPIKey == "" {
-			log.Warn().Msg("Reranking API key not set (ENGRAM_RERANKING_API_KEY) - reranking disabled")
-			return nil
-		}
+
 		if s.config.RerankingAPIBaseURL == "" {
 			log.Warn().Msg("Reranking API URL not set (ENGRAM_RERANKING_API_URL) - reranking disabled")
 			return nil
