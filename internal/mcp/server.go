@@ -256,40 +256,151 @@ func (s *Server) handleInitialize(req *Request) *Response {
 }
 
 func (s *Server) buildInstructions() string {
-	if s.collectionRegistry == nil {
-		return ""
-	}
-
-	collectionList := s.collectionRegistry.All()
-	if len(collectionList) == 0 {
-		return ""
-	}
-
 	var b strings.Builder
-	count := 0
-	for _, collection := range collectionList {
-		if collection == nil || strings.TrimSpace(collection.Description) == "" {
-			continue
-		}
 
-		if count == 0 {
-			b.WriteString("# Available Collections\n\n")
-		} else {
-			b.WriteString("\n\n")
-		}
-		b.WriteString("## ")
-		b.WriteString(collection.Name)
-		b.WriteString("\n")
-		b.WriteString(collection.Description)
-		count++
-	}
+	// Core usage instructions — always included so any MCP client knows how to use engram
+	b.WriteString(engramInstructions)
 
-	if count == 0 {
-		return ""
+	// Append available collections if any
+	if s.collectionRegistry != nil {
+		count := 0
+		for _, collection := range s.collectionRegistry.All() {
+			if collection == nil || strings.TrimSpace(collection.Description) == "" {
+				continue
+			}
+			if count == 0 {
+				b.WriteString("\n\n# Available Collections\n\n")
+			} else {
+				b.WriteString("\n\n")
+			}
+			b.WriteString("## ")
+			b.WriteString(collection.Name)
+			b.WriteString("\n")
+			b.WriteString(collection.Description)
+			count++
+		}
 	}
 
 	return b.String()
 }
+
+// engramInstructions is the MCP server instructions text returned to clients on initialize.
+// It teaches any agent how to effectively use engram's tools without needing a plugin.
+const engramInstructions = `# Engram — Persistent Memory for AI Agents
+
+Engram stores observations from coding sessions in PostgreSQL+pgvector and provides semantic search across them.
+Hooks automatically capture knowledge from your sessions. Your job is to **retrieve, connect, and maintain** that knowledge.
+
+## Quick Start
+
+1. Verify connection: ` + "`check_system_health()`" + `
+2. Search existing knowledge: ` + "`search(query=\"...\")`" + `
+3. Before modifying code: ` + "`find_by_file(files=\"path/to/file\")`" + `
+4. Before architectural decisions: ` + "`decisions(query=\"...\")`" + `
+
+## Tool Categories
+
+### Search & Retrieval (primary workflow)
+| Tool | When to Use |
+|------|-------------|
+| ` + "`search`" + ` | General semantic search across observations, sessions, prompts. Start here. |
+| ` + "`decisions`" + ` | Find past architecture/design decisions before making new ones. |
+| ` + "`changes`" + ` | Find code modifications, refactorings, migration history. |
+| ` + "`how_it_works`" + ` | Understand system design, patterns, implementation details. |
+| ` + "`find_by_concept`" + ` | Browse by concept tag (e.g., "vector-search", "authentication"). |
+| ` + "`find_by_file`" + ` | What's known about a file? Check BEFORE modifying unfamiliar code. |
+| ` + "`find_by_type`" + ` | Filter by observation type (decision, bugfix, feature, etc.). |
+| ` + "`find_similar_observations`" + ` | Pure vector similarity — detect duplicates before creating new ones. |
+| ` + "`search_sessions`" + ` | Full-text search across indexed Claude Code session transcripts. |
+
+### Timeline & Context
+| Tool | When to Use |
+|------|-------------|
+| ` + "`timeline`" + ` | Browse observations around a specific point in time. |
+| ` + "`get_recent_context`" + ` | Quick dump of latest observations for a project. |
+| ` + "`get_context_timeline`" + ` | Timeline around a specific observation ID. |
+| ` + "`get_timeline_by_query`" + ` | Search + timeline combined — finds best match, shows surrounding context. |
+
+### Graph & Relationships
+| Tool | When to Use |
+|------|-------------|
+| ` + "`find_related_observations`" + ` | Follow knowledge graph edges (causes, fixes, explains, contradicts). |
+| ` + "`get_observation_relationships`" + ` | Multi-hop graph traversal with configurable depth. |
+| ` + "`get_graph_neighbors`" + ` | FalkorDB graph neighbors (requires FalkorDB backend). |
+| ` + "`get_graph_stats`" + ` | Graph backend status and statistics. |
+
+### Observation Management
+| Tool | When to Use |
+|------|-------------|
+| ` + "`get_observation`" + ` | Fetch single observation by ID with full metadata. |
+| ` + "`edit_observation`" + ` | Correct errors, add details, update scope. Only provided fields change. |
+| ` + "`tag_observation`" + ` | Add/remove/set concept tags. Modes: add, remove, set. |
+| ` + "`get_observations_by_tag`" + ` | List all observations with a specific tag. |
+| ` + "`batch_tag_by_pattern`" + ` | Auto-tag observations matching a text pattern. Use dry_run=true first. |
+| ` + "`merge_observations`" + ` | Combine duplicates — target kept and boosted, source superseded. |
+| ` + "`bulk_delete_observations`" + ` | Batch delete by IDs. |
+| ` + "`bulk_mark_superseded`" + ` | Mark observations as stale without deleting. |
+| ` + "`bulk_boost_observations`" + ` | Adjust importance scores in bulk (-1.0 to 1.0). |
+| ` + "`export_observations`" + ` | Export as JSON, JSONL, or Markdown. |
+
+### Quality & Analytics
+| Tool | When to Use |
+|------|-------------|
+| ` + "`get_memory_stats`" + ` | System overview — counts, storage, health. |
+| ` + "`get_observation_quality`" + ` | Quality score for a single observation with improvement suggestions. |
+| ` + "`get_data_quality_report`" + ` | Comprehensive quality assessment across observations. |
+| ` + "`get_observation_scoring_breakdown`" + ` | Debug why an observation has its current importance score. |
+| ` + "`analyze_observation_importance`" + ` | Project-level importance analysis — top scored, most retrieved. |
+| ` + "`get_temporal_trends`" + ` | Activity patterns over time (daily, weekly, hourly). |
+| ` + "`explain_search_ranking`" + ` | Debug search result ordering for a query. |
+| ` + "`analyze_search_patterns`" + ` | Search usage analytics — common queries, missed results. |
+| ` + "`get_patterns`" + ` | Detected recurring patterns (workflow, best_practice, anti_pattern). |
+
+### Maintenance
+| Tool | When to Use |
+|------|-------------|
+| ` + "`check_system_health`" + ` | Health check of all subsystems. Also verifies engram connectivity. |
+| ` + "`suggest_consolidations`" + ` | Find observations that should be merged. |
+| ` + "`run_consolidation`" + ` | Trigger decay, association discovery, and/or forgetting cycles. |
+| ` + "`trigger_maintenance`" + ` | Run cleanup (old observations, DB optimization). |
+| ` + "`get_maintenance_stats`" + ` | Last run time, cleanup counts, configuration. |
+
+### Sessions
+| Tool | When to Use |
+|------|-------------|
+| ` + "`list_sessions`" + ` | List indexed sessions with workstation/project filters. |
+| ` + "`search_sessions`" + ` | Full-text search within session transcripts. |
+
+### Collections & Documents
+| Tool | When to Use |
+|------|-------------|
+| ` + "`list_collections`" + ` | Show configured collections with document counts. |
+| ` + "`list_documents`" + ` | List documents in a collection. |
+| ` + "`get_document`" + ` | Retrieve full document content. |
+| ` + "`ingest_document`" + ` | Add document — chunks, embeds, stores. Idempotent (same hash = skip). |
+| ` + "`search_collection`" + ` | Semantic search across document chunks. |
+| ` + "`remove_document`" + ` | Soft-delete (deactivate) a document. |
+
+### Import
+| Tool | When to Use |
+|------|-------------|
+| ` + "`import_instincts`" + ` | Import ECC instinct files as guidance observations. Idempotent. |
+
+## Workflow Patterns
+
+**Starting work:** Context is auto-injected by hooks. Use ` + "`search`" + ` or ` + "`get_recent_context`" + ` for more.
+**Before modifying code:** ` + "`find_by_file`" + ` + ` + "`how_it_works`" + ` to understand what's known.
+**Before architectural decisions:** ` + "`decisions`" + ` to check prior choices.
+**Debugging:** ` + "`find_related_observations`" + ` to trace cause chains.
+**Periodic cleanup:** ` + "`suggest_consolidations`" + ` → ` + "`merge_observations`" + ` → ` + "`trigger_maintenance`" + `.
+
+## Common Mistakes
+
+- Do NOT check ENGRAM_URL/ENGRAM_API_TOKEN env vars — call ` + "`check_system_health()`" + ` instead.
+- Do NOT manually save observations — hooks capture them automatically.
+- Read injected ` + "`<engram-context>`" + ` and ` + "`<relevant-memory>`" + ` blocks — they contain prior knowledge.
+- Search BEFORE re-exploring code — someone already documented it.
+- Use specialized tools: ` + "`decisions`" + ` for architecture, ` + "`find_by_file`" + ` for code, ` + "`timeline`" + ` for history.`
 
 // handleToolsList returns the list of available tools.
 func (s *Server) handleToolsList(req *Request) *Response {
