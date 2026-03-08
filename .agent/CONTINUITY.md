@@ -1,32 +1,30 @@
 # Continuity State
 
-**Last Updated:** 2026-03-06
-**Session:** Deployment Cleanup Implementation
+**Last Updated:** 2026-03-08
+**Session:** Production-ready: MCP instructions + marketplace auto-sync
 
 ## Done
 - Self-learning plan: all 3 phases complete (Phase 4 deferred to v1.1)
 - RAG improvements plan: ALL 3 PHASES COMPLETE
 - FalkorDB optional graph backend: ALL 6 PHASES COMPLETE
 - Embedding platform split: Windows build fix COMPLETE
-- **Deployment cleanup: ALL 4 PHASES COMPLETE** (6 commits)
-  - Phase 1: .env.example + DEPLOYMENT.md fixed (dimensions, postgres user, FalkorDB vars, client setup)
-  - Phase 2: Created `/engram:setup` command, updated doctor.md with setup reference
-  - Phase 4: Added mcp-stdio-proxy to goreleaser, updated release header
-  - Phase 3: Refactored install.sh and install.ps1 (deleted dead code, fixed binary names, added env var setup)
-- **ADRs written**:
-  - ADR-001: Belief revision and knowledge quality assurance (preliminary, deferred to v1.1)
-  - ADR-002: Plugin-first installation architecture (accepted)
+- Deployment cleanup: ALL 4 PHASES COMPLETE
+- **FalkorDB int64 panic fix** (commit `39cead0`)
+- **MCP panic recovery** (commit `cf20eb7`)
+- **Plugin marketplace restructured**: lightweight `thebtf/engram-marketplace` repo
+- **MCP instructions** (`8e28f2a`): `buildInstructions()` returns comprehensive usage guide for all 48+ tools on `initialize` — any MCP client instantly knows how to use engram
+- **Auto-sync workflow** (`3ab5321`): `.github/workflows/sync-marketplace.yml` syncs `plugin/` → `engram-marketplace` on push to main. MARKETPLACE_PAT secret configured. Verified working (`f083efb` → marketplace commit `6831371`).
+- **Plugin version bump** (`f083efb`): 0.5.0 → 0.5.1
 
 ## Now
-Deployment cleanup plan fully implemented. Ready for push/PR.
+All production-ready tasks complete for this session.
 
 ## Next
-1. Push deployment cleanup commits and create PR
-2. Test goreleaser snapshot: `goreleaser release --snapshot --skip=publish`
-3. RAG improvements Phase 1 (from `.agent/plans/rag-improvements.md`)
+1. Collection MCP Tools plan (`~/.claude/plans/vast-wishing-taco.md`)
+2. RAG improvements Phase 1 (from `.agent/plans/rag-improvements.md`)
 
 ## Open Questions
-- Gemini CLI API consistently 502 (model gemini-3.1-pro-preview-customtools not found)
+- None
 
 ## Known Pre-existing Test Failures (Windows)
 - `TestSafeResolvePath` — Windows path separator mismatch
@@ -35,15 +33,13 @@ Deployment cleanup plan fully implemented. Ready for push/PR.
 - `go-tree-sitter` — CGO build constraints exclude Windows
 
 ## Key Files
-- Deployment plan: `.agent/plans/deployment-cleanup.md`
-- Deployment spec: `.agent/specs/deployment-cleanup.md`
-- ADRs: `.agent/arch/decisions/ADR-001-belief-revision.md`, `ADR-002-plugin-first-install.md`
-- Plugin MCP config: `plugin/.mcp.json`
-- Install scripts: `scripts/install.sh`, `scripts/install.ps1`
-- Goreleaser: `.goreleaser.yaml`
+- Marketplace repo: `D:/Dev/engram-marketplace-new/` (local clone of `thebtf/engram-marketplace`)
+- Plugin source of truth: `plugin/` (hooks, skills, commands)
+- Root marketplace metadata: `.claude-plugin/` (backup for direct repo install)
+- FalkorDB client: `internal/graph/falkordb/client.go`
+- MCP streamable handler: `internal/mcp/streamable.go`
 
 ## Plan Documents
 - Global Roadmap: `.agent/plans/global-roadmap.md`
-- Deployment Cleanup: `.agent/plans/deployment-cleanup.md`
-- FalkorDB Graph: `.agent/plans/falkordb-optional-graph.md`
+- Collection MCP Tools: `~/.claude/plans/vast-wishing-taco.md`
 - RAG Improvements: `.agent/plans/rag-improvements.md`
