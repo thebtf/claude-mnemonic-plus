@@ -1,0 +1,19 @@
+# Session manifest for PoC backfill testing
+# 10 real sessions across diverse projects, 200KB-2.7MB range
+# Format: one absolute path per line (comments start with #)
+
+# Small sessions (200-300KB) — test skip/low-yield path
+C:\Users\btf\.claude\projects\D--Dev-nvmd-ai-kit\61663087-ec43-4d55-80d8-145d3918d5da.jsonl
+C:\Users\btf\.claude\projects\D--Dev-nvmd-ai-kg\9a6d70b3-c545-49b7-9855-ab93dd78b5ba.jsonl
+C:\Users\btf\.claude\projects\D--Dev-contentbricks-universal\8327135c-f245-4d13-b941-f25fed86d661.jsonl
+
+# Medium sessions (300KB-1MB) — expect 1-3 observations
+C:\Users\btf\.claude\projects\D--Dev-nvmd-devops\e8b7ed49-f67f-40c0-b57c-14743e73ade4.jsonl
+C:\Users\btf\.claude\projects\D--Dev-engram\3655a767-efb3-4d64-ba45-de5fefc9d24d.jsonl
+C:\Users\btf\.claude\projects\D--Dev-mcp-aimux\df7dd4eb-cefb-429d-836f-9849e56d2e48.jsonl
+
+# Large sessions (1-3MB) — test chunking, expect 3-5 observations
+C:\Users\btf\.claude\projects\D--Dev-nvmd-devops\d13d8de2-c0b9-4a7f-aa6a-888861e4d964.jsonl
+C:\Users\btf\.claude\projects\D--Dev-nvmd-ai-kg\0ff492a8-1189-42e3-8ebc-e3b276216ad7.jsonl
+C:\Users\btf\.claude\projects\D--Dev-contentbricks-universal\f1b5df23-4363-494f-8708-0b6d53c08b4f.jsonl
+C:\Users\btf\.claude\projects\D--Dev-nvmd-video-to-script\a14209e5-a0aa-4983-b967-1d95a4c37304.jsonl
