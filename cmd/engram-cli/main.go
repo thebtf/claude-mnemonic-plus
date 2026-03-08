@@ -84,6 +84,8 @@ func runBackfill(args []string) {
 	runID := fs.String("run-id", "", "Unique run ID for grouping observations (auto-generated if empty)")
 	limitPtr := fs.Int("limit", 0, "Maximum number of sessions to process (0 = unlimited)")
 	tokenPtr := fs.String("token", "", "API token for server authentication (or set ENGRAM_API_TOKEN)")
+	resume := fs.Bool("resume", false, "Resume from last checkpoint")
+	statePath := fs.String("state-file", backfill.DefaultProgressPath(), "Path to progress state file")
 
 	fs.Parse(args)
 
@@ -103,6 +105,20 @@ func runBackfill(args []string) {
 		apiToken = os.Getenv("ENGRAM_API_TOKEN")
 	}
 
+	// Load progress state for resumability
+	progress, err := backfill.LoadProgress(*statePath)
+	if err != nil {
+		log.Fatalf("Failed to load progress: %v", err)
+	}
+
+	if *resume && progress.RunID != "" {
+		*runID = progress.RunID
+		log.Printf("Resuming run %s (%d files already processed)", *runID, len(progress.ProcessedFiles))
+	} else {
+		progress.RunID = *runID
+		progress.StartedAt = time.Now()
+	}
+
 	// Find session files
 	files, err := findSessionFiles(*dirPtr)
 	if err != nil {
@@ -111,6 +127,14 @@ func runBackfill(args []string) {
 	if len(files) == 0 {
 		log.Fatal("No .jsonl session files found")
 	}
+
+	// Filter already processed files when resuming
+	if *resume {
+		files = progress.FilterUnprocessed(files)
+		log.Printf("After filtering processed files: %d remaining", len(files))
+	}
+
+	progress.TotalFiles = len(files) + len(progress.ProcessedFiles)
 
 	if *limitPtr > 0 && len(files) > *limitPtr {
 		files = files[:*limitPtr]
@@ -199,6 +223,7 @@ func runBackfill(args []string) {
 		if err != nil {
 			log.Printf("  Error sending session %s: %v", sessionID, err)
 			totalErrors++
+			progress.ErrorCount++
 			continue
 		}
 
@@ -209,6 +234,7 @@ func runBackfill(args []string) {
 		if resp.StatusCode != http.StatusOK {
 			log.Printf("  Server error for %s: %s %s", sessionID, resp.Status, string(respBody))
 			totalErrors++
+			progress.ErrorCount++
 			continue
 		}
 
@@ -216,6 +242,20 @@ func runBackfill(args []string) {
 		totalStored += ingestResp.Stored
 		log.Printf("  Session %s: stored=%d, skipped=%d, errors=%d",
 			sessionID, ingestResp.Stored, ingestResp.Skipped, ingestResp.Errors)
+
+		// Update progress tracking
+		progress.StoredCount += ingestResp.Stored
+		progress.SkippedCount += ingestResp.Skipped
+		progress.ErrorCount += ingestResp.Errors
+		progress.MarkProcessed(sessionFile)
+		if saveErr := progress.Save(*statePath); saveErr != nil {
+			log.Printf("  Warning: failed to save progress: %v", saveErr)
+		}
+	}
+
+	// Save final progress state
+	if saveErr := progress.Save(*statePath); saveErr != nil {
+		log.Printf("Warning: failed to save final progress: %v", saveErr)
 	}
 
 	log.Printf("\n=== Backfill Complete ===")
@@ -223,6 +263,7 @@ func runBackfill(args []string) {
 	log.Printf("Sessions:   %d", len(bySession))
 	log.Printf("Stored:     %d", totalStored)
 	log.Printf("Errors:     %d", totalErrors)
+	log.Printf("State file: %s", *statePath)
 }
 
 // findSessionFiles recursively finds all .jsonl files in a directory.
