@@ -125,7 +125,7 @@ ENGRAM_API_TOKEN=your-api-token
 ```
 
 ```
-/plugin marketplace add thebtf/engram
+/plugin marketplace add thebtf/engram-marketplace
 /plugin install engram
 ```
 

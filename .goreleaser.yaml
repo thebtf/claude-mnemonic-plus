@@ -333,7 +333,7 @@ release:
     ### Install via Plugin Marketplace (recommended)
 
     ```
-    /plugin marketplace add thebtf/engram
+    /plugin marketplace add thebtf/engram-marketplace
     /plugin install engram
     ```
 
