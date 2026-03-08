@@ -47,6 +47,7 @@ type Server struct {
 	embedSvc               *embedding.Service
 	chunkManager           *chunking.Manager
 	graphStore             graphpkg.GraphStore
+	backfillStatusFunc     func() (any, error)
 	version                string
 }
 
@@ -94,6 +95,11 @@ func NewServer(
 // SetGraphStore sets the graph store for graph-related MCP tools.
 func (s *Server) SetGraphStore(gs graphpkg.GraphStore) {
 	s.graphStore = gs
+}
+
+// SetBackfillStatusFunc sets the function to retrieve backfill run status.
+func (s *Server) SetBackfillStatusFunc(fn func() (any, error)) {
+	s.backfillStatusFunc = fn
 }
 
 // Request represents a JSON-RPC request.
@@ -991,6 +997,18 @@ func (s *Server) handleToolsList(req *Request) *Response {
 		},
 	}
 
+	// Backfill status tool — only advertise when backfill tracker is available
+	if s.backfillStatusFunc != nil {
+		tools = append(tools, Tool{
+			Name:        "backfill_status",
+			Description: "Get status of backfill runs — total runs, per-run stored/skipped/error counts, and total observations imported from historical sessions.",
+			InputSchema: map[string]any{
+				"type":       "object",
+				"properties": map[string]any{},
+			},
+		})
+	}
+
 	// Document / Collection tools — only advertise when dependencies are available
 	if s.documentStore != nil {
 		tools = append(tools,
@@ -1205,6 +1223,8 @@ func (s *Server) callTool(ctx context.Context, name string, args json.RawMessage
 		return s.handleRemoveDocument(ctx, args)
 	case "import_instincts":
 		return s.handleImportInstincts(ctx, args)
+	case "backfill_status":
+		return s.handleBackfillStatus()
 	}
 
 	// Original search-based tools
@@ -3090,6 +3110,22 @@ func (s *Server) handleExportObservations(ctx context.Context, args json.RawMess
 	}
 
 	return output, nil
+}
+
+// handleBackfillStatus returns backfill run status via the injected status function.
+func (s *Server) handleBackfillStatus() (string, error) {
+	if s.backfillStatusFunc == nil {
+		return "", fmt.Errorf("backfill status not available")
+	}
+	status, err := s.backfillStatusFunc()
+	if err != nil {
+		return "", fmt.Errorf("failed to get backfill status: %w", err)
+	}
+	data, err := json.MarshalIndent(status, "", "  ")
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal backfill status: %w", err)
+	}
+	return string(data), nil
 }
 
 // handleCheckSystemHealth performs comprehensive system health checks.

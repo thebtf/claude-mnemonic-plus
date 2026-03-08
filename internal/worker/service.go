@@ -818,6 +818,11 @@ func (s *Service) initializeAsync() {
 		searchMgr.SetGraphStore(s.graphStore)
 	}
 
+	// Wire backfill status into MCP server.
+	mcpServer.SetBackfillStatusFunc(func() (any, error) {
+		return s.backfillTracker.snapshot(), nil
+	})
+
 	// Wire document store into search manager for unified document search.
 	if documentStore != nil && embedSvc != nil {
 		searchMgr.SetDocumentStore(documentStore, embedSvc)
