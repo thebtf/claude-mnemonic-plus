@@ -145,9 +145,9 @@ install: build stop-worker
 	cp $(PLUGIN_DIR)/hooks/hooks.json $(HOME)/.claude/plugins/marketplaces/engram/hooks/
 	@# Copy slash commands if they exist
 	@if [ -d "$(PLUGIN_DIR)/commands" ]; then cp -r $(PLUGIN_DIR)/commands/* $(HOME)/.claude/plugins/marketplaces/engram/commands/ 2>/dev/null || true; fi
-	@# Update plugin.json and marketplace.json with current version to prevent stale version directories
-	@sed 's/{{ .Version }}/$(VERSION)/g; s/{{.Version}}/$(VERSION)/g' $(PLUGIN_DIR)/.claude-plugin/plugin.json.tpl > $(HOME)/.claude/plugins/marketplaces/engram/.claude-plugin/plugin.json
-	@sed 's/{{ .Version }}/$(VERSION)/g; s/{{.Version}}/$(VERSION)/g' $(PLUGIN_DIR)/.claude-plugin/marketplace.json.tpl > $(HOME)/.claude/plugins/marketplaces/engram/.claude-plugin/marketplace.json
+	@# Copy static plugin metadata
+	cp $(PLUGIN_DIR)/.claude-plugin/plugin.json $(HOME)/.claude/plugins/marketplaces/engram/.claude-plugin/plugin.json
+	cp $(PLUGIN_DIR)/.claude-plugin/marketplace.json $(HOME)/.claude/plugins/marketplaces/engram/.claude-plugin/marketplace.json
 	@echo "Registering plugin with Claude Code..."
 	@./scripts/register-plugin.sh "$(VERSION)"
 	@$(MAKE) start-worker
