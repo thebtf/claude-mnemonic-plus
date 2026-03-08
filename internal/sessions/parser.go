@@ -75,6 +75,32 @@ func ParseSessionReader(r io.Reader) (*SessionMeta, error) {
 	scanner.Buffer(make([]byte, bufio.MaxScanTokenSize), maxJSONLLineSize)
 
 	var pendingUser *Exchange
+	var assistantTexts []string
+	var assistantTools []string
+
+	// flushExchange saves the accumulated user+assistant exchange.
+	flushExchange := func() {
+		if pendingUser == nil {
+			return
+		}
+		exchange := Exchange{
+			UserText:      pendingUser.UserText,
+			AssistantText: strings.Join(assistantTexts, ""),
+			ToolsUsed:     dedupeStrings(assistantTools),
+			Timestamp:     pendingUser.Timestamp,
+		}
+		for _, toolName := range assistantTools {
+			if toolName == "" {
+				continue
+			}
+			meta.ToolCounts[toolName]++
+		}
+		meta.Exchanges = append(meta.Exchanges, exchange)
+		meta.ExchangeCount++
+		pendingUser = nil
+		assistantTexts = nil
+		assistantTools = nil
+	}
 
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
@@ -108,6 +134,8 @@ func ParseSessionReader(r io.Reader) (*SessionMeta, error) {
 
 		switch parsedLine.Type {
 		case "user":
+			// Flush any pending exchange before starting a new one
+			flushExchange()
 			pendingUser = &Exchange{
 				UserText:  strings.Join(extractTextItems(parsedLine.Message.Content), ""),
 				Timestamp: timestamp,
@@ -116,30 +144,16 @@ func ParseSessionReader(r io.Reader) (*SessionMeta, error) {
 			if pendingUser == nil {
 				continue
 			}
-
-			assistantText := extractTextItems(parsedLine.Message.Content)
-			toolNames := extractToolNames(parsedLine.Message.Content)
-			exchange := &Exchange{
-				UserText:      pendingUser.UserText,
-				AssistantText: strings.Join(assistantText, ""),
-				ToolsUsed:     dedupeStrings(toolNames),
-				Timestamp:     pendingUser.Timestamp,
-			}
-
-			for _, toolName := range toolNames {
-				if toolName == "" {
-					continue
-				}
-				meta.ToolCounts[toolName]++
-			}
-
-			meta.Exchanges = append(meta.Exchanges, *exchange)
-			meta.ExchangeCount++
-			pendingUser = nil
+			// Accumulate all assistant blocks (text, tool_use) for this exchange
+			assistantTexts = append(assistantTexts, extractTextItems(parsedLine.Message.Content)...)
+			assistantTools = append(assistantTools, extractToolNames(parsedLine.Message.Content)...)
 		default:
 			continue
 		}
 	}
+
+	// Flush the last exchange if present
+	flushExchange()
 
 	if err := scanner.Err(); err != nil {
 		return nil, fmt.Errorf("scan session file: %w", err)
@@ -189,6 +203,14 @@ func parseTimestamp(raw string) (time.Time, bool) {
 }
 
 func extractTextItems(content json.RawMessage) []string {
+	// Try plain string first (Claude Code sometimes sends content as a string)
+	if plainText, ok := parseContentString(content); ok {
+		if plainText != "" {
+			return []string{plainText}
+		}
+		return nil
+	}
+
 	items, ok := parseContentItems(content)
 	if !ok {
 		return nil
@@ -216,6 +238,17 @@ func extractToolNames(content json.RawMessage) []string {
 		}
 	}
 	return tools
+}
+
+func parseContentString(content json.RawMessage) (string, bool) {
+	if len(content) == 0 {
+		return "", false
+	}
+	var s string
+	if err := json.Unmarshal(content, &s); err != nil {
+		return "", false
+	}
+	return s, true
 }
 
 func parseContentItems(content json.RawMessage) ([]contentItem, bool) {
