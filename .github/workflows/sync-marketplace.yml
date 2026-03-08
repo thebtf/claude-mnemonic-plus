@@ -28,17 +28,15 @@ jobs:
 
       - name: Sync plugin files
         run: |
-          # Clear existing plugin files in marketplace (preserve .git and root files)
+          # Clear existing plugin files in marketplace (preserve .git and README.md)
           cd marketplace
-          rm -rf hooks skills commands .mcp.json
-          rm -rf .claude-plugin
+          rm -rf engram .claude-plugin
 
-          # Copy fresh plugin files from engram
-          cp -r ../engram/plugin/hooks ./hooks
-          cp -r ../engram/plugin/skills ./skills
-          cp -r ../engram/plugin/commands ./commands
-          cp ../engram/plugin/.mcp.json ./.mcp.json
+          # Copy marketplace metadata (source: "./engram" points to subdirectory)
           cp -r ../engram/plugin/.claude-plugin ./.claude-plugin
+
+          # Copy plugin files into engram/ subdirectory
+          cp -r ../engram/plugin/engram ./engram
 
       - name: Check for changes
         id: changes

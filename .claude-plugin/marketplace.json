@@ -14,7 +14,7 @@
       "author": {
         "name": "thebtf"
       },
-      "source": "./plugin",
+      "source": "./plugin/engram",
       "category": "productivity"
     }
   ]
