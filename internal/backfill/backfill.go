@@ -98,6 +98,15 @@ func (r *Runner) Run(ctx context.Context, files []string) (*Result, error) {
 	return &Result{Observations: observations, Metrics: m}, nil
 }
 
+// ProcessSession processes a pre-parsed session and returns extracted observations.
+// This is the server-side entry point — the caller provides a parsed SessionMeta
+// (e.g. from ParseSessionReader) instead of a file path.
+func (r *Runner) ProcessSession(ctx context.Context, sess *sessions.SessionMeta) (*Result, error) {
+	m := &metrics.Metrics{}
+	observations := r.processSession(ctx, sess, "", m)
+	return &Result{Observations: observations, Metrics: m}, nil
+}
+
 // processFile processes a single session file and returns extracted observations.
 func (r *Runner) processFile(ctx context.Context, file string, m *metrics.Metrics) []ExtractedObservation {
 	m.Add("total_sessions", 1)
@@ -106,6 +115,13 @@ func (r *Runner) processFile(ctx context.Context, file string, m *metrics.Metric
 	if err != nil {
 		return nil
 	}
+
+	return r.processSession(ctx, sess, file, m)
+}
+
+// processSession is the shared extraction logic for both file-based and content-based processing.
+func (r *Runner) processSession(ctx context.Context, sess *sessions.SessionMeta, sourceFile string, m *metrics.Metrics) []ExtractedObservation {
+	m.Add("total_sessions", 1)
 
 	durationMin := 0
 	if !sess.FirstMsgAt.IsZero() && !sess.LastMsgAt.IsZero() {
@@ -181,7 +197,7 @@ func (r *Runner) processFile(ctx context.Context, file string, m *metrics.Metric
 
 			obs := extract.ConvertToObservation(xo, sess.ProjectPath)
 			observations = append(observations, ExtractedObservation{
-				SessionFile: file,
+				SessionFile: sourceFile,
 				Project:     sess.ProjectPath,
 				Outcome:     xo.Outcome,
 				RawXML:      xmlOutput,

@@ -1516,6 +1516,7 @@ func (s *Service) setupRoutes() {
 
 	// Backfill endpoints
 	s.router.Post("/api/backfill", s.handleBackfillIngest)
+	s.router.Post("/api/backfill/session", s.handleBackfillSession)
 	s.router.Get("/api/backfill/status", s.handleBackfillStatus)
 
 	// MCP routes (require DB ready, no timeout — long-lived SSE connections)

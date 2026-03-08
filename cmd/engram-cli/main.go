@@ -18,10 +18,9 @@ import (
 	"time"
 
 	"github.com/thebtf/engram/internal/backfill"
-	"github.com/thebtf/engram/internal/learning"
 )
 
-const version = "0.1.0"
+const version = "0.2.0"
 
 func main() {
 	if len(os.Args) < 2 {
@@ -47,40 +46,33 @@ func printUsage() {
 	fmt.Println("Usage: engram-cli <command> [options]")
 	fmt.Println()
 	fmt.Println("Commands:")
-	fmt.Println("  backfill    Process historical session files and extract observations")
+	fmt.Println("  backfill    Process historical session files via server-side LLM extraction")
 	fmt.Println("  version     Print version")
 	fmt.Println("  help        Show this help")
 }
 
-// backfillIngestRequest mirrors the server's BackfillRequest.
-type backfillIngestRequest struct {
-	SessionID    string                   `json:"session_id"`
-	Project      string                   `json:"project"`
-	RunID        string                   `json:"run_id"`
-	Observations []backfillIngestObserver `json:"observations"`
+// backfillSessionRequest mirrors the server's BackfillSessionRequest.
+type backfillSessionRequest struct {
+	SessionID string `json:"session_id"`
+	Project   string `json:"project"`
+	RunID     string `json:"run_id"`
+	Content   string `json:"content"`
 }
 
-type backfillIngestObserver struct {
-	Type      string   `json:"type"`
-	Outcome   string   `json:"outcome"`
-	Title     string   `json:"title"`
-	Narrative string   `json:"narrative"`
-	Concepts  []string `json:"concepts"`
-	Files     []string `json:"files"`
-}
-
-type backfillIngestResponse struct {
-	Stored  int `json:"stored"`
-	Skipped int `json:"skipped"`
-	Errors  int `json:"errors"`
+// backfillSessionResponse mirrors the server's BackfillSessionResponse.
+type backfillSessionResponse struct {
+	Stored                int    `json:"stored"`
+	Skipped               int    `json:"skipped"`
+	Errors                int    `json:"errors"`
+	ObservationsExtracted int    `json:"observations_extracted"`
+	MetricsReport         string `json:"metrics_report,omitempty"`
 }
 
 func runBackfill(args []string) {
 	fs := flag.NewFlagSet("backfill", flag.ExitOnError)
 	dirPtr := fs.String("dir", "", "Directory containing .jsonl session files")
 	serverPtr := fs.String("server", "http://localhost:37777", "Engram server URL")
-	modelPtr := fs.String("model", "", "LLM model override")
-	dryRun := fs.Bool("dry-run", false, "Show what would be processed without calling LLM or server")
+	dryRun := fs.Bool("dry-run", false, "List files that would be processed without sending to server")
 	runID := fs.String("run-id", "", "Unique run ID for grouping observations (auto-generated if empty)")
 	limitPtr := fs.Int("limit", 0, "Maximum number of sessions to process (0 = unlimited)")
 	tokenPtr := fs.String("token", "", "API token for server authentication (or set ENGRAM_API_TOKEN)")
@@ -142,114 +134,94 @@ func runBackfill(args []string) {
 
 	log.Printf("Found %d session files to process (run_id: %s)", len(files), *runID)
 
-	// Setup LLM client
-	llmCfg := learning.DefaultOpenAIConfig()
-	llmCfg.Timeout = 5 * time.Minute
-	if *modelPtr != "" {
-		llmCfg.Model = *modelPtr
-	}
-	llmClient := learning.NewOpenAIClient(llmCfg)
-
-	cfg := backfill.DefaultConfig()
-	cfg.DryRun = *dryRun || !llmClient.IsConfigured()
-
-	if cfg.DryRun && !*dryRun {
-		log.Println("LLM not configured (set ENGRAM_LLM_URL + ENGRAM_LLM_API_KEY), running in dry-run mode")
+	if *dryRun {
+		var totalSize int64
+		for _, f := range files {
+			info, _ := os.Stat(f)
+			if info != nil {
+				totalSize += info.Size()
+			}
+		}
+		log.Printf("Dry run: %d files, total size %.1f MB", len(files), float64(totalSize)/(1024*1024))
+		for _, f := range files {
+			log.Printf("  %s", f)
+		}
+		return
 	}
 
 	// Handle graceful shutdown
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer cancel()
 
-	runner := backfill.NewRunner(llmClient, cfg)
-	result, err := runner.Run(ctx, files)
-	if err != nil {
-		log.Printf("Backfill interrupted: %v", err)
-	}
+	// HTTP client with long timeout (server-side LLM extraction can take minutes per session)
+	httpClient := &http.Client{Timeout: 10 * time.Minute}
+	totalStored, totalErrors, totalExtracted := 0, 0, 0
 
-	// Print metrics report
-	log.Print(result.Metrics.Report())
-
-	if cfg.DryRun || len(result.Observations) == 0 {
-		log.Printf("No observations to send (dry-run=%v, count=%d)", cfg.DryRun, len(result.Observations))
-		return
-	}
-
-	// Send observations to server
-	log.Printf("Sending %d observations to %s...", len(result.Observations), *serverPtr)
-
-	// Group observations by session file for batched requests
-	bySession := make(map[string][]backfill.ExtractedObservation)
-	for _, obs := range result.Observations {
-		bySession[obs.SessionFile] = append(bySession[obs.SessionFile], obs)
-	}
-
-	totalStored, totalErrors := 0, 0
-	httpClient := &http.Client{Timeout: 30 * time.Second}
-
-	for sessionFile, obs := range bySession {
-		// Build request
-		sessionID := filepath.Base(strings.TrimSuffix(sessionFile, ".jsonl"))
-		project := obs[0].Project
-
-		ingestObs := make([]backfillIngestObserver, 0, len(obs))
-		for _, o := range obs {
-			ingestObs = append(ingestObs, backfillIngestObserver{
-				Type:      string(o.Observation.Type),
-				Outcome:   o.Outcome,
-				Title:     o.Observation.Title,
-				Narrative: o.Observation.Narrative,
-				Concepts:  o.Observation.Concepts,
-				Files:     o.Observation.FilesRead,
-			})
+	for i, sessionFile := range files {
+		if err := ctx.Err(); err != nil {
+			log.Printf("Interrupted after %d/%d files", i, len(files))
+			break
 		}
 
-		reqBody := backfillIngestRequest{
-			SessionID:    sessionID,
-			Project:      project,
-			RunID:        *runID,
-			Observations: ingestObs,
+		// Read raw file content
+		content, readErr := os.ReadFile(sessionFile)
+		if readErr != nil {
+			log.Printf("  [%d/%d] Error reading %s: %v", i+1, len(files), filepath.Base(sessionFile), readErr)
+			totalErrors++
+			progress.ErrorCount++
+			continue
+		}
+
+		sessionID := filepath.Base(strings.TrimSuffix(sessionFile, ".jsonl"))
+		log.Printf("  [%d/%d] Processing %s (%.0f KB)...", i+1, len(files), sessionID, float64(len(content))/1024)
+
+		reqBody := backfillSessionRequest{
+			SessionID: sessionID,
+			RunID:     *runID,
+			Content:   string(content),
 		}
 
 		body, _ := json.Marshal(reqBody)
-		url := strings.TrimRight(*serverPtr, "/") + "/api/backfill"
+		url := strings.TrimRight(*serverPtr, "/") + "/api/backfill/session"
 		req, _ := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
 		if apiToken != "" {
 			req.Header.Set("Authorization", "Bearer "+apiToken)
 		}
 
-		resp, err := httpClient.Do(req)
-		if err != nil {
-			log.Printf("  Error sending session %s: %v", sessionID, err)
+		resp, httpErr := httpClient.Do(req)
+		if httpErr != nil {
+			log.Printf("    Error: %v", httpErr)
 			totalErrors++
 			progress.ErrorCount++
 			continue
 		}
 
-		var ingestResp backfillIngestResponse
 		respBody, _ := io.ReadAll(resp.Body)
 		resp.Body.Close()
 
 		if resp.StatusCode != http.StatusOK {
-			log.Printf("  Server error for %s: %s %s", sessionID, resp.Status, string(respBody))
+			log.Printf("    Server error: %s %s", resp.Status, string(respBody))
 			totalErrors++
 			progress.ErrorCount++
 			continue
 		}
 
-		json.Unmarshal(respBody, &ingestResp)
-		totalStored += ingestResp.Stored
-		log.Printf("  Session %s: stored=%d, skipped=%d, errors=%d",
-			sessionID, ingestResp.Stored, ingestResp.Skipped, ingestResp.Errors)
+		var sessionResp backfillSessionResponse
+		json.Unmarshal(respBody, &sessionResp)
+
+		totalStored += sessionResp.Stored
+		totalExtracted += sessionResp.ObservationsExtracted
+		log.Printf("    extracted=%d, stored=%d, skipped=%d, errors=%d",
+			sessionResp.ObservationsExtracted, sessionResp.Stored, sessionResp.Skipped, sessionResp.Errors)
 
 		// Update progress tracking
-		progress.StoredCount += ingestResp.Stored
-		progress.SkippedCount += ingestResp.Skipped
-		progress.ErrorCount += ingestResp.Errors
+		progress.StoredCount += sessionResp.Stored
+		progress.SkippedCount += sessionResp.Skipped
+		progress.ErrorCount += sessionResp.Errors
 		progress.MarkProcessed(sessionFile)
 		if saveErr := progress.Save(*statePath); saveErr != nil {
-			log.Printf("  Warning: failed to save progress: %v", saveErr)
+			log.Printf("    Warning: failed to save progress: %v", saveErr)
 		}
 	}
 
@@ -260,7 +232,8 @@ func runBackfill(args []string) {
 
 	log.Printf("\n=== Backfill Complete ===")
 	log.Printf("Run ID:     %s", *runID)
-	log.Printf("Sessions:   %d", len(bySession))
+	log.Printf("Sessions:   %d", len(files))
+	log.Printf("Extracted:  %d", totalExtracted)
 	log.Printf("Stored:     %d", totalStored)
 	log.Printf("Errors:     %d", totalErrors)
 	log.Printf("State file: %s", *statePath)
