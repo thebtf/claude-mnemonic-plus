@@ -78,8 +78,8 @@ WORKDIR /app
 COPY --from=builder /out/mcp-stdio-proxy /app/mcp-stdio-proxy
 COPY --from=builder /out/engram-mcp /app/engram-mcp
 COPY --from=builder /out/hooks/ /app/hooks/
-COPY plugin/hooks/hooks.json /app/hooks/hooks.json
-COPY plugin/commands/ /app/commands/
+COPY plugin/engram/hooks/hooks.json /app/hooks/hooks.json
+COPY plugin/engram/commands/ /app/commands/
 COPY plugin/.claude-plugin/ /app/.claude-plugin/
 
 ENTRYPOINT ["/bin/bash"]
