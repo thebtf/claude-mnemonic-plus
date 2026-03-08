@@ -62,25 +62,20 @@ func main() {
 	}
 
 	runner := backfill.NewRunner(llmClient, cfg)
-	sessionResults, m, err := runner.ProcessFiles(context.Background(), files)
+	result, err := runner.Run(context.Background(), files)
 	if err != nil {
 		log.Fatalf("Backfill failed: %v", err)
 	}
 
 	// Print report
-	report := m.Report()
+	report := result.Metrics.Report()
 	log.Print(report)
 
 	// Print extracted observations summary
-	obsCount := 0
-	for _, sr := range sessionResults {
-		if sr.ParseError != nil {
-			log.Printf("  Error: %v", sr.ParseError)
-			continue
-		}
-		for _, obs := range sr.Observations {
-			obsCount++
-			log.Printf("  [%d] %s — %s", obsCount, obs.Observation.Title, obs.ProjectPath)
+	if len(result.Observations) > 0 {
+		log.Printf("\n=== Extracted Observations (%d) ===", len(result.Observations))
+		for i, obs := range result.Observations {
+			log.Printf("  [%d] %s (%s) — %s", i+1, obs.Observation.Title, obs.Outcome, obs.Project)
 		}
 	}
 }
