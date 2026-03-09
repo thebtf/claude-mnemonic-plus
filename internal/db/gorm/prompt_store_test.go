@@ -333,6 +333,76 @@ func TestPromptStore_FindRecentPromptByText(t *testing.T) {
 	assert.False(t, notFound, "Should not find prompt outside time window")
 }
 
+func TestPromptStore_FindRecentPromptByTextGlobal(t *testing.T) {
+	promptStore, _, cleanup := testPromptStore(t)
+	defer cleanup()
+
+	ctx := context.Background()
+
+	// Save prompts under two different session IDs with the same text
+	_, err := promptStore.SaveUserPromptWithMatches(ctx, "session-A", 1, "Shared prompt text", 3)
+	require.NoError(t, err)
+
+	_, err = promptStore.SaveUserPromptWithMatches(ctx, "session-B", 1, "Different prompt", 2)
+	require.NoError(t, err)
+
+	// Global search should find the shared prompt regardless of session ID
+	foundID, foundNum, found := promptStore.FindRecentPromptByTextGlobal(ctx, "Shared prompt text", 60)
+	assert.True(t, found, "Should find prompt globally")
+	assert.Greater(t, foundID, int64(0))
+	assert.Equal(t, 1, foundNum)
+
+	// Global search should also find the other prompt
+	foundID2, _, found2 := promptStore.FindRecentPromptByTextGlobal(ctx, "Different prompt", 60)
+	assert.True(t, found2, "Should find different prompt globally")
+	assert.Greater(t, foundID2, int64(0))
+
+	// Should not find non-existent text
+	_, _, notFound := promptStore.FindRecentPromptByTextGlobal(ctx, "Non-existent prompt", 60)
+	assert.False(t, notFound, "Should not find non-existent prompt")
+
+	// Should not find outside time window
+	time.Sleep(100 * time.Millisecond)
+	_, _, notFound = promptStore.FindRecentPromptByTextGlobal(ctx, "Shared prompt text", 0)
+	assert.False(t, notFound, "Should not find prompt outside time window")
+}
+
+func TestPromptStore_FindRecentPromptByTextGlobal_CrossSession(t *testing.T) {
+	promptStore, _, cleanup := testPromptStore(t)
+	defer cleanup()
+
+	ctx := context.Background()
+
+	// Save the SAME prompt text under different session IDs
+	id1, err := promptStore.SaveUserPromptWithMatches(ctx, "session-X", 1, "Identical user prompt", 1)
+	require.NoError(t, err)
+
+	time.Sleep(10 * time.Millisecond)
+
+	// Save another prompt with same text under different session
+	id2, err := promptStore.SaveUserPromptWithMatches(ctx, "session-Y", 1, "Identical user prompt", 2)
+	require.NoError(t, err)
+
+	// Session-scoped search should only find the one matching the session
+	foundID, _, found := promptStore.FindRecentPromptByText(ctx, "session-X", "Identical user prompt", 60)
+	assert.True(t, found)
+	assert.Equal(t, id1, foundID, "Session-scoped should find session-X's prompt")
+
+	// Session-scoped search for session-Y
+	foundID, _, found = promptStore.FindRecentPromptByText(ctx, "session-Y", "Identical user prompt", 60)
+	assert.True(t, found)
+	assert.Equal(t, id2, foundID, "Session-scoped should find session-Y's prompt")
+
+	// Global search should find the most recent one (session-Y)
+	foundID, _, found = promptStore.FindRecentPromptByTextGlobal(ctx, "Identical user prompt", 60)
+	assert.True(t, found)
+	assert.Equal(t, id2, foundID, "Global should find the most recent prompt")
+
+	// Session-scoped search for a session that doesn't have this prompt
+	_, _, notFound := promptStore.FindRecentPromptByText(ctx, "session-Z", "Identical user prompt", 60)
+	assert.False(t, notFound, "Session-scoped should not find prompt from different session")
+}
+
 func TestPromptStore_GetRecentUserPromptsByProject(t *testing.T) {
 	promptStore, store, cleanup := testPromptStore(t)
 	defer cleanup()

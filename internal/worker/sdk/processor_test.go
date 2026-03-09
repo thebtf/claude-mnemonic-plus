@@ -1169,6 +1169,33 @@ func TestSafeResolvePath(t *testing.T) {
 			wantOk:   true,
 			wantPath: filepath.Join(tmpDir, "inside.txt"),
 		},
+		// Cross-platform edge cases
+		{
+			name:   "null byte injection",
+			path:   "file\x00.txt",
+			cwd:    tmpDir,
+			wantOk: true, // filepath.Clean handles null bytes, OS rejects on open
+		},
+		{
+			name:     "deeply nested valid path",
+			path:     filepath.Join("a", "b", "c", "d", "file.txt"),
+			cwd:      tmpDir,
+			wantOk:   true,
+			wantPath: filepath.Join(tmpDir, "a", "b", "c", "d", "file.txt"),
+		},
+		{
+			name:   "traversal via subdir then up and out",
+			path:   filepath.Join("valid", "..", "..", "..", "etc", "shadow"),
+			cwd:    tmpDir,
+			wantOk: false,
+		},
+		{
+			name:     "cwd equals path exactly",
+			path:     tmpDir,
+			cwd:      tmpDir,
+			wantOk:   true,
+			wantPath: tmpDir,
+		},
 	}
 
 	for _, tt := range tests {

@@ -234,6 +234,27 @@ func (s *PromptStore) GetAllPrompts(ctx context.Context) ([]*models.UserPromptWi
 	return toModelUserPromptsWithSession(results), nil
 }
 
+// FindRecentPromptByTextGlobal finds a recent prompt by exact text match across ALL sessions
+// within a time window. This detects cross-session duplicates when the same hook fires
+// from different session IDs (e.g., subagent spawning).
+// Returns (promptID, promptNumber, found).
+func (s *PromptStore) FindRecentPromptByTextGlobal(ctx context.Context, promptText string, withinSeconds int) (int64, int, bool) {
+	cutoffEpoch := time.Now().Add(-time.Duration(withinSeconds) * time.Second).UnixMilli()
+
+	var prompt UserPrompt
+	err := s.db.WithContext(ctx).
+		Where("prompt_text = ? AND created_at_epoch >= ?",
+			promptText, cutoffEpoch).
+		Order("created_at_epoch DESC").
+		First(&prompt).Error
+
+	if err != nil {
+		return 0, 0, false
+	}
+
+	return prompt.ID, prompt.PromptNumber, true
+}
+
 // FindRecentPromptByText finds a recent prompt by exact text match within a time window.
 // Returns (promptID, promptNumber, found).
 func (s *PromptStore) FindRecentPromptByText(ctx context.Context, claudeSessionID, promptText string, withinSeconds int) (int64, int, bool) {
