@@ -218,10 +218,11 @@ func runBackfill(args []string) {
 				progress.StoredCount += result.resp.Stored
 				progress.SkippedCount += result.resp.Skipped
 				progress.ErrorCount += result.resp.Errors
+				progress.MarkProcessed(result.file)
 			} else {
 				progress.ErrorCount++
+				// Do NOT mark as processed — --resume should retry failed files
 			}
-			progress.MarkProcessed(result.file)
 			if saveErr := progress.Save(*statePath); saveErr != nil {
 				log.Printf("    Warning: failed to save progress: %v", saveErr)
 			}
