@@ -1,7 +1,7 @@
 # Continuity State
 
-**Last Updated:** 2026-03-09
-**Session:** Full backfill + agent adoption improvements
+**Last Updated:** 2026-03-10
+**Session:** Upstream features port (cross-session dedup, internal prompt detection, path traversal)
 
 ## Done
 - Self-learning plan: all 3 phases complete (Phase 4 deferred to v1.1)
@@ -34,10 +34,15 @@
   - Added reminder at end of `<relevant-memory>` block (`plugin/engram/hooks/user-prompt.js`)
   - Goal: agents proactively call `find_by_file`, `decisions`, `search` before working
 
+- **Upstream features ported** (`3921b2c`, `398c8e3`):
+  - Cross-session prompt dedup: `FindRecentPromptByTextGlobal` in prompt_store + handler
+  - Internal prompt detection: `isInternalPrompt()` rejects system prompt signatures server-side
+  - Path traversal: replaced `strings.HasPrefix` with `filepath.Rel` for Windows case-insensitivity
+  - 14 new tests (8 isInternalPrompt, 2 FindRecentPromptByTextGlobal, 4 safeResolvePath edge cases)
+- **Full backfill COMPLETE**: 768 extracted, 767 stored, 14 permanent errors (413/400)
+
 ## Now
-Full backfill running: `engram-cli backfill --concurrency 3 --resume` processing ~4301 sessions.
-Background task `b8tnhyi98`. At ~163/4301 (~3.8%) as of last check.
-Server restarted mid-run (Watchtower pulled new image from `f914a27` push) — ~12 connection errors around sessions 45-71, self-recovered.
+Features committed, ready to push.
 
 ## Verified Complete (this session audit)
 - Collection MCP Tools plan (`vast-wishing-taco.md`): ALL 5 phases done
@@ -53,7 +58,7 @@ Server restarted mid-run (Watchtower pulled new image from `f914a27` push) — ~
 - None
 
 ## Known Pre-existing Test Failures (Windows)
-- `TestSafeResolvePath` — Windows path separator mismatch
+- `TestSafeResolvePath` — FIXED (`398c8e3`): replaced strings.HasPrefix with filepath.Rel
 - `TestConfigSuite/TestLoad_TableDriven` — env var isolation issue
 - `TestKillProcessOnPort_NoProcess` — `lsof` not available on Windows
 - `go-tree-sitter` — CGO build constraints exclude Windows
