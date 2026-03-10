@@ -57,7 +57,7 @@
 defineProps({
   title: {
     type: String,
-    default: 'Mnemonic'
+    default: 'Engram'
   },
   links: {
     type: Array,

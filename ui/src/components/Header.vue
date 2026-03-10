@@ -63,7 +63,7 @@ const waitForWorker = async (maxAttempts = 30, delayMs = 500): Promise<void> => 
             <i class="fas fa-brain text-xl text-white" />
           </div>
           <div>
-            <h1 class="text-xl font-bold text-white">Claude <span class="text-claude-400">Mnemonic</span></h1>
+            <h1 class="text-xl font-bold text-white"><span class="text-claude-400">Engram</span></h1>
             <p class="text-xs text-slate-400">Persistent Memory System</p>
           </div>
         </div>

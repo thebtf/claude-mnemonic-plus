@@ -65,14 +65,14 @@
             </li>
             <li class="flex items-start gap-3 sm:gap-4 text-white">
               <i class="fas fa-check-circle text-amber-500 mt-1 flex-shrink-0"></i>
-              <span class="text-sm sm:text-base"><strong>Mnemonic remembers so you don't have to repeat yourself.</strong></span>
+              <span class="text-sm sm:text-base"><strong>Engram remembers so you don't have to repeat yourself.</strong></span>
             </li>
           </ul>
         </div>
 
         <div class="glass rounded-2xl p-6 sm:p-8 relative overflow-hidden glow-amber">
           <div class="absolute top-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-amber-500 to-transparent"></div>
-          <p class="text-slate-500 text-xs sm:text-sm mb-4 font-mono">// What Mnemonic captures automatically:</p>
+          <p class="text-slate-500 text-xs sm:text-sm mb-4 font-mono">// What Engram captures automatically:</p>
           <div class="space-y-3">
             <FlowItem icon="fas fa-bug" title="Bug fixes & solutions" description='"Fixed N+1 query in user loader by adding .includes(:posts)"' />
             <FlowItem icon="fas fa-sitemap" title="Architecture decisions" description='"Using event sourcing for audit trail - all mutations go through EventStore"' />
@@ -122,7 +122,7 @@
         <div class="grid md:grid-cols-2 gap-6 sm:gap-8">
           <!-- Before -->
           <div class="glass rounded-2xl p-5 sm:p-6 relative border-red-500/20">
-            <div class="absolute top-3 sm:top-4 right-3 sm:right-4 bg-red-500/20 text-red-400 px-2 sm:px-3 py-1 rounded-full text-xs font-medium">Without Mnemonic</div>
+            <div class="absolute top-3 sm:top-4 right-3 sm:right-4 bg-red-500/20 text-red-400 px-2 sm:px-3 py-1 rounded-full text-xs font-medium">Without Engram</div>
             <div class="space-y-3 sm:space-y-4 mt-8">
               <div class="bg-slate-800/50 rounded-lg p-3 sm:p-4">
                 <p class="text-slate-400 text-xs sm:text-sm"><span class="text-blue-400">You:</span> Fix the authentication bug in the login flow</p>
@@ -139,7 +139,7 @@
 
           <!-- After -->
           <div class="glass rounded-2xl p-5 sm:p-6 relative border-green-500/20">
-            <div class="absolute top-3 sm:top-4 right-3 sm:right-4 bg-green-500/20 text-green-400 px-2 sm:px-3 py-1 rounded-full text-xs font-medium">With Mnemonic</div>
+            <div class="absolute top-3 sm:top-4 right-3 sm:right-4 bg-green-500/20 text-green-400 px-2 sm:px-3 py-1 rounded-full text-xs font-medium">With Engram</div>
             <div class="space-y-3 sm:space-y-4 mt-8">
               <div class="bg-slate-800/50 rounded-lg p-3 sm:p-4">
                 <p class="text-slate-400 text-xs sm:text-sm"><span class="text-blue-400">You:</span> Fix the authentication bug in the login flow</p>
@@ -157,7 +157,7 @@
     <!-- How It Works Section -->
     <section id="how-it-works" class="py-20 lg:py-28 px-4 sm:px-6 bg-slate-900/30">
       <div class="max-w-6xl mx-auto">
-        <SectionHeader title="Zero setup. Zero maintenance." subtitle="Install once, benefit forever. Mnemonic works silently in the background." />
+        <SectionHeader title="Zero setup. Zero maintenance." subtitle="Install once, benefit forever. Engram works silently in the background." />
         <div class="grid sm:grid-cols-2 lg:grid-cols-4 gap-6 sm:gap-8 relative">
           <div class="hidden lg:block absolute top-10 left-[60px] right-[60px] h-0.5 bg-gradient-to-r from-amber-500 via-amber-400 to-amber-500 opacity-30"></div>
           <StepCard
@@ -436,7 +436,7 @@ const features = [
 
 const steps = [
   { number: 1, title: 'Install', description: 'One command. Hooks into Claude Code automatically.' },
-  { number: 2, title: 'Work normally', description: 'Code with Claude as usual. Mnemonic listens silently in the background.' },
+  { number: 2, title: 'Work normally', description: 'Code with Claude as usual. Engram listens silently in the background.' },
   { number: 3, title: 'Knowledge builds', description: 'Every session adds to your knowledge base. Bug fixes. Decisions. Patterns.' },
   { number: 4, title: 'Context appears', description: 'Start a new session - relevant memories are already there. No re-explaining.' },
 ]
@@ -470,13 +470,13 @@ const requiredDeps = [
 ]
 
 const faqs = [
-  { question: 'Will it confuse Claude with wrong context?', answer: 'No. Mnemonic uses project isolation and semantic relevance scoring. Only memories from the current project (or global best practices) are injected, and only when they\'re actually relevant to your prompt.' },
+  { question: 'Will it confuse Claude with wrong context?', answer: 'No. Engram uses project isolation and semantic relevance scoring. Only memories from the current project (or global best practices) are injected, and only when they\'re actually relevant to your prompt.' },
   { question: 'What exactly gets saved?', answer: 'Bug fixes with context ("Fixed race condition by adding mutex"), architecture decisions ("Using repository pattern for data access"), conventions ("All API routes prefixed with /api/v1"), and learnings you want to preserve.' },
   { question: 'How does hybrid vector storage work?', answer: 'LEANN-inspired selective storage: frequently-accessed "hub" observations (identified by access patterns and graph centrality) store embeddings. Infrequently-accessed observations recompute embeddings on-demand during search. This reduces storage by 60-80% with minimal latency impact (<50ms).' },
   { question: 'Can I delete or edit memories?', answer: 'Yes. The web dashboard at localhost:37777 lets you browse, search, edit, and delete any memory. You can also view graph relationships, storage metrics, and performance analytics. You\'re always in control.' },
-  { question: 'Does it work with my existing Claude Code setup?', answer: 'Yes. Mnemonic installs as a Claude Code plugin with hooks. Your existing workflows, settings, and shortcuts remain unchanged.' },
+  { question: 'Does it work with my existing Claude Code setup?', answer: 'Yes. Engram installs as a Claude Code plugin with hooks. Your existing workflows, settings, and shortcuts remain unchanged.' },
   { question: 'What if I switch between projects frequently?', answer: 'That\'s the point. Each project has isolated memories. Switch from your Python ML project to your TypeScript app - context switches automatically.' },
   { question: 'Is there a performance impact?', answer: 'Minimal. The Go worker is lightweight (typically under 30MB RAM). Hybrid storage and auto-tuning optimize for your workload. Context injection at session start takes milliseconds for most projects.' },
-  { question: 'What is AST-aware chunking?', answer: 'When processing code observations, Mnemonic uses Tree-sitter parsers to respect function and class boundaries instead of arbitrary line limits. Go, Python, and TypeScript code is chunked at semantic boundaries for better search accuracy.' },
+  { question: 'What is AST-aware chunking?', answer: 'When processing code observations, Engram uses Tree-sitter parsers to respect function and class boundaries instead of arbitrary line limits. Go, Python, and TypeScript code is chunked at semantic boundaries for better search accuracy.' },
 ]
 </script>

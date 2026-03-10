@@ -167,14 +167,14 @@ func formatStatusLine(stats *WorkerStats, input StatusInput) string {
 
 // formatDefault returns the default status line format.
 func formatDefault(stats *WorkerStats, useColors bool) string {
-	// [mnemonic] ● served:42 | injected:5 | searches:3 | project:28 memories
+	// [engram] ● served:42 | injected:5 | searches:3 | project:28 memories
 	var prefix, indicator, reset string
 	if useColors {
-		prefix = colorCyan + "[mnemonic]" + colorReset
+		prefix = colorCyan + "[engram]" + colorReset
 		indicator = colorGreen + "●" + colorReset
 		reset = colorReset
 	} else {
-		prefix = "[mnemonic]"
+		prefix = "[engram]"
 		indicator = "●"
 	}
 
@@ -217,13 +217,13 @@ func formatDefault(stats *WorkerStats, useColors bool) string {
 
 // formatCompact returns a compact status line format.
 func formatCompact(stats *WorkerStats, useColors bool) string {
-	// [m] ● 42/5/3
+	// [e] ● 42/5/3
 	var prefix, indicator string
 	if useColors {
-		prefix = colorCyan + "[m]" + colorReset
+		prefix = colorCyan + "[e]" + colorReset
 		indicator = colorGreen + "●" + colorReset
 	} else {
-		prefix = "[m]"
+		prefix = "[e]"
 		indicator = "●"
 	}
 
@@ -248,7 +248,7 @@ func formatMinimal(stats *WorkerStats, useColors bool) string {
 		return fmt.Sprintf("%s %d memories", indicator, stats.ProjectObservations)
 	}
 
-	return fmt.Sprintf("%s mnemonic ready", indicator)
+	return fmt.Sprintf("%s engram ready", indicator)
 }
 
 // formatOffline returns status for when worker is offline.
@@ -260,15 +260,15 @@ func formatOffline() string {
 // formatOfflineColored returns colored offline status.
 func formatOfflineColored(useColors bool) string {
 	if useColors {
-		return colorGray + "[mnemonic]" + colorReset + " " + colorGray + "○" + colorReset + " offline"
+		return colorGray + "[engram]" + colorReset + " " + colorGray + "○" + colorReset + " offline"
 	}
-	return "[mnemonic] ○ offline"
+	return "[engram] ○ offline"
 }
 
 // formatStartingColored returns colored starting status.
 func formatStartingColored(useColors bool) string {
 	if useColors {
-		return colorYellow + "[mnemonic]" + colorReset + " " + colorYellow + "○" + colorReset + " starting..."
+		return colorYellow + "[engram]" + colorReset + " " + colorYellow + "○" + colorReset + " starting..."
 	}
-	return "[mnemonic] ○ starting..."
+	return "[engram] ○ starting..."
 }

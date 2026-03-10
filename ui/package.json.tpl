@@ -1,5 +1,5 @@
 {
-  "name": "claude-mnemonic-dashboard",
+  "name": "engram-dashboard",
   "version": "{{ .Version }}",
   "private": true,
   "type": "module",

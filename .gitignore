@@ -57,7 +57,7 @@ credentials.json
 
 # Local development
 *.local
-.claude-mnemonic/
+.engram/
 tmp/
 temp/
 
