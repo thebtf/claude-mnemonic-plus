@@ -181,8 +181,7 @@ To share memory across multiple machines:
 export DATABASE_DSN="postgres://user:password@db-host:5432/engram?sslmode=disable"
 export ENGRAM_WORKER_HOST=0.0.0.0
 export ENGRAM_API_TOKEN=shared-secret-token
-./bin/worker &
-./bin/mcp-sse &  # SSE server on :37778
+./bin/worker &  # HTTP API + MCP SSE + MCP Streamable HTTP on :37777
 ```
 
 **On remote workstations:** Configure Claude Code to use `mcp-stdio-proxy`:

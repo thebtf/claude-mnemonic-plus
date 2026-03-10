@@ -4,10 +4,11 @@
 
 ## Overview
 
-The MCP subsystem exposes 37+ tools via the `nia` MCP server. Two transport modes:
+The MCP subsystem exposes 48 tools via the `nia` MCP server. Three transport modes:
 
 1. **Stdio** (`cmd/mcp/main.go`) — Standard I/O for local Claude Code integration
-2. **SSE** (`cmd/mcp-sse/main.go`) — HTTP Server-Sent Events for remote access
+2. **SSE** (integrated into worker on `:37777/sse`) — HTTP Server-Sent Events for remote access
+3. **Streamable HTTP** (worker on `:37777/mcp`) — For Claude Code plugin
 
 **Protocol:** JSON-RPC 2.0. Methods: `initialize`, `tools/list`, `tools/call`.
 
@@ -27,15 +28,15 @@ cmd/mcp/main.go:
   8. Run stdio loop (stdin/stdout JSON-RPC)
 ```
 
-### SSE Server
+### SSE / Streamable HTTP (Worker-integrated)
 
 ```
-cmd/mcp-sse/main.go:
-  Port: 37778 (configurable via ENGRAM_MCP_SSE_PORT)
+Worker serves MCP on :37777:
   Routes:
     /sse     -> SSE event stream (persistent connection)
-    /message -> POST endpoint for tool calls
-  Auth: optional TokenAuth middleware (WORKER_TOKEN)
+    /message -> POST endpoint for tool calls (SSE transport)
+    /mcp     -> Streamable HTTP (Claude Code plugin transport)
+  Auth: optional TokenAuth middleware (ENGRAM_API_TOKEN)
 ```
 
 ### Stdio Proxy (`cmd/mcp-stdio-proxy/main.go`)

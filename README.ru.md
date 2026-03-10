@@ -450,7 +450,6 @@ make clean            # Очистить артефакты сборки
 ```
 cmd/
   mcp/                MCP stdio-сервер (локальный прямой доступ)
-  mcp-sse/            MCP SSE HTTP-сервер (автономный)
   mcp-stdio-proxy/    stdio → SSE мост (клиентская сторона)
   worker/             HTTP API + MCP SSE + MCP Streamable HTTP + панель управления
   hooks/              Hooks жизненного цикла Claude Code (устаревшие Go, см. plugin/hooks/)

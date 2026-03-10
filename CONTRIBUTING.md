@@ -106,7 +106,6 @@ Keep descriptions concise. Add a body for non-obvious changes.
 cmd/
   worker/          -- HTTP API server (main entry point)
   mcp/             -- MCP server (stdio transport)
-  mcp-sse/         -- MCP server (SSE transport)
   mcp-stdio-proxy/ -- stdio-to-SSE proxy
   hooks/           -- Claude Code lifecycle hooks
 internal/

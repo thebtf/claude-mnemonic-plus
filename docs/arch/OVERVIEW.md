@@ -46,11 +46,12 @@ The fork targets shared-team usage and production-ready durability:
 
 1. Claude Code lifecycle hooks and tool events write observations through the worker API and session parser.
 2. Worker endpoints and background tasks score, route, consolidate, and persist observations and relations in PostgreSQL.
-3. MCP tools expose memory operations to Claude on two transport modes:
+3. MCP tools expose memory operations to Claude on three transport modes:
    - Local stdio transport (`bin/mcp-server`) for per-session operation.
-   - HTTP SSE transport (`bin/mcp-sse`) for remote or multi-workstation clients.
+   - HTTP SSE transport (integrated into worker on `:37777/sse`) for remote clients.
+   - Streamable HTTP transport (worker on `:37777/mcp`) for Claude Code plugin.
 4. Search queries combine lexical search and vector similarity through the hybrid pipeline and return ranked, reranked results.
-5. MCP SSE stdio proxy converts hook-style stdio requests into SSE-compatible POSTs when required.
+5. MCP stdio proxy converts hook-style stdio requests into SSE-compatible POSTs when required.
 6. The Vue dashboard and status endpoints reflect worker health, memory operations, and consolidation activity.
 
 ## Runtime Roles and Binaries
@@ -59,7 +60,6 @@ The fork targets shared-team usage and production-ready durability:
 |-----------------------|------|
 | `bin/worker`          | Persistent HTTP daemon on `:37777` with REST API, dashboard, SSE broadcast, consolidation scheduler |
 | `bin/mcp-server`      | MCP stdio server exposing `nia` tools (per Claude Code session) |
-| `bin/mcp-sse`         | MCP SSE service on `:37778` with token auth |
 | `bin/mcp-stdio-proxy` | Stdio bridge that forwards JSON-RPC over POST and SSE |
 | `bin/hooks/*`         | Six lifecycle hooks: `session-start`, `user-prompt`, `post-tool-use`, `subagent-stop`, `stop`, `statusline` |
 

@@ -29,7 +29,6 @@ graph TB
         subgraph "Entry Points"
             WK["Worker<br/>cmd/worker<br/>:37777 HTTP"]
             MCP_STDIO["MCP stdio<br/>cmd/mcp"]
-            MCP_SSE["MCP SSE<br/>cmd/mcp-sse"]
             MCP_PROXY["MCP stdio-proxy<br/>cmd/mcp-stdio-proxy"]
         end
 
@@ -300,7 +299,6 @@ Scheduler runs 3 independent cycles:
 |---------|---------|-----------|
 | `cmd/worker` | HTTP API server | `main()` |
 | `cmd/mcp` | MCP stdio server | `main()` |
-| `cmd/mcp-sse` | MCP SSE server | `main()` |
 | `cmd/hooks/*` | Claude Code lifecycle hooks | `handlePostToolUse()`, etc. |
 | `internal/worker` | Service orchestrator, HTTP handlers | `Service` |
 | `internal/mcp` | MCP protocol implementation | `Server` |

@@ -450,7 +450,6 @@ make clean            # Clean build artifacts
 ```
 cmd/
   mcp/                MCP stdio server (local direct access)
-  mcp-sse/            MCP SSE HTTP server (standalone)
   mcp-stdio-proxy/    stdio -> SSE bridge (client-side)
   worker/             HTTP API + MCP SSE + MCP Streamable HTTP + dashboard
   hooks/              Claude Code lifecycle hooks (legacy Go, see plugin/hooks/)

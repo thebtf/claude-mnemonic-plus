@@ -450,7 +450,6 @@ make clean            # 清理构建产物
 ```
 cmd/
   mcp/                MCP stdio 服务器（本地直接访问）
-  mcp-sse/            MCP SSE HTTP 服务器（独立运行）
   mcp-stdio-proxy/    stdio -> SSE 桥接（客户端）
   worker/             HTTP API + MCP SSE + MCP Streamable HTTP + 仪表板
   hooks/              Claude Code 生命周期 hooks（旧版 Go，见 plugin/hooks/）

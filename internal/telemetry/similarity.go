@@ -120,7 +120,7 @@ func (st *SimilarityTelemetry) analyzeProject(ctx context.Context, project strin
 		}
 
 		for _, result := range results {
-			resultID := extractSQLiteID(result.Metadata)
+			resultID := vector.ExtractRowID(result.Metadata)
 			if resultID <= obs.ID {
 				continue
 			}
@@ -212,17 +212,6 @@ func (st *SimilarityTelemetry) GetLatestSnapshot(ctx context.Context, project st
 		return nil, err
 	}
 	return &snapshot, nil
-}
-
-// extractSQLiteID safely extracts a database row ID from vector result metadata.
-func extractSQLiteID(metadata map[string]any) int64 {
-	if sqliteID, ok := metadata["sqlite_id"].(float64); ok {
-		return int64(sqliteID)
-	}
-	if id, ok := metadata["sqlite_id"].(int64); ok {
-		return id
-	}
-	return 0
 }
 
 // GetAllLatestSnapshots returns the most recent snapshot per project.

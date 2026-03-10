@@ -104,7 +104,7 @@ func ExtractObservationIDs(results []QueryResult, project string) []int64 {
 	var ids []int64
 	seen := make(map[int64]bool)
 	for _, result := range results {
-		id := extractSQLiteID(result.Metadata)
+		id := ExtractRowID(result.Metadata)
 		if id == 0 {
 			continue
 		}
@@ -132,7 +132,7 @@ func ExtractSummaryIDs(results []QueryResult, project string) []int64 {
 	var ids []int64
 	seen := make(map[int64]bool)
 	for _, result := range results {
-		id := extractSQLiteID(result.Metadata)
+		id := ExtractRowID(result.Metadata)
 		if id == 0 {
 			continue
 		}
@@ -159,7 +159,7 @@ func ExtractPromptIDs(results []QueryResult, project string) []int64 {
 	var ids []int64
 	seen := make(map[int64]bool)
 	for _, result := range results {
-		id := extractSQLiteID(result.Metadata)
+		id := ExtractRowID(result.Metadata)
 		if id == 0 {
 			continue
 		}
@@ -208,8 +208,9 @@ func CopyMetadataMulti(base map[string]any, extra map[string]any) map[string]any
 	return result
 }
 
-// extractSQLiteID safely extracts a database row ID from metadata.
-func extractSQLiteID(metadata map[string]any) int64 {
+// ExtractRowID safely extracts a database row ID from vector result metadata.
+// The metadata key is "sqlite_id" for historical reasons (pgvector inherited the name).
+func ExtractRowID(metadata map[string]any) int64 {
 	if sqliteID, ok := metadata["sqlite_id"].(float64); ok {
 		return int64(sqliteID)
 	}

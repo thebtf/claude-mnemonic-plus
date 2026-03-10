@@ -41,13 +41,6 @@ This document maps all runtime binaries and internal Go components for `engram`.
 - **Services started**: consolidation scheduler, maintenance service, SSE event bus.
 - **Shutdown**: graceful with 30s timeout.
 
-### `bin/mcp-sse` (`cmd/mcp-sse/`)
-
-- **Role**: MCP transport over HTTP SSE.
-- **Transport**: HTTP on `:37778`.
-- **Auth**: Bearer token from `ENGRAM_API_TOKEN`.
-- **Use**: remote MCP access across workstations.
-
 ### `bin/mcp-stdio-proxy` (`cmd/mcp-stdio-proxy/`)
 
 - **Role**: stdio-to-SSE bridge.

@@ -123,11 +123,11 @@ The worker serves a Vue.js dashboard at `/` (embedded from `ui/dist/` at build t
 
 ---
 
-## MCP SSE Transport (:37778)
+## MCP SSE Transport (integrated into worker :37777)
 
-The SSE server (`bin/mcp-sse`) exposes the MCP protocol over HTTP Server-Sent Events for remote workstations.
+The worker exposes the MCP protocol over HTTP Server-Sent Events for remote workstations.
 
-### Endpoints (inferred from SSE architecture)
+### Endpoints
 
 | Method | Path | Description |
 |--------|------|-------------|

@@ -225,12 +225,12 @@ In a remote/containerized setup where Claude Code and the hooks run on different
 
 **Severity: ARCHITECTURAL**
 
-The MCP SSE transport (`bin/mcp-sse`) allows remote Claude Code workstations to use a central MCP server. However, the central MCP server still needs direct PostgreSQL access. The SSE server is a transport adapter — it does not add a separate data tier.
+The worker serves MCP over both SSE (`/sse`) and Streamable HTTP (`/mcp`) transports, allowing remote Claude Code workstations to connect. However, the worker still needs direct PostgreSQL access. The transport layer is an adapter — it does not add a separate data tier.
 
 **Typical multi-workstation setup:**
 - PostgreSQL server accessible to all nodes
-- One or more worker + mcp-sse processes on a central host
-- Remote workstations use `mcp-stdio-proxy` to forward MCP to the central SSE server
+- One or more worker processes on a central host
+- Remote workstations use `mcp-stdio-proxy` to forward MCP to the central worker
 - All workstations set `DATABASE_DSN` pointing to the shared PostgreSQL instance
 
 ---
