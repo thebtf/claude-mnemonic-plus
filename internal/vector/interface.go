@@ -4,7 +4,7 @@ package vector
 import "context"
 
 // Client defines the interface for vector storage operations.
-// Both sqlitevec.Client and hybrid.Client implement this interface.
+// pgvector.Client is the production implementation.
 type Client interface {
 	// AddDocuments adds documents with their embeddings to the vector store.
 	AddDocuments(ctx context.Context, docs []Document) error
@@ -32,9 +32,6 @@ type Client interface {
 
 	// GetStaleVectors returns info about vectors with mismatched or null model versions.
 	GetStaleVectors(ctx context.Context) ([]StaleVectorInfo, error)
-
-	// DeleteVectorsByDocIDs removes vectors by their doc_ids.
-	DeleteVectorsByDocIDs(ctx context.Context, docIDs []string) error
 
 	// GetHealthStats returns comprehensive health statistics about the vector store.
 	GetHealthStats(ctx context.Context) (*HealthStats, error)

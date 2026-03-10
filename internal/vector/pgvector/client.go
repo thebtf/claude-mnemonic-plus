@@ -271,17 +271,6 @@ func (c *Client) GetStaleVectors(ctx context.Context) ([]vector.StaleVectorInfo,
 	return infos, nil
 }
 
-// DeleteVectorsByDocIDs removes vectors by their doc_ids.
-// Used for granular rebuild — delete stale vectors before re-adding.
-func (c *Client) DeleteVectorsByDocIDs(ctx context.Context, docIDs []string) error {
-	if len(docIDs) == 0 {
-		return nil
-	}
-	return c.db.WithContext(ctx).
-		Where("doc_id IN ?", docIDs).
-		Delete(&vectorRecord{}).Error
-}
-
 // extractInt64 safely converts metadata values to int64.
 func extractInt64(v any) int64 {
 	switch x := v.(type) {
