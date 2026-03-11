@@ -112,6 +112,10 @@ type Config struct {
 	DedupSimilarityThreshold    float64  `json:"dedup_similarity_threshold"`    // Cosine similarity threshold for dedup clustering (default: 0.55)
 	DedupWindowSize             int      `json:"dedup_window_size"`             // Max observations considered for dedup (default: 200)
 	ClusteringThreshold         float64  `json:"clustering_threshold"`          // Similarity threshold for result clustering (default: 0.55)
+	StoreMemoryHardLimit        int      `json:"store_memory_hard_limit"`       // Max chars for store_memory content (default: 10000)
+	StoreMemorySoftLimit        int      `json:"store_memory_soft_limit"`       // Chars above which content is truncated (default: 1000)
+	StoreMemoryDedupThreshold   float64  `json:"store_memory_dedup_threshold"`  // Cosine similarity for dedup (default: 0.92)
+	StoreMemorySummarize        bool     `json:"store_memory_summarize"`        // Use LLM to summarize long content (default: false)
 }
 
 var (
@@ -239,6 +243,10 @@ func Default() *Config {
 		DedupSimilarityThreshold:    0.55,  // 55% similarity threshold for deduplication
 		DedupWindowSize:             200,   // Examine up to 200 candidates for dedup
 		ClusteringThreshold:         0.55,  // 55% similarity threshold for result clustering
+		StoreMemoryHardLimit:        10000,
+		StoreMemorySoftLimit:        1000,
+		StoreMemorySummarize:        false,
+		StoreMemoryDedupThreshold:   0.92,
 	}
 }
 

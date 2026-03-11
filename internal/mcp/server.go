@@ -1017,6 +1017,44 @@ func (s *Server) handleToolsList(req *Request) *Response {
 		})
 	}
 
+	// Memory management tools — only advertise when observation store is available
+	if s.observationStore != nil {
+		tools = append(tools,
+			Tool{
+				Name:        "store_memory",
+				Description: "Explicitly store a memory/observation. Use when you want to remember something specific across sessions.",
+				InputSchema: map[string]any{
+					"type":     "object",
+					"required": []string{"content"},
+					"properties": map[string]any{
+						"content":    map[string]any{"type": "string", "description": "The content/knowledge to remember"},
+						"title":      map[string]any{"type": "string", "description": "Short title for the memory"},
+						"tags":       map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "Concept tags (supports hierarchical: lang:go:concurrency)"},
+						"type":       map[string]any{"type": "string", "description": "Memory type: decision, bugfix, feature, discovery, refactor"},
+						"importance": map[string]any{"type": "number", "minimum": 0, "maximum": 1, "description": "Importance score (0-1)"},
+						"scope":      map[string]any{"type": "string", "enum": []string{"project", "global"}, "description": "Visibility scope"},
+						"project":    map[string]any{"type": "string", "description": "Project ID (defaults to current)"},
+					},
+				},
+			},
+			Tool{
+				Name:        "recall_memory",
+				Description: "Recall memories/observations by semantic search. Use to retrieve previously stored knowledge.",
+				InputSchema: map[string]any{
+					"type":     "object",
+					"required": []string{"query"},
+					"properties": map[string]any{
+						"query":  map[string]any{"type": "string", "description": "Natural language query"},
+						"tags":   map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "Filter by concept tags"},
+						"type":   map[string]any{"type": "string", "description": "Filter by observation type"},
+						"limit":  map[string]any{"type": "number", "default": 10, "minimum": 1, "maximum": 50},
+						"format": map[string]any{"type": "string", "enum": []string{"text", "items", "detailed"}, "default": "text"},
+					},
+				},
+			},
+		)
+	}
+
 	// Document / Collection tools — only advertise when dependencies are available
 	if s.documentStore != nil {
 		tools = append(tools,
@@ -1233,6 +1271,10 @@ func (s *Server) callTool(ctx context.Context, name string, args json.RawMessage
 		return s.handleImportInstincts(ctx, args)
 	case "backfill_status":
 		return s.handleBackfillStatus()
+	case "store_memory":
+		return s.handleStoreMemory(ctx, args)
+	case "recall_memory":
+		return s.handleRecallMemory(ctx, args)
 	}
 
 	// Original search-based tools
@@ -1509,7 +1551,7 @@ func (s *Server) handleFindSimilarObservations(ctx context.Context, args json.Ra
 		return "", fmt.Errorf("vector search not available")
 	}
 
-	where := vector.BuildWhereFilter(vector.DocTypeObservation, params.Project)
+	where := vector.BuildWhereFilter(vector.DocTypeObservation, params.Project, false)
 	results, err := s.vectorClient.Query(ctx, params.Query, params.Limit*2, where)
 	if err != nil {
 		return "", fmt.Errorf("vector search failed: %w", err)
@@ -2254,7 +2296,7 @@ func (s *Server) handleSuggestConsolidations(ctx context.Context, args json.RawM
 		}
 
 		// Query for similar observations
-		where := vector.BuildWhereFilter(vector.DocTypeObservation, params.Project)
+		where := vector.BuildWhereFilter(vector.DocTypeObservation, params.Project, false)
 		results, err := s.vectorClient.Query(ctx, searchText, 10, where)
 		if err != nil {
 			continue

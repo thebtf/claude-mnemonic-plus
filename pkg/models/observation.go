@@ -60,6 +60,7 @@ const (
 	SourceInstinctImport   SourceType = "instinct_import"
 	SourceBackfill         SourceType = "backfill"
 	SourceUnknown          SourceType = "unknown"
+	SourceManual           SourceType = "manual"
 )
 
 // ClassifySourceType maps a Claude Code tool name to its source type.
