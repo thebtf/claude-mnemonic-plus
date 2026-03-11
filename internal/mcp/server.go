@@ -311,8 +311,16 @@ Hooks automatically capture knowledge from your sessions. Your job is to **retri
 2. Search existing knowledge: ` + "`search(query=\"...\")`" + `
 3. Before modifying code: ` + "`find_by_file(files=\"path/to/file\")`" + `
 4. Before architectural decisions: ` + "`decisions(query=\"...\")`" + `
+5. To explicitly remember something: ` + "`store_memory(content=\"...\", title=\"...\")`" + `
+6. To recall stored knowledge: ` + "`recall_memory(query=\"...\")`" + `
 
 ## Tool Categories
+
+### Memory Management (Tier 1 — use proactively)
+| Tool | When to Use |
+|------|-------------|
+| ` + "`store_memory`" + ` | Explicitly remember something across sessions — decisions, patterns, preferences, insights. |
+| ` + "`recall_memory`" + ` | Retrieve stored knowledge by semantic search. Supports text/items/detailed formats. |
 
 ### Search & Retrieval (primary workflow)
 | Tool | When to Use |
@@ -411,7 +419,7 @@ Hooks automatically capture knowledge from your sessions. Your job is to **retri
 ## Common Mistakes
 
 - Do NOT check ENGRAM_URL/ENGRAM_API_TOKEN env vars — call ` + "`check_system_health()`" + ` instead.
-- Do NOT manually save observations — hooks capture them automatically.
+- Use ` + "`store_memory`" + ` when you want to explicitly remember something. Hooks capture observations automatically, but ` + "`store_memory`" + ` lets you create memories on demand.
 - Read injected ` + "`<engram-context>`" + ` and ` + "`<relevant-memory>`" + ` blocks — they contain prior knowledge.
 - Search BEFORE re-exploring code — someone already documented it.
 - Use specialized tools: ` + "`decisions`" + ` for architecture, ` + "`find_by_file`" + ` for code, ` + "`timeline`" + ` for history.`
