@@ -86,14 +86,14 @@ func NewFalkorDBGraphStore(cfg *config.Config) (*FalkorDBGraphStore, error) {
 	return store, nil
 }
 
-func (s *FalkorDBGraphStore) getGraph() (redisgraph.Graph, redis.Conn, error) {
+func (s *FalkorDBGraphStore) getGraph() (*redisgraph.Graph, redis.Conn, error) {
 	conn := s.pool.Get()
 	if err := conn.Err(); err != nil {
 		conn.Close()
-		return redisgraph.Graph{}, nil, fmt.Errorf("FalkorDB connection error: %w", err)
+		return nil, nil, fmt.Errorf("FalkorDB connection error: %w", err)
 	}
 	g := redisgraph.GraphNew(s.graphName, conn)
-	return g, conn, nil
+	return &g, conn, nil
 }
 
 func (s *FalkorDBGraphStore) ensureIndex() error {

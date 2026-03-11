@@ -385,6 +385,7 @@ func NewService(version string, logBuffer *logbuf.RingBuffer) (*Service, error) 
 
 	tokenAuth, err := NewTokenAuth(config.GetWorkerToken())
 	if err != nil {
+		cancel()
 		return nil, fmt.Errorf("init token auth: %w", err)
 	}
 
