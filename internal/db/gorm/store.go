@@ -76,9 +76,6 @@ func NewStore(cfg Config) (*Store, error) {
 
 	// 5. Run migrations
 	embeddingDims := config.GetEmbeddingDimensions()
-	if config.GetEmbeddingProvider() == "builtin" {
-		embeddingDims = 384
-	}
 	if err := runMigrations(db, embeddingDims); err != nil {
 		return nil, fmt.Errorf("run migrations: %w", err)
 	}

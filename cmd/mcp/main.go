@@ -115,7 +115,7 @@ func main() {
 
 	// Initialize embedding service and vector client
 	var vectorClient vector.Client
-	embedSvc, err := embedding.NewService()
+	embedSvc, err := embedding.NewServiceFromConfig()
 	if err != nil {
 		log.Warn().Err(err).Msg("Embedding service unavailable, vector search disabled")
 	} else {

@@ -238,8 +238,7 @@ func ExtractFacts(toolName, toolInput, toolResult string) []string {
 	return facts
 }
 
-// FormatEmbeddingText creates compact text for BGE embedding from an observation.
-// Must fit within BGE's 512-token MaxSequenceLength.
+// FormatEmbeddingText creates compact text for embedding from an observation.
 func FormatEmbeddingText(obs *models.Observation) string {
 	var parts []string
 

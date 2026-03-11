@@ -80,7 +80,7 @@ type Config struct {
 	RerankingEnabled          bool     `json:"reranking_enabled"`
 	ContextShowLastSummary    bool     `json:"context_show_last_summary"`
 	CleanupStaleObservations  bool     `json:"cleanup_stale_observations"`
-	RerankingProvider         string   `json:"reranking_provider"`     // "onnx" | "api" (default: "api")
+	RerankingProvider         string   `json:"reranking_provider"`
 	RerankingAPIBaseURL       string   `json:"reranking_api_base_url"` // Full rerank endpoint URL (e.g. http://host:port/v1/rerank)
 	RerankingAPIModel         string   `json:"reranking_api_model"`    // default: "rerank-english-v3.0"
 	RerankingTimeoutMS        int      `json:"reranking_timeout_ms"`   // default: 500
@@ -193,7 +193,7 @@ func Default() *Config {
 		Model:                     DefaultModel,
 		EmbeddingModel:            DefaultEmbeddingModel,
 		RerankingEnabled:          true,             // Enable by default for improved relevance
-		RerankingProvider:         "api",            // Use API reranker by default (ONNX is dead on Windows)
+		RerankingProvider:         "api",
 		RerankingAPIModel:         "rerank-english-v3.0", // Cohere Rerank v3
 		RerankingTimeoutMS:        500,              // 500ms hard timeout for search path
 		RerankingCandidates:       100,              // Retrieve top 100 candidates
@@ -206,7 +206,7 @@ func Default() *Config {
 		GraphEdgeWeight:           0.3,   // Minimum edge weight to follow
 		GraphRebuildIntervalMin:   60,    // Rebuild graph every 60 minutes
 		VectorStorageStrategy:     "hub", // Hub storage strategy (LEANN-inspired)
-		EmbeddingProvider:         "builtin",
+		EmbeddingProvider:         "openai",
 		EmbeddingBaseURL:          "https://api.openai.com/v1",
 		EmbeddingModelName:        "text-embedding-3-small",
 		EmbeddingDimensions:       1536,
@@ -587,7 +587,7 @@ func GetWorkerToken() string {
 	return strings.TrimSpace(os.Getenv("ENGRAM_API_TOKEN"))
 }
 
-// GetEmbeddingProvider returns the embedding provider ("builtin" or "openai").
+// GetEmbeddingProvider returns the embedding provider (e.g., "openai").
 func GetEmbeddingProvider() string {
 	if v := envFirstOf("ENGRAM_EMBEDDING_PROVIDER", "EMBEDDING_PROVIDER"); v != "" {
 		return v

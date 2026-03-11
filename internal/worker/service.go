@@ -551,22 +551,6 @@ func (s *Service) createReranker() reranking.Reranker {
 			Msg("API reranking enabled")
 		return ranker
 
-	case "onnx":
-		if reranking.NewONNXReranker == nil {
-			log.Warn().Msg("ONNX reranker not available on this platform - reranking disabled")
-			return nil
-		}
-		ranker, err := reranking.NewONNXReranker(alpha)
-		if err != nil {
-			log.Warn().Err(err).Msg("ONNX reranker creation failed - reranking disabled")
-			return nil
-		}
-		log.Info().
-			Str("provider", "onnx").
-			Float64("alpha", alpha).
-			Msg("ONNX cross-encoder reranking enabled")
-		return ranker
-
 	default:
 		log.Warn().Str("provider", provider).Msg("Unknown reranking provider - reranking disabled")
 		return nil
@@ -689,7 +673,7 @@ func (s *Service) initializeAsync() {
 				Msg("pgvector vector search enabled")
 		}
 
-		// Create reranking service if enabled (API or ONNX)
+		// Create reranking service if enabled
 		if s.config.RerankingEnabled {
 			reranker = s.createReranker()
 		}
@@ -1079,7 +1063,7 @@ func (s *Service) reinitializeDatabase() {
 			log.Info().Msg("pgvector reconnected after reinit")
 		}
 
-		// Recreate reranking service if enabled (API or ONNX)
+		// Recreate reranking service if enabled
 		if s.config.RerankingEnabled {
 			reranker = s.createReranker()
 		}
