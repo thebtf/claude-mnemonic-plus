@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"time"
@@ -176,15 +177,17 @@ func WorkstationID() string {
 	return hex.EncodeToString(hash[:])[:8]
 }
 
-// ProjectID computes a deterministic 8-char hexadecimal project ID.
+// ProjectID computes a deterministic project ID with directory name prefix.
 // Tries git remote origin URL first (stable across machines and OS path layouts),
 // falls back to SHA-256 of the absolute path if not a git repo or has no remote.
+// Format: "dirname_xxxxxxxx" (name + 8-char hex hash)
 func ProjectID(cwdPath string) string {
+	dirName := filepath.Base(cwdPath)
 	if id, err := GitRemoteProjectID(cwdPath); err == nil && id != "" {
-		return id
+		return dirName + "_" + id
 	}
 	hash := sha256.Sum256([]byte(cwdPath))
-	return hex.EncodeToString(hash[:])[:8]
+	return dirName + "_" + hex.EncodeToString(hash[:])[:8]
 }
 
 // GitRemoteProjectID computes a stable 8-char project ID from the git remote origin URL

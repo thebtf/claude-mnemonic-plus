@@ -33,11 +33,20 @@ async function handleSessionStart(ctx, input) {
   const cwd = typeof ctx.CWD === 'string' ? ctx.CWD : '';
   const project = typeof ctx.Project === 'string' ? ctx.Project : '';
 
+  const legacyProject = typeof ctx.LegacyProject === 'string' ? ctx.LegacyProject : '';
+  const gitRemote = typeof ctx.GitRemote === 'string' ? ctx.GitRemote : '';
+  const relativePath = typeof ctx.RelativePath === 'string' ? ctx.RelativePath : '';
+
+  let injectURL = `/api/context/inject?project=${encodeURIComponent(project)}&cwd=${encodeURIComponent(cwd)}`;
+  if (legacyProject && legacyProject !== project) {
+    injectURL += `&legacy_project=${encodeURIComponent(legacyProject)}`;
+    injectURL += `&git_remote=${encodeURIComponent(gitRemote)}`;
+    injectURL += `&relative_path=${encodeURIComponent(relativePath)}`;
+  }
+
   let result = {};
   try {
-    result = await lib.requestGet(
-      `/api/context/inject?project=${encodeURIComponent(project)}&cwd=${encodeURIComponent(cwd)}`
-    );
+    result = await lib.requestGet(injectURL);
   } catch (error) {
     console.error(`[engram] Warning: context fetch failed: ${error.message}`);
     return '';

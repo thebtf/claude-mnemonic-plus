@@ -135,9 +135,8 @@ func TestProjectID(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			first := ProjectID(tt.path)
 			second := ProjectID(tt.path)
-			assert.Equal(t, 8, len(first))
-			assert.Equal(t, 8, len(second))
-			assert.Regexp(t, `^[0-9a-f]{8}$`, first)
+			assert.Contains(t, first, "_")
+			assert.Regexp(t, `^.+_[0-9a-f]{8}$`, first)
 			assert.Equal(t, first, second)
 		})
 	}

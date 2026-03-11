@@ -722,6 +722,22 @@ func (s *Service) handleContextInject(w http.ResponseWriter, r *http.Request) {
 		cwd = "/"
 	}
 
+	legacyProject := r.URL.Query().Get("legacy_project")
+	gitRemote := r.URL.Query().Get("git_remote")
+	relativePath := r.URL.Query().Get("relative_path")
+
+	if legacyProject != "" && legacyProject != project {
+		displayName := project
+		if idx := strings.Index(project, "_"); idx > 0 {
+			displayName = project[:idx]
+		}
+		go func() {
+			if err := gorm.UpsertProject(context.Background(), s.store.DB, project, legacyProject, gitRemote, relativePath, displayName); err != nil {
+				log.Warn().Err(err).Str("project", project).Str("legacy", legacyProject).Msg("project upsert failed")
+			}
+		}()
+	}
+
 	// Limit observations for fast startup (configurable, default 100)
 	limit := s.config.ContextObservations
 	if limit <= 0 {

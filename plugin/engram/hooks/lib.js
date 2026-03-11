@@ -189,13 +189,18 @@ async function RunHook(hookName, handler) {
     console.error(`[engram] Failed to parse hook input JSON: ${error.message}`);
   }
 
+  const cwd = typeof input.cwd === 'string' ? input.cwd : '';
+  const gitResult = getGitRemoteID(cwd);
+
   const context = {
     SessionID: typeof input.session_id === 'string' ? input.session_id : '',
-    CWD: typeof input.cwd === 'string' ? input.cwd : '',
+    CWD: cwd,
     PermissionMode: typeof input.permission_mode === 'string' ? input.permission_mode : '',
     HookEventName: typeof input.hook_event_name === 'string' ? input.hook_event_name : hookName,
-    Project: ProjectIDWithName(typeof input.cwd === 'string' ? input.cwd : ''),
-    LegacyProject: LegacyProjectID(typeof input.cwd === 'string' ? input.cwd : ''),
+    Project: ProjectIDWithName(cwd),
+    LegacyProject: LegacyProjectID(cwd),
+    GitRemote: gitResult ? gitResult.gitRemote : '',
+    RelativePath: gitResult ? gitResult.relativePath : '',
     RawInput: rawInput,
   };
 
