@@ -147,7 +147,7 @@ func (s *Service) handleSearchByPrompt(w http.ResponseWriter, r *http.Request) {
 			obsIDs := vector.ExtractObservationIDs(filteredResults, project)
 
 			if len(obsIDs) > 0 {
-				// Fetch full observations from SQLite
+				// Fetch full observations from database
 				observations, err = s.observationStore.GetObservationsByIDs(r.Context(), obsIDs, "date_desc", limit)
 				if err == nil {
 					usedVector = true

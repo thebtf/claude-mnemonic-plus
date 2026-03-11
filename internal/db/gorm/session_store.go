@@ -122,7 +122,7 @@ func (s *SessionStore) FindAnySDKSession(ctx context.Context, claudeSessionID st
 // Uses a single SQL query with RETURNING clause for optimal performance.
 func (s *SessionStore) IncrementPromptCounter(ctx context.Context, id int64) (int, error) {
 	// Use raw SQL with RETURNING to get updated value in single query
-	// SQLite supports RETURNING since version 3.35.0 (2021-03-12)
+	// PostgreSQL supports RETURNING natively
 	var newCounter int
 	err := s.db.WithContext(ctx).Raw(`
 		UPDATE sdk_sessions
@@ -132,7 +132,7 @@ func (s *SessionStore) IncrementPromptCounter(ctx context.Context, id int64) (in
 	`, id).Scan(&newCounter).Error
 
 	if err != nil {
-		// Fallback for older SQLite versions without RETURNING support
+		// Fallback if RETURNING clause fails
 		if err.Error() == "near \"RETURNING\": syntax error" || newCounter == 0 {
 			// Atomic increment
 			updateErr := s.db.WithContext(ctx).

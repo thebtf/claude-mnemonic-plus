@@ -1085,7 +1085,7 @@ func (m *Manager) buildResultFromFTS(ftsResults []gorm.ScoredObservation, params
 	}, nil
 }
 
-// filterSearch performs structured filter search via SQLite.
+// filterSearch performs structured filter search via database.
 func (m *Manager) filterSearch(ctx context.Context, params SearchParams) (*UnifiedSearchResult, error) {
 	start := time.Now()
 	defer func() {

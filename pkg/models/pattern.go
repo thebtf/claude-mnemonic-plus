@@ -57,7 +57,7 @@ type Pattern struct {
 	CreatedAtEpoch int64           `db:"created_at_epoch" json:"created_at_epoch"`
 }
 
-// JSONInt64Array is a custom type for handling JSON int64 arrays in SQLite.
+// JSONInt64Array is a custom type for handling JSON int64 arrays in PostgreSQL.
 type JSONInt64Array []int64
 
 // Scan implements sql.Scanner for JSONInt64Array.

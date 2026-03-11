@@ -104,7 +104,7 @@ var GlobalizableConcepts = []string{
 	"tooling",
 }
 
-// JSONStringArray is a custom type for handling JSON string arrays in SQLite.
+// JSONStringArray is a custom type for handling JSON string arrays in PostgreSQL.
 type JSONStringArray []string
 
 // Scan implements sql.Scanner for JSONStringArray.
@@ -140,7 +140,7 @@ func (j JSONStringArray) Value() (driver.Value, error) {
 	return json.Marshal(j)
 }
 
-// JSONInt64Map is a custom type for handling JSON int64 maps in SQLite.
+// JSONInt64Map is a custom type for handling JSON int64 maps in PostgreSQL.
 type JSONInt64Map map[string]int64
 
 // Scan implements sql.Scanner for JSONInt64Map.

@@ -51,7 +51,7 @@ func (s *Service) handleGetObservations(w http.ResponseWriter, r *http.Request) 
 		}
 	}
 
-	// Fall back to SQLite if vector search not used
+	// Fall back to database query if vector search not used
 	if !usedVector {
 		if project != "" {
 			// Strict project filtering for dashboard - only observations from this project
@@ -119,7 +119,7 @@ func (s *Service) handleGetSummaries(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Fall back to SQLite if vector search not used
+	// Fall back to database query if vector search not used
 	if !usedVector {
 		if project != "" {
 			summaries, err = s.summaryStore.GetRecentSummaries(r.Context(), project, limit)
@@ -172,7 +172,7 @@ func (s *Service) handleGetPrompts(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Fall back to SQLite if vector search not used
+	// Fall back to database query if vector search not used
 	if !usedVector {
 		if project != "" {
 			prompts, err = s.promptStore.GetRecentUserPromptsByProject(r.Context(), project, limit)

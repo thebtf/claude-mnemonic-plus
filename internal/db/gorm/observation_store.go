@@ -734,7 +734,7 @@ func (s *ObservationStore) SearchObservationsFTSScored(ctx context.Context, quer
 }
 
 // searchObservationsLike performs fallback LIKE search on observations using GORM.
-// Limits to 2 keywords to prevent expensive OR queries that SQLite optimizes poorly.
+// Limits to 2 keywords to prevent expensive OR queries.
 // This is a fallback path when FTS returns no results, so we prioritize performance.
 func (s *ObservationStore) searchObservationsLike(ctx context.Context, keywords []string, project string, limit int) ([]*models.Observation, error) {
 	if len(keywords) == 0 {
@@ -742,7 +742,7 @@ func (s *ObservationStore) searchObservationsLike(ctx context.Context, keywords 
 	}
 
 	// Limit keywords to prevent excessive OR conditions that hurt query planning.
-	// SQLite performs significantly better with fewer LIKE conditions.
+	// Query performs significantly better with fewer LIKE conditions.
 	// Using 2 instead of 5 reduces query complexity from O(15) to O(6) conditions
 	// (each keyword creates 3 LIKE conditions for title, subtitle, narrative).
 	const maxKeywords = 2
