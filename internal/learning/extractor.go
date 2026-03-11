@@ -9,6 +9,7 @@ import (
 
 	"github.com/rs/zerolog/log"
 	"github.com/thebtf/engram/pkg/models"
+	"github.com/thebtf/engram/pkg/strutil"
 )
 
 // ExtractedLearning represents a single learning extracted by the LLM.
@@ -64,7 +65,7 @@ func (e *Extractor) ExtractGuidance(ctx context.Context, messages []Message, pro
 	// Parse response
 	learnings, err := parseLearnings(response)
 	if err != nil {
-		log.Warn().Err(err).Str("response", truncate(response, 200)).Msg("Failed to parse LLM extraction response")
+		log.Warn().Err(err).Str("response", strutil.Truncate(response, 200)).Msg("Failed to parse LLM extraction response")
 		return nil, fmt.Errorf("parse LLM response: %w", err)
 	}
 
@@ -156,10 +157,3 @@ func filterValidConcepts(concepts []string) []string {
 	return valid
 }
 
-// truncate shortens a string to maxLen characters.
-func truncate(s string, maxLen int) string {
-	if len(s) <= maxLen {
-		return s
-	}
-	return s[:maxLen] + "..."
-}

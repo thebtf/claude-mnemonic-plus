@@ -1663,11 +1663,6 @@ func (s *Service) handleMCPStreamable(w http.ResponseWriter, r *http.Request) {
 	handler.ServeHTTP(w, r)
 }
 
-// recordRetrievalStats atomically updates retrieval statistics for a project.
-func (s *Service) recordRetrievalStats(project string, served, verified, deleted int64, isSearch bool) {
-	s.recordRetrievalStatsExtended(project, served, verified, deleted, 0, 0, 0, isSearch)
-}
-
 // recordRetrievalStatsExtended records retrieval stats including staleness metrics.
 func (s *Service) recordRetrievalStatsExtended(project string, served, verified, deleted, staleExcluded, freshCount, duplicatesRemoved int64, isSearch bool) {
 	now := time.Now().Unix()

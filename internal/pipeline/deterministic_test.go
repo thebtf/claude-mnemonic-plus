@@ -1006,14 +1006,6 @@ func TestFormatEmbeddingText(t *testing.T) {
 	})
 }
 
-// max is a helper for Go < 1.21 compat (1.21+ has built-in max).
-func max(a, b int) int {
-	if a > b {
-		return a
-	}
-	return b
-}
-
 // --- ShouldSkipTool ---
 
 func TestShouldSkipTool(t *testing.T) {
