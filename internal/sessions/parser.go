@@ -2,6 +2,7 @@ package sessions
 
 import (
 	"bufio"
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -211,9 +212,12 @@ func GitRemoteProjectID(cwdPath string) (string, error) {
 }
 
 // runGitCommand runs git with the given args inside cwdPath and returns trimmed stdout.
+// Uses a 3-second timeout to prevent hangs on slow or unavailable git remotes.
 func runGitCommand(cwdPath string, args ...string) (string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
 	fullArgs := append([]string{"-C", cwdPath}, args...)
-	out, err := exec.Command("git", fullArgs...).Output()
+	out, err := exec.CommandContext(ctx, "git", fullArgs...).Output()
 	if err != nil {
 		return "", err
 	}

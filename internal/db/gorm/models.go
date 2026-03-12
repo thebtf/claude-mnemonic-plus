@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"time"
 
+	"github.com/lib/pq"
 	pgvec "github.com/pgvector/pgvector-go"
 	"gorm.io/gorm"
 
@@ -350,7 +351,7 @@ type Project struct {
 	GitRemote    sql.NullString         `gorm:"column:git_remote;index"`
 	RelativePath sql.NullString         `gorm:"column:relative_path"`
 	DisplayName  sql.NullString         `gorm:"column:display_name"`
-	LegacyIDs    models.JSONStringArray `gorm:"column:legacy_ids;type:text"`
+	LegacyIDs    pq.StringArray         `gorm:"column:legacy_ids;type:text[]"`
 	ID           string                 `gorm:"primaryKey"`
 	CreatedAt    time.Time              `gorm:"autoCreateTime"`
 }

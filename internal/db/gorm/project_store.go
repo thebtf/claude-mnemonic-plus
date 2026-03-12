@@ -5,6 +5,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"time"
 
 	"github.com/rs/zerolog/log"
 	"gorm.io/gorm"
@@ -47,12 +48,14 @@ func UpsertProject(ctx context.Context, db *gorm.DB, newID, legacyID, gitRemote,
 			log.Warn().Err(err).Str("project", newID).Str("legacy_id", legacyID).Msg("failed to append legacy_id to project")
 		}
 
-		// Re-associate observations in the background. Idempotent and non-blocking.
-		go func() {
-			if err := reassociateObservations(db, legacyID, newID); err != nil {
-				log.Warn().Err(err).Str("from", legacyID).Str("to", newID).Msg("observation re-association failed")
+		// Re-associate observations in the background with a timeout. Idempotent and non-blocking.
+		go func(oldID, canonicalID string) {
+			bgCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
+			if err := reassociateObservations(bgCtx, db, oldID, canonicalID); err != nil {
+				log.Warn().Err(err).Str("from", oldID).Str("to", canonicalID).Msg("observation re-association failed")
 			}
-		}()
+		}(legacyID, newID)
 	}
 
 	return nil
@@ -60,8 +63,8 @@ func UpsertProject(ctx context.Context, db *gorm.DB, newID, legacyID, gitRemote,
 
 // reassociateObservations migrates observations from an old project ID to the canonical one.
 // Safe to call multiple times — idempotent via WHERE project = oldID.
-func reassociateObservations(db *gorm.DB, oldID, newID string) error {
-	res := db.Exec("UPDATE observations SET project = ? WHERE project = ?", newID, oldID)
+func reassociateObservations(ctx context.Context, db *gorm.DB, oldID, newID string) error {
+	res := db.WithContext(ctx).Exec("UPDATE observations SET project = ? WHERE project = ?", newID, oldID)
 	if res.Error != nil {
 		return fmt.Errorf("reassociate observations %s -> %s: %w", oldID, newID, res.Error)
 	}

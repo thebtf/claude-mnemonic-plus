@@ -116,8 +116,8 @@ type Config struct {
 	StoreMemorySoftLimit        int      `json:"store_memory_soft_limit"`       // Chars above which content is truncated (default: 1000)
 	StoreMemoryDedupThreshold   float64  `json:"store_memory_dedup_threshold"`  // Cosine similarity for dedup (default: 0.92)
 	StoreMemorySummarize        bool     `json:"store_memory_summarize"`        // Use LLM to summarize long content (default: false)
-	EncryptionKeyFile string // env-only: ENGRAM_ENCRYPTION_KEY_FILE (path to vault.key)
-	EncryptionKey     string // env-only: ENGRAM_ENCRYPTION_KEY (hex-encoded 256-bit key)
+	EncryptionKeyFile string `json:"-"` // env-only: ENGRAM_ENCRYPTION_KEY_FILE (path to vault.key)
+	EncryptionKey     string `json:"-"` // env-only: ENGRAM_ENCRYPTION_KEY (hex-encoded 256-bit key)
 }
 
 var (

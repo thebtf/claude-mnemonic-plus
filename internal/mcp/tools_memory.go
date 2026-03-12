@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/rs/zerolog/log"
 	"github.com/thebtf/engram/internal/config"
@@ -27,13 +28,16 @@ func (s *Server) handleStoreMemory(ctx context.Context, args json.RawMessage) (s
 		Type       string   `json:"type"`
 		Scope      string   `json:"scope"`
 		Project    string   `json:"project"`
-		Importance float64  `json:"importance"`
+		Importance *float64 `json:"importance"`
 	}
 	if err := json.Unmarshal(args, &params); err != nil {
 		return "", fmt.Errorf("invalid arguments: %w", err)
 	}
 	if params.Content == "" {
 		return "", fmt.Errorf("content is required")
+	}
+	if params.Importance != nil && (*params.Importance < 0 || *params.Importance > 1) {
+		return "", fmt.Errorf("importance must be between 0 and 1")
 	}
 
 	cfg := config.Get()
@@ -50,11 +54,11 @@ func (s *Server) handleStoreMemory(ctx context.Context, args json.RawMessage) (s
 		dedupThreshold = 0.92
 	}
 
-	if len(params.Content) > hardLimit {
+	if utf8.RuneCountInString(params.Content) > hardLimit {
 		return "", fmt.Errorf("content exceeds maximum length of %d characters", hardLimit)
 	}
-	if len(params.Content) > softLimit {
-		params.Content = params.Content[:softLimit]
+	if utf8.RuneCountInString(params.Content) > softLimit {
+		params.Content = string([]rune(params.Content)[:softLimit])
 		log.Debug().
 			Int("soft_limit", softLimit).
 			Msg("store_memory: content truncated to soft limit")
@@ -111,8 +115,9 @@ func (s *Server) handleStoreMemory(ctx context.Context, args json.RawMessage) (s
 	}
 
 	// Dedup check: skip if very similar observation already exists.
+	// includeGlobal=true so that global observations are considered during dedup.
 	if s.vectorClient != nil && s.vectorClient.IsConnected() {
-		where := vector.BuildWhereFilter(vector.DocTypeObservation, params.Project, false)
+		where := vector.BuildWhereFilter(vector.DocTypeObservation, params.Project, true)
 		similar, err := s.vectorClient.Query(ctx, params.Content, 1, where)
 		if err == nil && len(similar) > 0 && similar[0].Similarity >= dedupThreshold {
 			existingID := vector.ExtractRowID(similar[0].Metadata)
@@ -144,6 +149,11 @@ func (s *Server) handleStoreMemory(ctx context.Context, args json.RawMessage) (s
 	if err != nil {
 		return "", fmt.Errorf("store observation: %w", err)
 	}
+	if params.Importance != nil {
+		if err := s.observationStore.UpdateImportanceScore(ctx, id, *params.Importance); err != nil {
+			return "", fmt.Errorf("set importance: %w", err)
+		}
+	}
 
 	result := map[string]any{
 		"id":      id,
@@ -162,11 +172,11 @@ func (s *Server) handleStoreMemory(ctx context.Context, args json.RawMessage) (s
 // truncateTitle creates a short title from content, truncating at a word boundary.
 func truncateTitle(content string, maxLen int) string {
 	content = strings.TrimSpace(content)
-	if len(content) <= maxLen {
+	if utf8.RuneCountInString(content) <= maxLen {
 		return content
 	}
-	truncated := content[:maxLen]
-	if i := strings.LastIndexAny(truncated, " \t\n"); i > maxLen/2 {
+	truncated := string([]rune(content)[:maxLen])
+	if i := strings.LastIndexAny(truncated, " \t\n"); i > 0 {
 		truncated = truncated[:i]
 	}
 	return truncated + "..."
@@ -179,11 +189,12 @@ func (s *Server) handleRecallMemory(ctx context.Context, args json.RawMessage) (
 	}
 
 	var params struct {
-		Tags   []string `json:"tags"`
-		Query  string   `json:"query"`
-		Type   string   `json:"type"`
-		Format string   `json:"format"`
-		Limit  int      `json:"limit"`
+		Tags    []string `json:"tags"`
+		Query   string   `json:"query"`
+		Type    string   `json:"type"`
+		Format  string   `json:"format"`
+		Limit   int      `json:"limit"`
+		Project string   `json:"project"`
 	}
 	if err := json.Unmarshal(args, &params); err != nil {
 		return "", fmt.Errorf("invalid arguments: %w", err)
@@ -203,6 +214,7 @@ func (s *Server) handleRecallMemory(ctx context.Context, args json.RawMessage) (
 
 	searchParams := search.SearchParams{
 		Query:         params.Query,
+		Project:       strings.TrimSpace(params.Project),
 		Limit:         params.Limit,
 		IncludeGlobal: true,
 		Format:        "full",

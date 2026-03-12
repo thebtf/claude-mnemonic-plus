@@ -9,6 +9,7 @@ require (
 	github.com/go-gormigrate/gormigrate/v2 v2.1.5
 	github.com/goccy/go-json v0.10.5
 	github.com/gomodule/redigo v1.9.3
+	github.com/lib/pq v1.10.9
 	github.com/pgvector/pgvector-go v0.3.0
 	github.com/rs/zerolog v1.34.0
 	github.com/smacker/go-tree-sitter v0.0.0-20240827094217-dd81d9e9be82

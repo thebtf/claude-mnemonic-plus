@@ -1072,7 +1072,8 @@ func (s *Server) handleToolsList(req *Request) *Response {
 						"tags":   map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "Filter by concept tags"},
 						"type":   map[string]any{"type": "string", "description": "Filter by observation type"},
 						"limit":  map[string]any{"type": "number", "default": 10, "minimum": 1, "maximum": 50},
-						"format": map[string]any{"type": "string", "enum": []string{"text", "items", "detailed"}, "default": "text"},
+						"format":  map[string]any{"type": "string", "enum": []string{"text", "items", "detailed"}, "default": "text"},
+						"project": map[string]any{"type": "string", "description": "Project ID to scope results (includes project-scoped and global observations)"},
 					},
 				},
 			},
@@ -1643,7 +1644,7 @@ func (s *Server) handleFindSimilarObservations(ctx context.Context, args json.Ra
 		return "", fmt.Errorf("vector search not available")
 	}
 
-	where := vector.BuildWhereFilter(vector.DocTypeObservation, params.Project, false)
+	where := vector.BuildWhereFilter(vector.DocTypeObservation, params.Project, true)
 	results, err := s.vectorClient.Query(ctx, params.Query, params.Limit*2, where)
 	if err != nil {
 		return "", fmt.Errorf("vector search failed: %w", err)
@@ -2388,7 +2389,7 @@ func (s *Server) handleSuggestConsolidations(ctx context.Context, args json.RawM
 		}
 
 		// Query for similar observations
-		where := vector.BuildWhereFilter(vector.DocTypeObservation, params.Project, false)
+		where := vector.BuildWhereFilter(vector.DocTypeObservation, params.Project, true)
 		results, err := s.vectorClient.Query(ctx, searchText, 10, where)
 		if err != nil {
 			continue

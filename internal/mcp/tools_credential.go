@@ -66,6 +66,9 @@ func (s *Server) handleStoreCredential(ctx context.Context, args json.RawMessage
 	default:
 		return "", fmt.Errorf("invalid scope %q: must be \"project\" or \"global\"", params.Scope)
 	}
+	if params.Scope == "project" && params.Project == "" {
+		return "", fmt.Errorf("project is required for project-scoped credentials")
+	}
 
 	v, err := getVault()
 	if err != nil {
@@ -253,6 +256,9 @@ func (s *Server) handleDeleteCredential(ctx context.Context, args json.RawMessag
 	default:
 		return "", fmt.Errorf("invalid scope %q: must be \"project\" or \"global\"", params.Scope)
 	}
+	if params.Scope == "project" && params.Project == "" {
+		return "", fmt.Errorf("project is required for project-scoped credentials")
+	}
 
 	if err := s.observationStore.DeleteCredential(ctx, params.Name, params.Project, params.Scope); err != nil {
 		return "", fmt.Errorf("delete credential: %w", err)
@@ -270,13 +276,20 @@ func (s *Server) handleDeleteCredential(ctx context.Context, args json.RawMessag
 }
 
 // handleVaultStatus returns vault key status and credential count.
+// This is a read-only status check: it does NOT initialize the vault or create
+// any key files. It uses a passive existence check to determine key_configured.
 func (s *Server) handleVaultStatus(ctx context.Context, _ json.RawMessage) (string, error) {
-	v, vErr := getVault()
-
-	keyConfigured := vErr == nil && v != nil
+	cfg := config.Get()
+	keyConfigured := crypto.VaultExists(cfg)
 	fingerprint := ""
+
+	// Only load fingerprint and key source when vault is already configured (read existing key).
+	keySource := ""
 	if keyConfigured {
-		fingerprint = v.Fingerprint()
+		if v, err := getVault(); err == nil && v != nil {
+			fingerprint = v.Fingerprint()
+			keySource = v.KeySource()
+		}
 	}
 
 	count := 0
@@ -284,11 +297,6 @@ func (s *Server) handleVaultStatus(ctx context.Context, _ json.RawMessage) (stri
 		if n, err := s.observationStore.CountCredentials(ctx); err == nil {
 			count = int(n)
 		}
-	}
-
-	keySource := ""
-	if keyConfigured {
-		keySource = v.KeySource()
 	}
 
 	result := map[string]any{

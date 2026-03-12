@@ -1091,6 +1091,10 @@ func runMigrations(db *gorm.DB, embeddingDims int) error {
 			sqls := []string{
 				`ALTER TABLE observations DROP COLUMN IF EXISTS encrypted_secret`,
 				`ALTER TABLE observations DROP COLUMN IF EXISTS encryption_key_fingerprint`,
+				// Rewrite credential observations to 'discovery' before restoring the old
+				// constraint that excludes 'credential'. Without this, ADD CONSTRAINT fails
+				// if any credential rows exist, leaving the DB in a broken half-rolled-back state.
+				`UPDATE observations SET type = 'discovery' WHERE type = 'credential'`,
 				`ALTER TABLE observations DROP CONSTRAINT IF EXISTS chk_observations_type`,
 				`ALTER TABLE observations ADD CONSTRAINT chk_observations_type CHECK (type IN ('decision', 'bugfix', 'feature', 'refactor', 'discovery', 'change', 'guidance'))`,
 			}

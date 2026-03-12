@@ -323,6 +323,7 @@ func (m *Manager) warmFrequentQueries() {
 		cancel()
 
 		if err == nil && result != nil {
+			result = filterCredentials(result)
 			cacheKey := m.getCacheKey(candidate.info.params)
 			m.putInCache(cacheKey, result)
 
@@ -747,9 +748,14 @@ func filterCredentials(result *UnifiedSearchResult) *UnifiedSearchResult {
 	}
 	filtered := make([]SearchResult, 0, len(result.Results))
 	for _, r := range result.Results {
-		if r.Type != "credential" {
-			filtered = append(filtered, r)
+		if r.Type == "observation" {
+			if obsType, _ := r.Metadata["obs_type"].(string); obsType == string(models.ObsTypeCredential) {
+				continue
+			}
+		} else if r.Type == "credential" {
+			continue
 		}
+		filtered = append(filtered, r)
 	}
 	out := *result // shallow copy preserves all metadata fields
 	out.Results = filtered
@@ -902,7 +908,15 @@ func (m *Manager) hybridSearch(ctx context.Context, params SearchParams) (*Unifi
 	case "prompts":
 		docType = vector.DocTypeUserPrompt
 	}
-	where := vector.BuildWhereFilter(docType, params.Project, params.IncludeGlobal || params.Scope == "")
+	var where vector.WhereFilter
+	switch params.Scope {
+	case "global":
+		where = vector.BuildWhereFilter(docType, "", true)
+	case "project":
+		where = vector.BuildWhereFilter(docType, params.Project, false)
+	default:
+		where = vector.BuildWhereFilter(docType, params.Project, params.IncludeGlobal)
+	}
 
 	vectorResults, err := m.vectorClient.Query(ctx, params.Query, params.Limit*2, where)
 	if err != nil {

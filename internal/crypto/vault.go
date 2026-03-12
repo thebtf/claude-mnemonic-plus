@@ -64,6 +64,11 @@ func NewVault(cfg *config.Config) (*Vault, error) {
 			}
 			log.Info().Str("file", keyFile).Msg("vault: loaded auto-generated key")
 			return &Vault{key: key, fingerprint: computeFingerprint(key), source: "auto_generated"}, nil
+		} else if !os.IsNotExist(statErr) {
+			// Stat failed for a reason other than the file not existing (e.g.,
+			// permission denied, I/O error). Returning here prevents accidentally
+			// generating a new key and overwriting an existing vault.key.
+			return nil, fmt.Errorf("stat vault key %q: %w", keyFile, statErr)
 		} else {
 			key = make([]byte, 32)
 			if _, err = io.ReadFull(rand.Reader, key); err != nil {
@@ -149,6 +154,22 @@ func (v *Vault) KeySource() string {
 // Uses constant-time comparison to avoid timing side-channels on key-derived material.
 func (v *Vault) MatchesFingerprint(fp string) bool {
 	return subtle.ConstantTimeCompare([]byte(v.fingerprint), []byte(fp)) == 1
+}
+
+// VaultExists reports whether a vault key is already configured (env var set or
+// key file exists on disk). It performs a read-only passive check and does NOT
+// create files or initialize the vault.
+func VaultExists(cfg *config.Config) bool {
+	if cfg.EncryptionKey != "" {
+		return true
+	}
+	if cfg.EncryptionKeyFile != "" {
+		_, err := os.Stat(cfg.EncryptionKeyFile)
+		return err == nil
+	}
+	keyFile := filepath.Join(config.DataDir(), "vault.key")
+	_, err := os.Stat(keyFile)
+	return err == nil
 }
 
 // computeFingerprint returns the first 16 hex chars of SHA-256(key).
