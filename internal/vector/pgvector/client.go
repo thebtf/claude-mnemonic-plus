@@ -129,7 +129,7 @@ func (c *Client) DeleteDocuments(ctx context.Context, ids []string) error {
 }
 
 // Query performs a vector similarity search using cosine distance.
-func (c *Client) Query(ctx context.Context, query string, limit int, where map[string]any) ([]vector.QueryResult, error) {
+func (c *Client) Query(ctx context.Context, query string, limit int, where vector.WhereFilter) ([]vector.QueryResult, error) {
 	if limit <= 0 {
 		limit = 10
 	}
@@ -150,11 +150,37 @@ func (c *Client) Query(ctx context.Context, query string, limit int, where map[s
 	args = append(args, queryVec)
 	argIdx := 2
 
+	// allowedColumns is the set of column identifiers permitted in WHERE clauses.
+	// This prevents SQL injection via unvalidated column names in fmt.Sprintf.
+	allowedColumns := map[string]struct{}{
+		"doc_type":   {},
+		"project":    {},
+		"scope":      {},
+		"field_type": {},
+		"sqlite_id":  {},
+	}
+
 	var whereClauses []string
-	for k, v := range where {
-		whereClauses = append(whereClauses, fmt.Sprintf("%s = $%d", k, argIdx))
-		args = append(args, v)
-		argIdx++
+	for _, clause := range where.Clauses {
+		if len(clause.OrGroup) > 0 {
+			var orParts []string
+			for _, oc := range clause.OrGroup {
+				if _, ok := allowedColumns[oc.Column]; !ok {
+					return nil, fmt.Errorf("unsupported where column: %s", oc.Column)
+				}
+				orParts = append(orParts, fmt.Sprintf("%s = $%d", oc.Column, argIdx))
+				args = append(args, oc.Value)
+				argIdx++
+			}
+			whereClauses = append(whereClauses, "("+strings.Join(orParts, " OR ")+")")
+		} else {
+			if _, ok := allowedColumns[clause.Column]; !ok {
+				return nil, fmt.Errorf("unsupported where column: %s", clause.Column)
+			}
+			whereClauses = append(whereClauses, fmt.Sprintf("%s = $%d", clause.Column, argIdx))
+			args = append(args, clause.Value)
+			argIdx++
+		}
 	}
 	args = append(args, limit)
 

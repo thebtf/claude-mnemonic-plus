@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"time"
 
+	"github.com/lib/pq"
 	pgvec "github.com/pgvector/pgvector-go"
 	"gorm.io/gorm"
 
@@ -77,7 +78,9 @@ type Observation struct {
 	CreatedAtEpoch  int64         `gorm:"index:idx_observations_created,sort:desc;index:idx_observations_project_created,priority:2,sort:desc;not null"`
 	DiscoveryTokens int64         `gorm:"default:0"`
 	IsSuperseded    int           `gorm:"default:0;index:idx_observations_superseded;index:idx_observations_active,priority:2"`
-	IsArchived      int           `gorm:"default:0;index:idx_observations_archived;index:idx_observations_active,priority:1"`
+	IsArchived                  int            `gorm:"default:0;index:idx_observations_archived;index:idx_observations_active,priority:1"`
+	EncryptedSecret             []byte         `gorm:"type:bytea"`
+	EncryptionKeyFingerprint    sql.NullString `gorm:"type:text"`
 }
 
 func (Observation) TableName() string { return "observations" }
@@ -340,3 +343,17 @@ type TelemetrySnapshot struct {
 }
 
 func (TelemetrySnapshot) TableName() string { return "telemetry_snapshots" }
+
+// Project represents a repository's stable identity record for cross-platform project ID resolution.
+// Maps a canonical git-remote-based project ID to optional legacy path-based aliases,
+// enabling zero-downtime migration when clients upgrade to git-remote IDs.
+type Project struct {
+	GitRemote    sql.NullString         `gorm:"column:git_remote;index"`
+	RelativePath sql.NullString         `gorm:"column:relative_path"`
+	DisplayName  sql.NullString         `gorm:"column:display_name"`
+	LegacyIDs    pq.StringArray         `gorm:"column:legacy_ids;type:text[]"`
+	ID           string                 `gorm:"primaryKey"`
+	CreatedAt    time.Time              `gorm:"autoCreateTime"`
+}
+
+func (Project) TableName() string { return "projects" }

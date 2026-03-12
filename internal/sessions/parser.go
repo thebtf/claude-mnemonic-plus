@@ -2,12 +2,15 @@ package sessions
 
 import (
 	"bufio"
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"time"
@@ -175,10 +178,50 @@ func WorkstationID() string {
 	return hex.EncodeToString(hash[:])[:8]
 }
 
-// ProjectID computes a deterministic 8-char hexadecimal ID from the cwd path.
+// ProjectID computes a deterministic project ID with directory name prefix.
+// Tries git remote origin URL first (stable across machines and OS path layouts),
+// falls back to SHA-256 of the absolute path if not a git repo or has no remote.
+// Format: "dirname_xxxxxxxx" (name + 8-char hex hash)
 func ProjectID(cwdPath string) string {
+	dirName := filepath.Base(cwdPath)
+	if id, err := GitRemoteProjectID(cwdPath); err == nil && id != "" {
+		return dirName + "_" + id
+	}
 	hash := sha256.Sum256([]byte(cwdPath))
-	return hex.EncodeToString(hash[:])[:8]
+	return dirName + "_" + hex.EncodeToString(hash[:])[:8]
+}
+
+// GitRemoteProjectID computes a stable 8-char project ID from the git remote origin URL
+// and the repository-relative path of cwdPath (via git rev-parse --show-prefix).
+// Returns "", error if cwdPath is not inside a git repo or has no remote configured.
+func GitRemoteProjectID(cwdPath string) (string, error) {
+	remoteURL, err := runGitCommand(cwdPath, "remote", "get-url", "origin")
+	if err != nil {
+		return "", fmt.Errorf("git remote get-url origin: %w", err)
+	}
+	if remoteURL == "" {
+		return "", fmt.Errorf("git remote origin URL is empty")
+	}
+	relativePath, err := runGitCommand(cwdPath, "rev-parse", "--show-prefix")
+	if err != nil {
+		return "", fmt.Errorf("git rev-parse --show-prefix: %w", err)
+	}
+	key := remoteURL + "/" + relativePath
+	hash := sha256.Sum256([]byte(key))
+	return hex.EncodeToString(hash[:])[:8], nil
+}
+
+// runGitCommand runs git with the given args inside cwdPath and returns trimmed stdout.
+// Uses a 3-second timeout to prevent hangs on slow or unavailable git remotes.
+func runGitCommand(cwdPath string, args ...string) (string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	fullArgs := append([]string{"-C", cwdPath}, args...)
+	out, err := exec.CommandContext(ctx, "git", fullArgs...).Output()
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(string(out)), nil
 }
 
 // CompositeKey builds the isolation key: workstation_id:project_id:session_id.

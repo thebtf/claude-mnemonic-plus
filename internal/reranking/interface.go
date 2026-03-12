@@ -2,7 +2,7 @@
 package reranking
 
 // Reranker defines the interface for cross-encoder reranking implementations.
-// Implementations include the ONNX-based local Service and the API-based APIService.
+// Implementations include the API-based APIService.
 type Reranker interface {
 	// Rerank reranks candidates using combined bi-encoder + cross-encoder scores.
 	// Returns up to limit results sorted by combined score.

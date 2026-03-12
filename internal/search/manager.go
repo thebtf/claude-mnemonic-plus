@@ -323,6 +323,7 @@ func (m *Manager) warmFrequentQueries() {
 		cancel()
 
 		if err == nil && result != nil {
+			result = filterCredentials(result)
 			cacheKey := m.getCacheKey(candidate.info.params)
 			m.putInCache(cacheKey, result)
 
@@ -724,13 +725,42 @@ func (m *Manager) UnifiedSearch(ctx context.Context, params SearchParams) (*Unif
 
 	searchResult := result.(*UnifiedSearchResult)
 
-	// Cache the result
-	m.putInCache(cacheKey, searchResult)
+	// Never return credential observations in search results (leak prevention).
+	// Return a new struct to avoid mutating the shared singleflight result.
+	filtered := filterCredentials(searchResult)
+
+	// Cache the filtered result
+	m.putInCache(cacheKey, filtered)
 
 	// Track query frequency for cache warming
 	m.trackQueryFrequency(params)
 
-	return searchResult, nil
+	return filtered, nil
+}
+
+// filterCredentials removes credential observations from search results.
+// Credentials are only accessible via the dedicated get_credential MCP tool.
+// Returns a new *UnifiedSearchResult to avoid mutating the shared singleflight result,
+// which may be concurrently read by other waiters.
+func filterCredentials(result *UnifiedSearchResult) *UnifiedSearchResult {
+	if result == nil {
+		return nil
+	}
+	filtered := make([]SearchResult, 0, len(result.Results))
+	for _, r := range result.Results {
+		if r.Type == "observation" {
+			if obsType, _ := r.Metadata["obs_type"].(string); obsType == string(models.ObsTypeCredential) {
+				continue
+			}
+		} else if r.Type == "credential" {
+			continue
+		}
+		filtered = append(filtered, r)
+	}
+	out := *result // shallow copy preserves all metadata fields
+	out.Results = filtered
+	out.TotalCount = len(filtered)
+	return &out
 }
 
 // executeSearch performs the actual search without caching/coalescing.
@@ -878,7 +908,15 @@ func (m *Manager) hybridSearch(ctx context.Context, params SearchParams) (*Unifi
 	case "prompts":
 		docType = vector.DocTypeUserPrompt
 	}
-	where := vector.BuildWhereFilter(docType, params.Project)
+	var where vector.WhereFilter
+	switch params.Scope {
+	case "global":
+		where = vector.BuildWhereFilter(docType, "", true)
+	case "project":
+		where = vector.BuildWhereFilter(docType, params.Project, false)
+	default:
+		where = vector.BuildWhereFilter(docType, params.Project, params.IncludeGlobal)
+	}
 
 	vectorResults, err := m.vectorClient.Query(ctx, params.Query, params.Limit*2, where)
 	if err != nil {

@@ -6,27 +6,6 @@ import (
 	"sync"
 )
 
-// PoolingStrategy defines how to pool token embeddings into sentence embeddings.
-type PoolingStrategy string
-
-const (
-	// PoolingNone means the model already outputs sentence embeddings directly.
-	PoolingNone PoolingStrategy = "none"
-	// PoolingMean averages all token embeddings (weighted by attention mask).
-	PoolingMean PoolingStrategy = "mean"
-	// PoolingCLS uses only the [CLS] token embedding.
-	PoolingCLS PoolingStrategy = "cls"
-)
-
-// ONNXConfig describes ONNX-specific model configuration.
-// This allows different models to specify their tensor names and pooling needs.
-type ONNXConfig struct {
-	Pooling     PoolingStrategy
-	InputNames  []string
-	OutputNames []string
-	HiddenSize  int
-}
-
 // EmbeddingModel represents a text embedding model.
 type EmbeddingModel interface {
 	// Name returns the human-readable model name (e.g., "bge-small-en-v1.5").
@@ -46,13 +25,6 @@ type EmbeddingModel interface {
 
 	// Close releases model resources.
 	Close() error
-}
-
-// ONNXConfigurer is an optional interface that models can implement
-// to expose their ONNX configuration for introspection.
-type ONNXConfigurer interface {
-	// ONNXConfig returns the model's ONNX configuration.
-	ONNXConfig() ONNXConfig
 }
 
 // ModelMetadata describes an embedding model for UI/config.

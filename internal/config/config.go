@@ -80,7 +80,7 @@ type Config struct {
 	RerankingEnabled          bool     `json:"reranking_enabled"`
 	ContextShowLastSummary    bool     `json:"context_show_last_summary"`
 	CleanupStaleObservations  bool     `json:"cleanup_stale_observations"`
-	RerankingProvider         string   `json:"reranking_provider"`     // "onnx" | "api" (default: "api")
+	RerankingProvider         string   `json:"reranking_provider"`
 	RerankingAPIBaseURL       string   `json:"reranking_api_base_url"` // Full rerank endpoint URL (e.g. http://host:port/v1/rerank)
 	RerankingAPIModel         string   `json:"reranking_api_model"`    // default: "rerank-english-v3.0"
 	RerankingTimeoutMS        int      `json:"reranking_timeout_ms"`   // default: 500
@@ -112,6 +112,12 @@ type Config struct {
 	DedupSimilarityThreshold    float64  `json:"dedup_similarity_threshold"`    // Cosine similarity threshold for dedup clustering (default: 0.55)
 	DedupWindowSize             int      `json:"dedup_window_size"`             // Max observations considered for dedup (default: 200)
 	ClusteringThreshold         float64  `json:"clustering_threshold"`          // Similarity threshold for result clustering (default: 0.55)
+	StoreMemoryHardLimit        int      `json:"store_memory_hard_limit"`       // Max chars for store_memory content (default: 10000)
+	StoreMemorySoftLimit        int      `json:"store_memory_soft_limit"`       // Chars above which content is truncated (default: 1000)
+	StoreMemoryDedupThreshold   float64  `json:"store_memory_dedup_threshold"`  // Cosine similarity for dedup (default: 0.92)
+	StoreMemorySummarize        bool     `json:"store_memory_summarize"`        // Use LLM to summarize long content (default: false)
+	EncryptionKeyFile string `json:"-"` // env-only: ENGRAM_ENCRYPTION_KEY_FILE (path to vault.key)
+	EncryptionKey     string `json:"-"` // env-only: ENGRAM_ENCRYPTION_KEY (hex-encoded 256-bit key)
 }
 
 var (
@@ -189,7 +195,7 @@ func Default() *Config {
 		Model:                     DefaultModel,
 		EmbeddingModel:            DefaultEmbeddingModel,
 		RerankingEnabled:          true,             // Enable by default for improved relevance
-		RerankingProvider:         "api",            // Use API reranker by default (ONNX is dead on Windows)
+		RerankingProvider:         "api",
 		RerankingAPIModel:         "rerank-english-v3.0", // Cohere Rerank v3
 		RerankingTimeoutMS:        500,              // 500ms hard timeout for search path
 		RerankingCandidates:       100,              // Retrieve top 100 candidates
@@ -202,7 +208,7 @@ func Default() *Config {
 		GraphEdgeWeight:           0.3,   // Minimum edge weight to follow
 		GraphRebuildIntervalMin:   60,    // Rebuild graph every 60 minutes
 		VectorStorageStrategy:     "hub", // Hub storage strategy (LEANN-inspired)
-		EmbeddingProvider:         "builtin",
+		EmbeddingProvider:         "openai",
 		EmbeddingBaseURL:          "https://api.openai.com/v1",
 		EmbeddingModelName:        "text-embedding-3-small",
 		EmbeddingDimensions:       1536,
@@ -239,6 +245,10 @@ func Default() *Config {
 		DedupSimilarityThreshold:    0.55,  // 55% similarity threshold for deduplication
 		DedupWindowSize:             200,   // Examine up to 200 candidates for dedup
 		ClusteringThreshold:         0.55,  // 55% similarity threshold for result clustering
+		StoreMemoryHardLimit:        10000,
+		StoreMemorySoftLimit:        1000,
+		StoreMemorySummarize:        false,
+		StoreMemoryDedupThreshold:   0.92,
 	}
 }
 
@@ -508,6 +518,12 @@ func Load() (*Config, error) {
 			cfg.ClusteringThreshold = f
 		}
 	}
+	if v := strings.TrimSpace(os.Getenv("ENGRAM_ENCRYPTION_KEY_FILE")); v != "" {
+		cfg.EncryptionKeyFile = v
+	}
+	if v := strings.TrimSpace(os.Getenv("ENGRAM_ENCRYPTION_KEY")); v != "" {
+		cfg.EncryptionKey = v
+	}
 
 	return cfg, nil
 }
@@ -579,7 +595,7 @@ func GetWorkerToken() string {
 	return strings.TrimSpace(os.Getenv("ENGRAM_API_TOKEN"))
 }
 
-// GetEmbeddingProvider returns the embedding provider ("builtin" or "openai").
+// GetEmbeddingProvider returns the embedding provider (e.g., "openai").
 func GetEmbeddingProvider() string {
 	if v := envFirstOf("ENGRAM_EMBEDDING_PROVIDER", "EMBEDDING_PROVIDER"); v != "" {
 		return v

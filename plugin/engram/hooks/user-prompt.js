@@ -7,6 +7,13 @@ function asString(value) {
   return typeof value === 'string' ? value : '';
 }
 
+function escapeXmlTags(value) {
+  return asString(value)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+}
+
 async function handleUserPrompt(ctx, input) {
   const prompt = asString(input.prompt) || asString(input.Prompt);
   const project = typeof ctx.Project === 'string' ? ctx.Project : '';
@@ -27,20 +34,20 @@ async function handleUserPrompt(ctx, input) {
       ? searchResult.observations
       : [];
 
-    // Collect injected observation IDs for per-session tracking (called after sessionID is known)
-    for (const obs of observations) {
-      if (obs && typeof obs === 'object' && typeof obs.id === 'number' && obs.id > 0) {
-        searchIds.push(obs.id);
-      }
-    }
+    // Filter out credentials from context injection (leak prevention).
+    // Credentials are only accessible via the dedicated get_credential MCP tool.
+    const safeObservations = observations.filter(obs => {
+      const t = asString(obs.type).toLowerCase();
+      return t !== 'credential';
+    });
 
-    if (observations.length > 0) {
+    if (safeObservations.length > 0) {
       // Sort by similarity score (highest first)
-      observations.sort((a, b) => (b.similarity || 0) - (a.similarity || 0));
+      safeObservations.sort((a, b) => (b.similarity || 0) - (a.similarity || 0));
 
       // Dedup by title word overlap (>80% Jaccard = near-duplicate)
       const dedupedObs = [];
-      for (const obs of observations) {
+      for (const obs of safeObservations) {
         const title = asString(obs.title).toLowerCase();
         const words = new Set(title.split(/\s+/).filter(w => w.length > 2));
         let isDup = false;
@@ -111,6 +118,14 @@ async function handleUserPrompt(ctx, input) {
         console.error(`[engram] Trimmed ${trimmed} observations to fit token budget (${TOKEN_BUDGET})`);
       }
 
+      // Collect injected observation IDs after dedup and token trimming
+      // so /mark-injected only tracks observations that actually made it into context.
+      for (const obs of budgetObs) {
+        if (obs && typeof obs === 'object' && typeof obs.id === 'number' && obs.id > 0) {
+          searchIds.push(obs.id);
+        }
+      }
+
       // Re-group after budget trimming
       const finalGroups = {
         decisions: [],
@@ -151,12 +166,13 @@ async function handleUserPrompt(ctx, input) {
 
         contextBuilder += `### ${section.label}\n`;
         for (const obs of sectionObs) {
-          const title = asString(obs.title);
-          const obsType = asString(obs.type).toUpperCase();
+          const title = escapeXmlTags(obs.title);
+          const obsType = escapeXmlTags(asString(obs.type).toUpperCase());
           const score = typeof obs.similarity === 'number' ? obs.similarity.toFixed(2) : '';
           const scoreTag = score ? ` [relevance: ${score}]` : '';
+          const scopeTag = (typeof obs.scope === 'string' && obs.scope === 'global') ? ' [GLOBAL]' : '';
 
-          contextBuilder += `## ${idx}. [${obsType}] ${title}${scoreTag}\n`;
+          contextBuilder += `## ${idx}. [${obsType}] ${title}${scopeTag}${scoreTag}\n`;
 
           if (Array.isArray(obs.facts) && obs.facts.length > 0) {
             contextBuilder += 'Key facts:\n';
@@ -164,13 +180,13 @@ async function handleUserPrompt(ctx, input) {
             for (const fact of obs.facts) {
               if (typeof fact === 'string' && fact !== '') {
                 hasFacts = true;
-                contextBuilder += `- ${fact}\n`;
+                contextBuilder += `- ${escapeXmlTags(fact)}\n`;
               }
             }
             if (hasFacts) contextBuilder += '\n';
           }
 
-          const narrative = asString(obs.narrative);
+          const narrative = escapeXmlTags(obs.narrative);
           if (narrative !== '') {
             contextBuilder += `${narrative}\n\n`;
           }

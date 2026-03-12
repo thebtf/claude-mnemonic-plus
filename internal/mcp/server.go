@@ -311,8 +311,25 @@ Hooks automatically capture knowledge from your sessions. Your job is to **retri
 2. Search existing knowledge: ` + "`search(query=\"...\")`" + `
 3. Before modifying code: ` + "`find_by_file(files=\"path/to/file\")`" + `
 4. Before architectural decisions: ` + "`decisions(query=\"...\")`" + `
+5. To explicitly remember something: ` + "`store_memory(content=\"...\", title=\"...\")`" + `
+6. To recall stored knowledge: ` + "`recall_memory(query=\"...\")`" + `
 
 ## Tool Categories
+
+### Memory Management (Tier 1 — use proactively)
+| Tool | When to Use |
+|------|-------------|
+| ` + "`store_memory`" + ` | Explicitly remember something across sessions — decisions, patterns, preferences, insights. |
+| ` + "`recall_memory`" + ` | Retrieve stored knowledge by semantic search. Supports text/items/detailed formats. |
+
+### Credential Management (secure storage)
+| Tool | When to Use |
+|------|-------------|
+| ` + "`store_credential`" + ` | Securely store an API key, password, or token. Encrypted with AES-256-GCM. |
+| ` + "`get_credential`" + ` | Retrieve and decrypt a stored credential by name. |
+| ` + "`list_credentials`" + ` | List stored credentials (names and metadata only, no values). |
+| ` + "`delete_credential`" + ` | Delete a stored credential by name. Scope-aware (project or global). |
+| ` + "`vault_status`" + ` | Check vault encryption status: key configured, fingerprint, credential count, key source. |
 
 ### Search & Retrieval (primary workflow)
 | Tool | When to Use |
@@ -407,11 +424,18 @@ Hooks automatically capture knowledge from your sessions. Your job is to **retri
 **Before architectural decisions:** ` + "`decisions`" + ` to check prior choices.
 **Debugging:** ` + "`find_related_observations`" + ` to trace cause chains.
 **Periodic cleanup:** ` + "`suggest_consolidations`" + ` → ` + "`merge_observations`" + ` → ` + "`trigger_maintenance`" + `.
+**Storing secrets:** ` + "`store_credential`" + ` for API keys, passwords, tokens. ` + "`vault_status`" + ` to verify encryption is active.
+
+## Engram vs File-Based Memory
+
+Prefer ` + "`store_memory`" + ` over file-based memory for decisions, patterns, and insights.
+Engram provides semantic search, cross-project visibility (global scope), and cross-machine access.
+Use file-based memory only for static instructions and user preferences.
 
 ## Common Mistakes
 
 - Do NOT check ENGRAM_URL/ENGRAM_API_TOKEN env vars — call ` + "`check_system_health()`" + ` instead.
-- Do NOT manually save observations — hooks capture them automatically.
+- Use ` + "`store_memory`" + ` when you want to explicitly remember something. Hooks capture observations automatically, but ` + "`store_memory`" + ` lets you create memories on demand.
 - Read injected ` + "`<engram-context>`" + ` and ` + "`<relevant-memory>`" + ` blocks — they contain prior knowledge.
 - Search BEFORE re-exploring code — someone already documented it.
 - Use specialized tools: ` + "`decisions`" + ` for architecture, ` + "`find_by_file`" + ` for code, ` + "`timeline`" + ` for history.`
@@ -1017,6 +1041,103 @@ func (s *Server) handleToolsList(req *Request) *Response {
 		})
 	}
 
+	// Memory management tools — only advertise when observation store is available
+	if s.observationStore != nil {
+		tools = append(tools,
+			Tool{
+				Name:        "store_memory",
+				Description: "Explicitly store a memory/observation. Use when you want to remember something specific across sessions.",
+				InputSchema: map[string]any{
+					"type":     "object",
+					"required": []string{"content"},
+					"properties": map[string]any{
+						"content":    map[string]any{"type": "string", "description": "The content/knowledge to remember"},
+						"title":      map[string]any{"type": "string", "description": "Short title for the memory"},
+						"tags":       map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "Concept tags (supports hierarchical: lang:go:concurrency)"},
+						"type":       map[string]any{"type": "string", "description": "Memory type: decision, bugfix, feature, discovery, refactor"},
+						"importance": map[string]any{"type": "number", "minimum": 0, "maximum": 1, "description": "Importance score (0-1)"},
+						"scope":      map[string]any{"type": "string", "enum": []string{"project", "global"}, "description": "Visibility scope"},
+						"project":    map[string]any{"type": "string", "description": "Project ID (defaults to current)"},
+					},
+				},
+			},
+			Tool{
+				Name:        "recall_memory",
+				Description: "Recall memories/observations by semantic search. Use to retrieve previously stored knowledge.",
+				InputSchema: map[string]any{
+					"type":     "object",
+					"required": []string{"query"},
+					"properties": map[string]any{
+						"query":  map[string]any{"type": "string", "description": "Natural language query"},
+						"tags":   map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "Filter by concept tags"},
+						"type":   map[string]any{"type": "string", "description": "Filter by observation type"},
+						"limit":  map[string]any{"type": "number", "default": 10, "minimum": 1, "maximum": 50},
+						"format":  map[string]any{"type": "string", "enum": []string{"text", "items", "detailed"}, "default": "text"},
+						"project": map[string]any{"type": "string", "description": "Project ID to scope results (includes project-scoped and global observations)"},
+					},
+				},
+			},
+		)
+	}
+
+	// Credential vault tools — only advertise when observation store is available
+	if s.observationStore != nil {
+		tools = append(tools,
+			Tool{
+				Name:        "store_credential",
+				Description: "Securely store an encrypted credential (API key, password, token). Value is encrypted with AES-256-GCM.",
+				InputSchema: map[string]any{
+					"type":     "object",
+					"required": []string{"name", "value"},
+					"properties": map[string]any{
+						"name":  map[string]any{"type": "string", "description": "Credential name/identifier"},
+						"value": map[string]any{"type": "string", "description": "Secret value to encrypt and store"},
+						"scope": map[string]any{"type": "string", "enum": []string{"project", "global"}, "default": "project", "description": "Scope: 'project' (default) or 'global' (cross-project)"},
+						"tags":  map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "Optional concept tags"},
+					},
+				},
+			},
+			Tool{
+				Name:        "get_credential",
+				Description: "Retrieve and decrypt a stored credential by name. Returns the decrypted value.",
+				InputSchema: map[string]any{
+					"type":     "object",
+					"required": []string{"name"},
+					"properties": map[string]any{
+						"name": map[string]any{"type": "string", "description": "Credential name to retrieve"},
+					},
+				},
+			},
+			Tool{
+				Name:        "list_credentials",
+				Description: "List all stored credentials (names and metadata only, no values).",
+				InputSchema: map[string]any{
+					"type":       "object",
+					"properties": map[string]any{},
+				},
+			},
+			Tool{
+				Name:        "delete_credential",
+				Description: "Delete a stored credential by name.",
+				InputSchema: map[string]any{
+					"type":     "object",
+					"required": []string{"name"},
+					"properties": map[string]any{
+						"name": map[string]any{"type": "string", "description": "Credential name to delete"},
+					},
+				},
+			},
+			Tool{
+				Name:        "vault_status",
+				Description: "Check vault encryption status: key configured, fingerprint, credential count.",
+				InputSchema: map[string]any{
+					"type":       "object",
+					"properties": map[string]any{},
+				},
+			},
+		)
+	}
+
 	// Document / Collection tools — only advertise when dependencies are available
 	if s.documentStore != nil {
 		tools = append(tools,
@@ -1233,6 +1354,20 @@ func (s *Server) callTool(ctx context.Context, name string, args json.RawMessage
 		return s.handleImportInstincts(ctx, args)
 	case "backfill_status":
 		return s.handleBackfillStatus()
+	case "store_credential":
+		return s.handleStoreCredential(ctx, args)
+	case "get_credential":
+		return s.handleGetCredential(ctx, args)
+	case "list_credentials":
+		return s.handleListCredentials(ctx, args)
+	case "delete_credential":
+		return s.handleDeleteCredential(ctx, args)
+	case "vault_status":
+		return s.handleVaultStatus(ctx, args)
+	case "store_memory":
+		return s.handleStoreMemory(ctx, args)
+	case "recall_memory":
+		return s.handleRecallMemory(ctx, args)
 	}
 
 	// Original search-based tools
@@ -1509,7 +1644,7 @@ func (s *Server) handleFindSimilarObservations(ctx context.Context, args json.Ra
 		return "", fmt.Errorf("vector search not available")
 	}
 
-	where := vector.BuildWhereFilter(vector.DocTypeObservation, params.Project)
+	where := vector.BuildWhereFilter(vector.DocTypeObservation, params.Project, true)
 	results, err := s.vectorClient.Query(ctx, params.Query, params.Limit*2, where)
 	if err != nil {
 		return "", fmt.Errorf("vector search failed: %w", err)
@@ -2254,7 +2389,7 @@ func (s *Server) handleSuggestConsolidations(ctx context.Context, args json.RawM
 		}
 
 		// Query for similar observations
-		where := vector.BuildWhereFilter(vector.DocTypeObservation, params.Project)
+		where := vector.BuildWhereFilter(vector.DocTypeObservation, params.Project, true)
 		results, err := s.vectorClient.Query(ctx, searchText, 10, where)
 		if err != nil {
 			continue

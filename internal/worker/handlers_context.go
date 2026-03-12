@@ -96,7 +96,7 @@ func (s *Service) handleSearchByPrompt(w http.ResponseWriter, r *http.Request) {
 	// Try vector search first if available
 	var vectorSearchFailed bool
 	if s.vectorClient != nil && s.vectorClient.IsConnected() {
-		where := vector.BuildWhereFilter(vector.DocTypeObservation, "")
+		where := vector.BuildWhereFilter(vector.DocTypeObservation, "", false)
 
 		// Search with each expanded query and merge results
 		// Pre-allocate with estimated capacity to avoid repeated reallocation
@@ -416,7 +416,7 @@ func (s *Service) handleFileContext(w http.ResponseWriter, r *http.Request) {
 			// Build search query from file path
 			query := buildFileQuery(file)
 
-			where := vector.BuildWhereFilter(vector.DocTypeObservation, "")
+			where := vector.BuildWhereFilter(vector.DocTypeObservation, "", false)
 			vectorResults, vecErr := s.vectorClient.Query(ctx, query, limit*2, where)
 			if vecErr != nil {
 				log.Warn().Err(vecErr).Str("file", file).Msg("Vector search failed for file context")
@@ -722,6 +722,22 @@ func (s *Service) handleContextInject(w http.ResponseWriter, r *http.Request) {
 		cwd = "/"
 	}
 
+	legacyProject := r.URL.Query().Get("legacy_project")
+	gitRemote := r.URL.Query().Get("git_remote")
+	relativePath := r.URL.Query().Get("relative_path")
+
+	if legacyProject != "" && legacyProject != project {
+		displayName := project
+		if idx := strings.Index(project, "_"); idx > 0 {
+			displayName = project[:idx]
+		}
+		go func() {
+			if err := gorm.UpsertProject(context.Background(), s.store.DB, project, legacyProject, gitRemote, relativePath, displayName); err != nil {
+				log.Warn().Err(err).Str("project", project).Str("legacy", legacyProject).Msg("project upsert failed")
+			}
+		}()
+	}
+
 	// Limit observations for fast startup (configurable, default 100)
 	limit := s.config.ContextObservations
 	if limit <= 0 {
@@ -772,7 +788,7 @@ func (s *Service) handleContextInject(w http.ResponseWriter, r *http.Request) {
 	var relevantObservations []*models.Observation
 	if s.vectorClient != nil && s.vectorClient.IsConnected() {
 		query := project + " code development"
-		where := vector.BuildWhereFilter(vector.DocTypeObservation, "")
+		where := vector.BuildWhereFilter(vector.DocTypeObservation, "", false)
 
 		vectorResults, vecErr := s.vectorClient.Query(ctx, query, 20, where)
 		if vecErr != nil {

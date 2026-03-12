@@ -8,7 +8,9 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strings"
 )
 
 // HookResponse is the response sent back to Claude Code.
@@ -16,9 +18,31 @@ type HookResponse struct {
 	Continue bool `json:"continue"`
 }
 
-// ProjectIDWithName returns both the hash ID and the directory name for display.
-// Format: "dirname_abc123" (name + truncated hash for human-readability)
-func ProjectIDWithName(cwd string) string {
+// GitRemoteProjectID computes a stable 8-char project ID from the git remote origin URL
+// and the repository-relative path of cwd (via git rev-parse --show-prefix).
+// Returns "", error if cwd is not inside a git repo or has no remote configured.
+func GitRemoteProjectID(cwd string) (string, error) {
+	remoteOut, err := exec.Command("git", "-C", cwd, "remote", "get-url", "origin").Output()
+	if err != nil {
+		return "", err
+	}
+	remoteURL := strings.TrimSpace(string(remoteOut))
+	if remoteURL == "" {
+		return "", fmt.Errorf("git remote origin URL is empty")
+	}
+	prefixOut, err := exec.Command("git", "-C", cwd, "rev-parse", "--show-prefix").Output()
+	if err != nil {
+		return "", err
+	}
+	relativePath := strings.TrimSpace(string(prefixOut))
+	key := remoteURL + "/" + relativePath
+	hash := sha256.Sum256([]byte(key))
+	return hex.EncodeToString(hash[:])[:8], nil
+}
+
+// LegacyProjectID returns a path-based project identifier.
+// Format: "dirname_xxxxxx" (name + 6-char path hash)
+func LegacyProjectID(cwd string) string {
 	absPath, err := filepath.Abs(cwd)
 	if err != nil {
 		absPath = cwd
@@ -29,6 +53,16 @@ func ProjectIDWithName(cwd string) string {
 	shortHash := hex.EncodeToString(hash[:3]) // 6 chars
 
 	return fmt.Sprintf("%s_%s", dirName, shortHash)
+}
+
+// ProjectIDWithName returns both the hash ID and the directory name for display.
+// Format: "dirname_abc123" (name + truncated hash for human-readability)
+func ProjectIDWithName(cwd string) string {
+	dirName := filepath.Base(cwd)
+	if gitHash, err := GitRemoteProjectID(cwd); err == nil && gitHash != "" {
+		return dirName + "_" + gitHash
+	}
+	return LegacyProjectID(cwd)
 }
 
 // Exit codes for Claude Code hooks
@@ -61,12 +95,15 @@ type BaseInput struct {
 
 // HookContext provides common context for hook handlers.
 type HookContext struct {
-	HookName  string
-	Project   string
-	SessionID string
-	CWD       string
-	RawInput  []byte
-	Port      int
+	HookName      string
+	Project       string
+	SessionID     string
+	CWD           string
+	RawInput      []byte
+	Port          int
+	LegacyProject string
+	GitRemote     string
+	RelativePath  string
 }
 
 // HookHandler is a function that handles hook-specific logic.
@@ -110,15 +147,27 @@ func RunHook[T any](hookName string, handler HookHandler[T]) {
 
 	// Generate project ID from CWD
 	project := ProjectIDWithName(base.CWD)
+	legacyProject := LegacyProjectID(base.CWD)
+
+	var gitRemote, relativePath string
+	if remoteOut, err := exec.Command("git", "-C", base.CWD, "remote", "get-url", "origin").Output(); err == nil {
+		gitRemote = strings.TrimSpace(string(remoteOut))
+	}
+	if prefixOut, err := exec.Command("git", "-C", base.CWD, "rev-parse", "--show-prefix").Output(); err == nil {
+		relativePath = strings.TrimSpace(string(prefixOut))
+	}
 
 	// Create context
 	ctx := &HookContext{
-		HookName:  hookName,
-		Port:      port,
-		Project:   project,
-		SessionID: base.SessionID,
-		CWD:       base.CWD,
-		RawInput:  inputData,
+		HookName:      hookName,
+		Port:          port,
+		Project:       project,
+		SessionID:     base.SessionID,
+		CWD:           base.CWD,
+		RawInput:      inputData,
+		LegacyProject: legacyProject,
+		GitRemote:     gitRemote,
+		RelativePath:  relativePath,
 	}
 
 	// Run hook-specific handler

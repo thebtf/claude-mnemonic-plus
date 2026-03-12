@@ -32,9 +32,12 @@ func main() {
 
 func handleSessionStart(ctx *hooks.HookContext, input *Input) (string, error) {
 	// Fetch observations for context injection
-	endpoint := fmt.Sprintf("/api/context/inject?project=%s&cwd=%s&format=compact",
+	endpoint := fmt.Sprintf("/api/context/inject?project=%s&cwd=%s&format=compact&legacy_project=%s&git_remote=%s&relative_path=%s",
 		url.QueryEscape(ctx.Project),
-		url.QueryEscape(ctx.CWD))
+		url.QueryEscape(ctx.CWD),
+		url.QueryEscape(ctx.LegacyProject),
+		url.QueryEscape(ctx.GitRemote),
+		url.QueryEscape(ctx.RelativePath))
 
 	result, err := hooks.GET(ctx.Port, endpoint)
 	if err != nil {

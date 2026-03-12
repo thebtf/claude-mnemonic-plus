@@ -1034,6 +1034,78 @@ func runMigrations(db *gorm.DB, embeddingDims int) error {
 			return tx.Exec(`ALTER TABLE content_chunks DROP COLUMN IF EXISTS text`).Error
 		},
 	},
+	// Migration 030: Projects lookup table for stable cross-platform project identity.
+	// Maps canonical git-remote-based project IDs to legacy path-based aliases,
+	// enabling zero-downtime migration as clients upgrade to git-remote IDs.
+	{
+		ID: "030_projects_table",
+		Migrate: func(tx *gorm.DB) error {
+			sqls := []string{
+				`CREATE TABLE IF NOT EXISTS projects (
+					id            TEXT PRIMARY KEY,
+					git_remote    TEXT,
+					relative_path TEXT,
+					legacy_ids    TEXT[],
+					display_name  TEXT,
+					created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+				)`,
+				// Unique constraint on (git_remote, relative_path) for ON CONFLICT upserts.
+				// Partial index excludes rows without a git_remote (path-based fallback projects).
+				`CREATE UNIQUE INDEX IF NOT EXISTS idx_projects_remote_path
+				 ON projects(git_remote, relative_path)
+				 WHERE git_remote IS NOT NULL`,
+				// GIN index on legacy_ids array for fast alias lookup via @> operator.
+				`CREATE INDEX IF NOT EXISTS idx_projects_legacy_ids
+				 ON projects USING GIN(legacy_ids)`,
+			}
+			for _, s := range sqls {
+				if err := tx.Exec(s).Error; err != nil {
+					return fmt.Errorf("migration 030: %w", err)
+				}
+			}
+			return nil
+		},
+		Rollback: func(tx *gorm.DB) error {
+			return tx.Exec("DROP TABLE IF EXISTS projects CASCADE").Error
+		},
+	},
+	// Migration 031: Add credential storage columns and update type constraint.
+	{
+		ID: "031_credential_storage",
+		Migrate: func(tx *gorm.DB) error {
+			sqls := []string{
+				`ALTER TABLE observations ADD COLUMN IF NOT EXISTS encrypted_secret BYTEA`,
+				`ALTER TABLE observations ADD COLUMN IF NOT EXISTS encryption_key_fingerprint TEXT`,
+				// Drop old type constraint and add new one that includes 'credential'
+				`ALTER TABLE observations DROP CONSTRAINT IF EXISTS chk_observations_type`,
+				`ALTER TABLE observations ADD CONSTRAINT chk_observations_type CHECK (type IN ('decision', 'bugfix', 'feature', 'refactor', 'discovery', 'change', 'guidance', 'credential'))`,
+			}
+			for _, s := range sqls {
+				if err := tx.Exec(s).Error; err != nil {
+					return fmt.Errorf("migration 031: %w", err)
+				}
+			}
+			return nil
+		},
+		Rollback: func(tx *gorm.DB) error {
+			sqls := []string{
+				`ALTER TABLE observations DROP COLUMN IF EXISTS encrypted_secret`,
+				`ALTER TABLE observations DROP COLUMN IF EXISTS encryption_key_fingerprint`,
+				// Rewrite credential observations to 'discovery' before restoring the old
+				// constraint that excludes 'credential'. Without this, ADD CONSTRAINT fails
+				// if any credential rows exist, leaving the DB in a broken half-rolled-back state.
+				`UPDATE observations SET type = 'discovery' WHERE type = 'credential'`,
+				`ALTER TABLE observations DROP CONSTRAINT IF EXISTS chk_observations_type`,
+				`ALTER TABLE observations ADD CONSTRAINT chk_observations_type CHECK (type IN ('decision', 'bugfix', 'feature', 'refactor', 'discovery', 'change', 'guidance'))`,
+			}
+			for _, s := range sqls {
+				if err := tx.Exec(s).Error; err != nil {
+					log.Warn().Err(err).Str("sql", s).Msg("migration 031 rollback step failed")
+				}
+			}
+			return nil
+		},
+	},
 	})
 	if err := m.Migrate(); err != nil {
 		return fmt.Errorf("run gormigrate migrations: %w", err)
