@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"github.com/rs/zerolog/log"
@@ -146,7 +147,12 @@ func (s *Server) handleStoreMemory(ctx context.Context, args json.RawMessage) (s
 		Scope:      scope,
 	}
 
-	id, _, err := s.observationStore.StoreObservation(ctx, "", params.Project, obs, 0, 0)
+	// Generate a unique session ID for manual memories to avoid
+	// duplicate key violations on idx_sdk_sessions_claude_session_id.
+	// Empty string causes conflicts because PostgreSQL NULLs are always unique
+	// (ON CONFLICT on sdk_session_id won't fire) but claude_session_id="" collides.
+	manualSessionID := fmt.Sprintf("manual-%d", time.Now().UnixNano())
+	id, _, err := s.observationStore.StoreObservation(ctx, manualSessionID, params.Project, obs, 0, 0)
 	if err != nil {
 		return "", fmt.Errorf("store observation: %w", err)
 	}
