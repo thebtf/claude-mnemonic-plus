@@ -195,6 +195,12 @@ const plugin: OpenClawPluginDefinition = {
           }
         });
 
+      // CLI context is stable per process — cache the tool instance.
+      const cliMigrateTool = createMemoryMigrateTool(
+        { workspaceDir: process.cwd() },
+        client, config, api,
+      );
+
       memCmd
         .command('migrate')
         .description('Import local memory files into engram')
@@ -204,13 +210,7 @@ const plugin: OpenClawPluginDefinition = {
           const opts = (args[args.length - 1] ?? {}) as Record<string, unknown>;
           const dryRun = Boolean(opts['dryRun'] ?? opts['dry-run']);
           const force = Boolean(opts.force);
-
-          const toolCtx: OpenClawPluginToolContext = {
-            workspaceDir: process.cwd(),
-          };
-
-          const tool = createMemoryMigrateTool(toolCtx, client, config, api);
-          const result = await tool.execute('cli-migrate', { dryRun, force });
+          const result = await cliMigrateTool.execute('cli-migrate', { dryRun, force });
           console.log(result);
         });
     }, { commands: ['memory'] });

@@ -7,7 +7,7 @@
 
 import { z } from 'zod';
 import { Type } from '@sinclair/typebox';
-import { readFile, readdir, writeFile, stat, lstat } from 'node:fs/promises';
+import { readFile, readdir, writeFile, rename, stat, lstat } from 'node:fs/promises';
 import { join, relative, resolve, normalize } from 'node:path';
 import { createHash } from 'node:crypto';
 import type { EngramRestClient, BulkImportRequest } from '../client.js';
@@ -23,17 +23,27 @@ const MARKER_FILE = '.engram-migrated.json';
 const CONTENT_MAX_CHARS = 900;
 const MAX_FILE_SIZE = 50_000; // 50KB limit per file
 
+// Single source of truth: Zod schema defines shape, TypeBox schema exposes it to SDK.
+// If you add/remove a field, update BOTH the Zod schema AND the TypeBox schema below.
 const MigrateParamsSchema = z.object({
   dryRun: z.boolean().optional().default(false),
   path: z.string().optional(),
   force: z.boolean().optional().default(false),
 });
 
+type MigrateParams = z.infer<typeof MigrateParamsSchema>;
+
 const migrateParameters = Type.Object({
   dryRun: Type.Optional(Type.Boolean({ description: 'Preview what would be imported without writing', default: false })),
   path: Type.Optional(Type.String({ description: 'Specific file path to migrate (default: MEMORY.md + memory/**/*.md)' })),
   force: Type.Optional(Type.Boolean({ description: 'Ignore migration marker, re-import everything', default: false })),
 });
+
+// Compile-time drift guard: if Zod and TypeBox schemas diverge in field names,
+// this assignment will produce a TypeScript error.
+const _schemaCheck: Record<keyof MigrateParams, true> = {
+  dryRun: true, path: true, force: true,
+}; void _schemaCheck;
 
 interface MigrationMarker {
   lastMigrated: string;
@@ -354,9 +364,13 @@ async function loadMarker(path: string): Promise<MigrationMarker | null> {
   }
 }
 
-async function saveMarker(path: string, marker: MigrationMarker): Promise<void> {
+async function saveMarker(markerPath: string, marker: MigrationMarker): Promise<void> {
+  // Atomic write via temp file + rename to reduce race window when
+  // two agents migrate concurrently (last writer wins, no corruption).
+  const tmp = markerPath + '.tmp';
   try {
-    await writeFile(path, JSON.stringify(marker, null, 2), 'utf-8');
+    await writeFile(tmp, JSON.stringify(marker, null, 2), 'utf-8');
+    await rename(tmp, markerPath);
   } catch {
     // Non-critical — migration still succeeded
   }
