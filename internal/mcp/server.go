@@ -11,9 +11,12 @@ import (
 	"strings"
 	"time"
 
+	"sync"
+
 	"github.com/thebtf/engram/internal/chunking"
 	"github.com/thebtf/engram/internal/collections"
 	"github.com/thebtf/engram/internal/consolidation"
+	"github.com/thebtf/engram/internal/crypto"
 	"github.com/thebtf/engram/internal/db/gorm"
 	"github.com/thebtf/engram/internal/embedding"
 	graphpkg "github.com/thebtf/engram/internal/graph"
@@ -47,6 +50,9 @@ type Server struct {
 	embedSvc               *embedding.Service
 	chunkManager           *chunking.Manager
 	graphStore             graphpkg.GraphStore
+	vault                  *crypto.Vault
+	vaultInitErr           error
+	vaultOnce              sync.Once
 	backfillStatusFunc     func() (any, error)
 	version                string
 }
