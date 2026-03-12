@@ -126,7 +126,11 @@ const plugin: OpenClawPluginDefinition = {
         const pathArgs = parts.filter((a) => !a.startsWith('--'));
         const migratePath = pathArgs.length > 0 ? pathArgs.join(' ') : undefined;
 
-        const toolCtx: OpenClawPluginToolContext = {};
+        // Resolve workspace from the plugin API — slash commands (Telegram, Discord)
+        // don't carry workspaceDir in PluginCommandContext, but api.resolvePath does.
+        let workspaceDir: string | undefined;
+        try { workspaceDir = api.resolvePath('.'); } catch { /* unavailable */ }
+        const toolCtx: OpenClawPluginToolContext = { workspaceDir };
         const tool = createMemoryMigrateTool(toolCtx, client, config, api);
         const result = await tool.execute('cmd-migrate', { dryRun, force, path: migratePath });
         return { text: result };
