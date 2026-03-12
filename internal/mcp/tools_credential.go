@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"sync"
 
 	"github.com/rs/zerolog/log"
 	"github.com/thebtf/engram/internal/config"
@@ -12,27 +11,18 @@ import (
 	"github.com/thebtf/engram/pkg/models"
 )
 
-// Vault singleton — initialized lazily on first credential operation.
-// If initialization fails (missing key file, invalid key), the error is permanent.
-// Restart the server after fixing the key configuration to retry.
-// Test isolation: vault state is package-level; tests that trigger getVault()
-// with failing config will poison all subsequent tests in the same binary.
-var (
-	sharedVault  *crypto.Vault
-	vaultInitErr error
-	vaultOnce    sync.Once
-)
-
-// getVault returns the shared Vault, initializing it lazily on first call.
-func getVault() (*crypto.Vault, error) {
-	vaultOnce.Do(func() {
+// getVault returns the Server's Vault, initializing it lazily on first call.
+// The vault is a singleton within the server instance; initialization errors
+// are permanent — restart the server after fixing key configuration to retry.
+func (s *Server) getVault() (*crypto.Vault, error) {
+	s.vaultOnce.Do(func() {
 		cfg := config.Get()
-		sharedVault, vaultInitErr = crypto.NewVault(cfg)
-		if vaultInitErr != nil {
-			log.Error().Err(vaultInitErr).Msg("vault: failed to initialize")
+		s.vault, s.vaultInitErr = crypto.NewVault(cfg)
+		if s.vaultInitErr != nil {
+			log.Error().Err(s.vaultInitErr).Msg("vault: failed to initialize")
 		}
 	})
-	return sharedVault, vaultInitErr
+	return s.vault, s.vaultInitErr
 }
 
 // handleStoreCredential encrypts and stores a credential observation.
@@ -70,7 +60,7 @@ func (s *Server) handleStoreCredential(ctx context.Context, args json.RawMessage
 		return "", fmt.Errorf("project is required for project-scoped credentials")
 	}
 
-	v, err := getVault()
+	v, err := s.getVault()
 	if err != nil {
 		return "", fmt.Errorf("vault not available: %w", err)
 	}
@@ -143,7 +133,7 @@ func (s *Server) handleGetCredential(ctx context.Context, args json.RawMessage) 
 		return "", fmt.Errorf("name is required")
 	}
 
-	v, err := getVault()
+	v, err := s.getVault()
 	if err != nil {
 		return "", fmt.Errorf("vault not available — configure ENGRAM_ENCRYPTION_KEY or ENGRAM_ENCRYPTION_KEY_FILE: %w", err)
 	}
@@ -286,7 +276,7 @@ func (s *Server) handleVaultStatus(ctx context.Context, _ json.RawMessage) (stri
 	// Only load fingerprint and key source when vault is already configured (read existing key).
 	keySource := ""
 	if keyConfigured {
-		if v, err := getVault(); err == nil && v != nil {
+		if v, err := s.getVault(); err == nil && v != nil {
 			fingerprint = v.Fingerprint()
 			keySource = v.KeySource()
 		}
