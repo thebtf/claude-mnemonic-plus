@@ -71,11 +71,13 @@
     "memory_search",
     "memory_store",
     "memory_forget",
-    "memory_get"
+    "memory_get",
+    "memory_migrate"
   ],
   "commands": [
     "memory",
-    "remember"
+    "remember",
+    "migrate"
   ],
   "cli": {
     "commands": ["memory"]

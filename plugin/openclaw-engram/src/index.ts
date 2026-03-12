@@ -8,15 +8,18 @@
  *   - Automatic self-learning via tool event ingestion
  *   - Transcript backfill on compaction / session end
  *   - Agent tools: engram_search, engram_remember, engram_decisions,
- *                  memory_search, memory_store, memory_forget, memory_get
- *   - Slash commands: /memory, /remember
- *   - CLI: openclaw memory status|search|store
+ *                  memory_search, memory_store, memory_forget, memory_get,
+ *                  memory_migrate
+ *   - Slash commands: /memory, /remember, /migrate
+ *   - CLI: openclaw memory status|search|store|migrate
  */
 
 import type {
   OpenClawPluginDefinition,
   OpenClawPluginApi,
   OpenClawPluginToolContext,
+  CommandContext,
+  CommandResult,
 } from './types/openclaw.js';
 import { parseConfig, getJsonSchema } from './config.js';
 import { EngramRestClient } from './client.js';
@@ -32,6 +35,7 @@ import { createEngramRememberTool, createMemoryStoreTool } from './tools/engram-
 import { createEngramDecisionsTool } from './tools/engram-decisions.js';
 import { createMemoryForgetTool } from './tools/memory-forget.js';
 import { createMemoryGetTool } from './tools/memory-get.js';
+import { createMemoryMigrateTool } from './tools/memory-migrate.js';
 
 import { buildMemoryCommand } from './commands/memory.js';
 import { buildRememberCommand } from './commands/remember.js';
@@ -90,6 +94,7 @@ const plugin: OpenClawPluginDefinition = {
       createEngramDecisionsTool(ctx, client, config),
       createMemoryForgetTool(ctx, client, config),
       createMemoryGetTool(ctx, client, config, api),
+      createMemoryMigrateTool(ctx, client, config, api),
     ];
 
     api.registerTool(toolFactory, {
@@ -99,6 +104,7 @@ const plugin: OpenClawPluginDefinition = {
         'engram_decisions',
         'memory_forget',
         'memory_get',
+        'memory_migrate',
       ],
     });
 
@@ -108,6 +114,28 @@ const plugin: OpenClawPluginDefinition = {
 
     api.registerCommand(buildMemoryCommand(client, config));
     api.registerCommand(buildRememberCommand(client, config));
+
+    api.registerCommand({
+      name: 'migrate',
+      description: 'Import local memory files (MEMORY.md, memory/**/*.md) into engram',
+      usage: '/migrate [--dry-run] [--force] [path]',
+      async execute(args: string[], context: CommandContext): Promise<CommandResult> {
+        const dryRun = args.includes('--dry-run');
+        const force = args.includes('--force');
+        const pathArgs = args.filter((a) => !a.startsWith('--'));
+        const path = pathArgs.length > 0 ? pathArgs.join(' ') : undefined;
+
+        const toolCtx: OpenClawPluginToolContext = {
+          agentId: context.agentId,
+          workspaceDir: context.workspaceDir,
+          sessionId: context.sessionId,
+        };
+
+        const tool = createMemoryMigrateTool(toolCtx, client, config, api);
+        const result = await tool.execute('cmd-migrate', { dryRun, force, path });
+        return { output: result };
+      },
+    });
 
     // ------------------------------------------------------------------
     // CLI: openclaw memory <subcommand>
@@ -165,6 +193,25 @@ const plugin: OpenClawPluginDefinition = {
           } else {
             console.log('Failed to store memory.');
           }
+        });
+
+      memCmd
+        .command('migrate')
+        .description('Import local memory files into engram')
+        .option('--dry-run', 'Preview without importing')
+        .option('--force', 'Re-import already migrated files')
+        .action(async (...args: unknown[]) => {
+          const opts = (args[args.length - 1] ?? {}) as Record<string, unknown>;
+          const dryRun = Boolean(opts['dryRun'] ?? opts['dry-run']);
+          const force = Boolean(opts.force);
+
+          const toolCtx: OpenClawPluginToolContext = {
+            workspaceDir: process.cwd(),
+          };
+
+          const tool = createMemoryMigrateTool(toolCtx, client, config, api);
+          const result = await tool.execute('cli-migrate', { dryRun, force });
+          console.log(result);
         });
     }, { commands: ['memory'] });
 
