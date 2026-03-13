@@ -48,7 +48,7 @@ export interface SelfCheckResponse {
   components: Record<string, { status: string; message?: string }>;
 }
 
-export interface BulkImportRequest {
+export interface BulkObservationInput {
   title: string;
   content: string;
   type: string;
@@ -56,6 +56,9 @@ export interface BulkImportRequest {
   scope?: string;
   tags?: string[];
 }
+
+/** @deprecated Use BulkObservationInput instead. */
+export type BulkImportRequest = BulkObservationInput;
 
 export interface BulkImportResponse {
   imported: number;
@@ -184,11 +187,30 @@ export class EngramRestClient {
   /**
    * Bulk-import observations.
    * POST /api/observations/bulk-import
+   *
+   * Server expects: { project, observations: [{ type, title, narrative, scope, concepts }] }
+   * Client uses:    { content → narrative, tags → concepts }
    */
   async bulkImport(
-    observations: BulkImportRequest[],
+    observations: BulkObservationInput[],
   ): Promise<BulkImportResponse | null> {
-    return this.post<BulkImportResponse>('/api/observations/bulk-import', observations);
+    if (observations.length === 0) return { imported: 0, skipped: 0 };
+
+    // All observations in a batch must share the same project.
+    const project = observations[0].project;
+
+    const mapped = observations.map((o) => ({
+      type: o.type,
+      title: o.title,
+      narrative: o.content,
+      scope: o.scope,
+      concepts: o.tags,
+    }));
+
+    return this.post<BulkImportResponse>('/api/observations/bulk-import', {
+      project,
+      observations: mapped,
+    });
   }
 
   /**
