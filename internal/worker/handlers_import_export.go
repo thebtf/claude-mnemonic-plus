@@ -51,13 +51,6 @@ type BulkImportResponse struct {
 // handleBulkImport handles bulk import of observations.
 // This is useful for migrating data or importing observations from external sources.
 func (s *Service) handleBulkImport(w http.ResponseWriter, r *http.Request) {
-	// Rate limit bulk operations to prevent DoS
-	if s.bulkOpLimiter != nil && !s.bulkOpLimiter.CanExecute() {
-		remaining := s.bulkOpLimiter.CooldownRemaining()
-		http.Error(w, fmt.Sprintf("bulk import rate limited, retry in %d seconds", remaining), http.StatusTooManyRequests)
-		return
-	}
-
 	var req BulkImportRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "invalid request body: "+err.Error(), http.StatusBadRequest)

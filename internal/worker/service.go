@@ -157,7 +157,6 @@ type Service struct {
 	config                 *config.Config
 	rebuildStatus          *RebuildStatus
 	staleQueue             chan staleVerifyRequest
-	bulkOpLimiter          *BulkOperationLimiter
 	dbWatcher              *watcher.Watcher
 	configWatcher          *watcher.Watcher
 	updater                *update.Updater
@@ -486,7 +485,6 @@ func NewService(version string, logBuffer *logbuf.RingBuffer) (*Service, error) 
 		rateLimiter:        rateLimiter,
 		tokenAuth:          tokenAuth,
 		expensiveOpLimiter: NewExpensiveOperationLimiter(),
-		bulkOpLimiter:      NewBulkOperationLimiter(60), // 60 second cooldown for bulk operations
 		logBuffer:          logBuffer,
 		backfillTracker:    newBackfillTracker(),
 		cachedObsCounts:    make(map[string]cachedCount),

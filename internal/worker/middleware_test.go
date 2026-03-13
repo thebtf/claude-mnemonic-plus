@@ -437,32 +437,6 @@ func TestValidateProjectName(t *testing.T) {
 	}
 }
 
-func TestBulkOperationLimiter(t *testing.T) {
-	limiter := NewBulkOperationLimiter(1) // 1 second cooldown for testing
-
-	// First operation should be allowed
-	if !limiter.CanExecute() {
-		t.Error("First bulk operation should be allowed")
-	}
-
-	// Immediate second operation should be blocked
-	if limiter.CanExecute() {
-		t.Error("Immediate second bulk operation should be blocked")
-	}
-
-	// Check cooldown remaining
-	remaining := limiter.CooldownRemaining()
-	if remaining <= 0 || remaining > 1 {
-		t.Errorf("Expected cooldown remaining between 0-1 seconds, got %d", remaining)
-	}
-
-	// Check time since last op
-	since := limiter.TimeSinceLastOp()
-	if since < 0 || since > 1 {
-		t.Errorf("Expected time since last op between 0-1 seconds, got %d", since)
-	}
-}
-
 func TestSecurityHeaders_CSP(t *testing.T) {
 	handler := SecurityHeaders(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
