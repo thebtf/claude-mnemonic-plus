@@ -16,7 +16,8 @@
   ],
   "license": "MIT",
   "dependencies": {
-    "@sinclair/typebox": "^0.34.0"
+    "@sinclair/typebox": "^0.34.0",
+    "chokidar": "^4.0.3"
   },
   "devDependencies": {
     "@types/node": "^25.5.0",
@@ -27,6 +28,8 @@
     "node": ">=18.0.0"
   },
   "openclaw": {
-    "extensions": ["dist/index.js"]
+    "extensions": [
+      "dist/index.js"
+    ]
   }
 }

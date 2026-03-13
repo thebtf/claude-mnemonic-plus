@@ -40,6 +40,7 @@ import { createMemoryMigrateTool } from './tools/memory-migrate.js';
 
 import { buildMemoryCommand } from './commands/memory.js';
 import { buildRememberCommand } from './commands/remember.js';
+import { createFileWatcherService } from './services/file-watcher.js';
 
 // ---------------------------------------------------------------------------
 // Plugin definition
@@ -216,6 +217,12 @@ const plugin: OpenClawPluginDefinition = {
           console.log(result);
         });
     }, { commands: ['memory'] });
+
+    // File watcher service (replaces memory-core chokidar watcher)
+    // Use configured workspace, or default agent workspace path.
+    const watcherWorkspaceDir = config.workspaceDir
+      ?? join(homedir(), '.openclaw', 'workspace');
+    api.registerService(createFileWatcherService(watcherWorkspaceDir, client, config, api.logger));
 
     api.logger.info('[engram] plugin registered successfully');
   },
