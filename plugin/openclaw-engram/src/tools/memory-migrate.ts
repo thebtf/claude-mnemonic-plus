@@ -7,7 +7,6 @@
 
 import { z } from 'zod';
 import { Type } from '@sinclair/typebox';
-import { readFile, readdir, writeFile, rename, stat, lstat } from 'node:fs/promises';
 import { join, relative, resolve, normalize } from 'node:path';
 import { createHash } from 'node:crypto';
 import type { EngramRestClient, BulkImportRequest } from '../client.js';
@@ -18,10 +17,16 @@ import type {
   OpenClawPluginToolContext,
   OpenClawPluginApi,
 } from '../types/openclaw.js';
-
-const MARKER_FILE = '.engram-migrated.json';
-const CONTENT_MAX_CHARS = 900;
-const MAX_FILE_SIZE = 50_000; // 50KB limit per file
+import {
+  splitIntoChunks,
+  loadMarker,
+  saveMarker,
+  discoverMemoryFiles,
+  safeReadFile,
+  MARKER_FILE,
+  type MigrationMarker,
+  type MemoryChunk,
+} from '../utils/memory-files.js';
 
 // Single source of truth: Zod schema defines shape, TypeBox schema exposes it to SDK.
 // If you add/remove a field, update BOTH the Zod schema AND the TypeBox schema below.
@@ -44,18 +49,6 @@ const migrateParameters = Type.Object({
 const _schemaCheck: Record<keyof MigrateParams, true> = {
   dryRun: true, path: true, force: true,
 }; void _schemaCheck;
-
-interface MigrationMarker {
-  lastMigrated: string;
-  files: Record<string, string>; // path → content SHA256
-}
-
-interface MemoryChunk {
-  title: string;
-  content: string;
-  sourcePath: string;
-  type: string;
-}
 
 export function createMemoryMigrateTool(
   ctx: OpenClawPluginToolContext,
@@ -150,23 +143,25 @@ async function runMigration(
     return 'No content to migrate (files were empty or could not be read).';
   }
 
-  // Dry run — just report
+  // Dry run — show summary with first 5 chunks
   if (params.dryRun) {
-    const lines = [`Dry run: ${allChunks.length} chunk(s) from ${filePaths.length - skippedFiles.length} file(s) would be imported.\n`];
+    const fileCount = filePaths.length - skippedFiles.length;
+    const lines: string[] = [
+      `Dry run: ${allChunks.length} chunk(s) from ${fileCount} file(s) would be imported.`,
+    ];
     if (skippedFiles.length > 0) {
-      lines.push(`Skipped (already migrated): ${skippedFiles.length} file(s)\n`);
+      lines.push(`Skipped (already migrated): ${skippedFiles.length} file(s)`);
     }
-    lines.push('Chunks:');
-    let truncatedCount = 0;
-    for (const chunk of allChunks) {
-      const willTruncate = chunk.content.length > CONTENT_MAX_CHARS;
-      if (willTruncate) truncatedCount++;
-      const truncTag = willTruncate ? ` [TRUNCATED: ${chunk.content.length} → ${CONTENT_MAX_CHARS} chars]` : '';
-      const preview = chunk.content.length > 80 ? chunk.content.slice(0, 77) + '...' : chunk.content;
-      lines.push(`- [${chunk.type}] "${chunk.title}" (from ${chunk.sourcePath})${truncTag}: ${preview}`);
+    lines.push('Chunks (first 5):');
+    const preview = allChunks.slice(0, 5);
+    for (const chunk of preview) {
+      const contentPreview = chunk.content.length > 80
+        ? chunk.content.slice(0, 77) + '...'
+        : chunk.content;
+      lines.push(`- [${chunk.type}] "${chunk.title}" (from ${chunk.sourcePath}): ${contentPreview}`);
     }
-    if (truncatedCount > 0) {
-      lines.push(`\nNote: ${truncatedCount} chunk(s) exceed ${CONTENT_MAX_CHARS} chars and will be truncated on import.`);
+    if (allChunks.length > 5) {
+      lines.push(`... and ${allChunks.length - 5} more chunk(s)`);
     }
     return lines.join('\n');
   }
@@ -177,7 +172,7 @@ async function runMigration(
 
   const observations: BulkImportRequest[] = allChunks.map((chunk) => ({
     title: chunk.title,
-    content: chunk.content.length > CONTENT_MAX_CHARS ? chunk.content.slice(0, CONTENT_MAX_CHARS) : chunk.content,
+    content: chunk.content,
     type: chunk.type,
     project,
     scope: 'project',
@@ -226,175 +221,5 @@ async function runMigration(
     lines.push(`  Errors: ${errors.join(', ')}`);
     lines.push(`  Note: marker NOT saved due to errors — re-run to retry failed chunks.`);
   }
-  const truncated = observations.filter((o) => o.content.length === CONTENT_MAX_CHARS).length;
-  if (truncated > 0) lines.push(`  Truncated: ${truncated} chunk(s) exceeded ${CONTENT_MAX_CHARS} chars`);
   return lines.join('\n');
-}
-
-// ---------------------------------------------------------------------------
-// File discovery
-// ---------------------------------------------------------------------------
-
-async function discoverMemoryFiles(workspaceDir: string): Promise<string[]> {
-  const files: string[] = [];
-
-  // Check MEMORY.md
-  const memoryMd = join(workspaceDir, 'MEMORY.md');
-  if (await fileExists(memoryMd)) {
-    files.push(memoryMd);
-  }
-
-  // Check memory/ directory recursively
-  const memoryDir = join(workspaceDir, 'memory');
-  if (await fileExists(memoryDir)) {
-    const mdFiles = await findMdFiles(memoryDir);
-    files.push(...mdFiles);
-  }
-
-  return files;
-}
-
-async function findMdFiles(dir: string, depth = 0): Promise<string[]> {
-  if (depth > 10) return []; // Guard against excessive nesting
-  const results: string[] = [];
-  try {
-    const entries = await readdir(dir, { withFileTypes: true });
-    for (const entry of entries) {
-      if (entry.isSymbolicLink()) continue; // Prevent symlink cycles
-      const fullPath = join(dir, entry.name);
-      if (entry.isDirectory()) {
-        const nested = await findMdFiles(fullPath, depth + 1);
-        results.push(...nested);
-      } else if (entry.isFile() && entry.name.endsWith('.md')) {
-        results.push(fullPath);
-      }
-    }
-  } catch {
-    // Directory not readable — skip
-  }
-  return results;
-}
-
-// ---------------------------------------------------------------------------
-// Chunking
-// ---------------------------------------------------------------------------
-
-function splitIntoChunks(content: string, sourcePath: string): MemoryChunk[] {
-  const chunks: MemoryChunk[] = [];
-  const lines = content.split('\n');
-
-  // Try splitting by ## headers
-  const sections: Array<{ title: string; content: string }> = [];
-  let currentTitle = '';
-  let currentContent: string[] = [];
-
-  let inFence = false;
-  for (const line of lines) {
-    if (line.startsWith('```')) {
-      inFence = !inFence;
-    }
-    const headerMatch = !inFence ? line.match(/^##\s+(.+)/) : null;
-    if (headerMatch) {
-      if (currentContent.length > 0) {
-        sections.push({
-          title: currentTitle || sourcePath,
-          content: currentContent.join('\n').trim(),
-        });
-      }
-      currentTitle = headerMatch[1].trim();
-      currentContent = [];
-    } else {
-      currentContent.push(line);
-    }
-  }
-  // Push last section
-  if (currentContent.length > 0) {
-    sections.push({
-      title: currentTitle || sourcePath,
-      content: currentContent.join('\n').trim(),
-    });
-  }
-
-  // If no ## headers found, treat whole file as one chunk
-  if (sections.length === 0) {
-    const trimmed = content.trim();
-    if (trimmed) {
-      chunks.push({
-        title: sourcePath,
-        content: trimmed,
-        sourcePath,
-        type: inferType(sourcePath, trimmed),
-      });
-    }
-    return chunks;
-  }
-
-  // Filter out empty sections and create chunks
-  for (const section of sections) {
-    if (!section.content) continue;
-    chunks.push({
-      title: section.title,
-      content: section.content,
-      sourcePath,
-      type: inferType(sourcePath, section.content),
-    });
-  }
-
-  return chunks;
-}
-
-function inferType(sourcePath: string, content: string): string {
-  const lower = content.toLowerCase();
-  if (lower.includes('decision') || lower.includes('chose') || lower.includes('decided')) return 'decision';
-  if (lower.includes('bug') || lower.includes('fix') || lower.includes('resolved')) return 'bugfix';
-  if (lower.includes('pattern') || lower.includes('convention')) return 'discovery';
-  return 'context';
-}
-
-// ---------------------------------------------------------------------------
-// Marker file
-// ---------------------------------------------------------------------------
-
-async function loadMarker(path: string): Promise<MigrationMarker | null> {
-  try {
-    const raw = await readFile(path, 'utf-8');
-    return JSON.parse(raw) as MigrationMarker;
-  } catch {
-    return null;
-  }
-}
-
-async function saveMarker(markerPath: string, marker: MigrationMarker): Promise<void> {
-  // Atomic write via temp file + rename to reduce race window when
-  // two agents migrate concurrently (last writer wins, no corruption).
-  const tmp = markerPath + '.tmp';
-  try {
-    await writeFile(tmp, JSON.stringify(marker, null, 2), 'utf-8');
-    await rename(tmp, markerPath);
-  } catch {
-    // Non-critical — migration still succeeded
-  }
-}
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-async function fileExists(path: string): Promise<boolean> {
-  try {
-    await stat(path);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-async function safeReadFile(path: string): Promise<string | null> {
-  try {
-    const info = await stat(path);
-    if (info.size > MAX_FILE_SIZE) return null;
-    return await readFile(path, 'utf-8');
-  } catch {
-    return null;
-  }
 }
