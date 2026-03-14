@@ -1516,18 +1516,6 @@ func TestHandleGetObservationScoringBreakdown_Validation(t *testing.T) {
 }
 
 // TestHandleTimeline_InvalidJSON tests timeline with invalid JSON.
-func TestHandleTimeline_InvalidJSON(t *testing.T) {
-	t.Parallel()
-
-	server := NewServer(nil, "1.0.0", nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
-	ctx := context.Background()
-
-	_, err := server.handleTimeline(ctx, json.RawMessage(`{invalid`))
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "invalid timeline params")
-}
-
-// TestHandleTimelineByQuery_EmptyQuery tests timeline by query with empty query.
 func TestHandleTimelineByQuery_EmptyQuery(t *testing.T) {
 	t.Parallel()
 
@@ -1535,21 +1523,9 @@ func TestHandleTimelineByQuery_EmptyQuery(t *testing.T) {
 	ctx := context.Background()
 
 	// Empty query should error
-	_, err := server.handleTimelineByQuery(ctx, json.RawMessage(`{}`))
+	_, err := server.handleTimelineByQuery(ctx, map[string]any{})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "query is required")
-}
-
-// TestHandleTimelineByQuery_InvalidJSON tests timeline by query with invalid JSON.
-func TestHandleTimelineByQuery_InvalidJSON(t *testing.T) {
-	t.Parallel()
-
-	server := NewServer(nil, "1.0.0", nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
-	ctx := context.Background()
-
-	_, err := server.handleTimelineByQuery(ctx, json.RawMessage(`{invalid`))
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "invalid timeline params")
 }
 
 // TestHandleTimeline_NoAnchorNoQuery tests timeline with no anchor and no query.
@@ -1560,7 +1536,7 @@ func TestHandleTimeline_NoAnchorNoQuery(t *testing.T) {
 	ctx := context.Background()
 
 	// No anchor_id and no query should return empty result
-	result, err := server.handleTimeline(ctx, json.RawMessage(`{}`))
+	result, err := server.handleTimeline(ctx, map[string]any{})
 	require.NoError(t, err)
 	assert.NotNil(t, result)
 	assert.Empty(t, result.Results)
@@ -1574,7 +1550,7 @@ func TestHandleTimeline_WithDefaults(t *testing.T) {
 	ctx := context.Background()
 
 	// With anchor_id = 0, should return empty result
-	result, err := server.handleTimeline(ctx, json.RawMessage(`{"anchor_id": 0}`))
+	result, err := server.handleTimeline(ctx, map[string]any{"anchor_id": float64(0)})
 	require.NoError(t, err)
 	assert.NotNil(t, result)
 	assert.Empty(t, result.Results)
@@ -2204,7 +2180,7 @@ func TestHandleAnalyzeSearchPatterns_Validation(t *testing.T) {
 			name:        "invalid json",
 			args:        `{invalid`,
 			wantErr:     true,
-			errContains: "invalid params",
+			errContains: "invalid arguments",
 		},
 	}
 
@@ -2626,17 +2602,16 @@ func TestHandleGetMaintenanceStats_NilService(t *testing.T) {
 	assert.Contains(t, err.Error(), "maintenance service not available")
 }
 
-// TestHandleTimeline_ParameterDefaultsNew tests timeline parameter defaults.
-func TestHandleTimeline_ParameterDefaultsNew(t *testing.T) {
+// TestHandleTimeline_EmptyMap tests timeline with empty map returns empty result.
+func TestHandleTimeline_EmptyMap(t *testing.T) {
 	t.Parallel()
 
 	server := NewServer(nil, "1.0.0", nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 	ctx := context.Background()
 
-	// Invalid JSON should fail
-	_, err := server.handleTimeline(ctx, json.RawMessage(`{invalid`))
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "invalid timeline params")
+	result, err := server.handleTimeline(ctx, map[string]any{})
+	require.NoError(t, err)
+	assert.Empty(t, result.Results)
 }
 
 // TestHandleTimelineByQuery_ValidationExtended tests timeline_by_query validation.
@@ -2646,34 +2621,10 @@ func TestHandleTimelineByQuery_ValidationExtended(t *testing.T) {
 	server := NewServer(nil, "1.0.0", nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 	ctx := context.Background()
 
-	tests := []struct {
-		name        string
-		args        string
-		errContains string
-		wantErr     bool
-	}{
-		{
-			name:        "invalid json",
-			args:        `{invalid`,
-			wantErr:     true,
-			errContains: "invalid timeline params",
-		},
-		{
-			name:        "missing query",
-			args:        `{}`,
-			wantErr:     true,
-			errContains: "query is required",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			_, err := server.handleTimelineByQuery(ctx, json.RawMessage(tt.args))
-			require.Error(t, err)
-			assert.Contains(t, err.Error(), tt.errContains)
-		})
-	}
+	// Missing query should error
+	_, err := server.handleTimelineByQuery(ctx, map[string]any{})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "query is required")
 }
 
 // TestHandleSuggestConsolidations_ValidationExtended tests suggest_consolidations validation.

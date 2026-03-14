@@ -1394,20 +1394,21 @@ func (s *Server) callTool(ctx context.Context, name string, args json.RawMessage
 		return s.handleRecallMemory(ctx, args)
 	}
 
-	// Original search-based tools
-	var params search.SearchParams
-	if err := json.Unmarshal(args, &params); err != nil {
-		return "", fmt.Errorf("invalid arguments: %w", err)
+	// Search-based tools: use parseArgs + coercion instead of direct unmarshal
+	// to handle MCP clients sending numeric values as strings or floats.
+	m, err := parseArgs(args)
+	if err != nil {
+		return "", err
 	}
+	params := buildSearchParams(m)
 
 	var result *search.UnifiedSearchResult
-	var err error
 
 	switch name {
 	case "search":
 		result, err = s.searchMgr.UnifiedSearch(ctx, params)
 	case "timeline":
-		result, err = s.handleTimeline(ctx, args)
+		result, err = s.handleTimeline(ctx, m)
 	case "decisions":
 		result, err = s.searchMgr.Decisions(ctx, params)
 	case "changes":
@@ -1426,9 +1427,9 @@ func (s *Server) callTool(ctx context.Context, name string, args json.RawMessage
 	case "get_recent_context":
 		result, err = s.searchMgr.UnifiedSearch(ctx, params)
 	case "get_context_timeline":
-		result, err = s.handleTimeline(ctx, args)
+		result, err = s.handleTimeline(ctx, m)
 	case "get_timeline_by_query":
-		result, err = s.handleTimelineByQuery(ctx, args)
+		result, err = s.handleTimelineByQuery(ctx, m)
 	default:
 		return "", fmt.Errorf("unknown tool: %s", name)
 	}
@@ -1460,12 +1461,9 @@ type TimelineParams struct {
 	DateEnd   int64  `json:"dateEnd"`
 }
 
-// handleTimeline handles timeline requests.
-func (s *Server) handleTimeline(ctx context.Context, args json.RawMessage) (*search.UnifiedSearchResult, error) {
-	var params TimelineParams
-	if err := json.Unmarshal(args, &params); err != nil {
-		return nil, fmt.Errorf("invalid timeline params: %w", err)
-	}
+// handleTimeline handles timeline requests using pre-parsed args map.
+func (s *Server) handleTimeline(ctx context.Context, m map[string]any) (*search.UnifiedSearchResult, error) {
+	params := buildTimelineParams(m)
 
 	if params.Before <= 0 {
 		params.Before = 10
@@ -1509,12 +1507,9 @@ func (s *Server) handleTimeline(ctx context.Context, args json.RawMessage) (*sea
 	return s.searchMgr.UnifiedSearch(ctx, searchParams)
 }
 
-// handleTimelineByQuery handles combined search + timeline requests.
-func (s *Server) handleTimelineByQuery(ctx context.Context, args json.RawMessage) (*search.UnifiedSearchResult, error) {
-	var params TimelineParams
-	if err := json.Unmarshal(args, &params); err != nil {
-		return nil, fmt.Errorf("invalid timeline params: %w", err)
-	}
+// handleTimelineByQuery handles combined search + timeline requests using pre-parsed args map.
+func (s *Server) handleTimelineByQuery(ctx context.Context, m map[string]any) (*search.UnifiedSearchResult, error) {
+	params := buildTimelineParams(m)
 
 	if params.Query == "" {
 		return nil, fmt.Errorf("query is required")
@@ -1540,20 +1535,25 @@ func (s *Server) handleTimelineByQuery(ctx context.Context, args json.RawMessage
 	}
 
 	// Now get timeline around that result
-	params.AnchorID = result.Results[0].ID
-	return s.handleTimeline(ctx, args)
+	m["anchor_id"] = result.Results[0].ID
+	return s.handleTimeline(ctx, m)
 }
 
 // handleFindRelatedObservations finds observations related to a given observation ID.
 func (s *Server) handleFindRelatedObservations(ctx context.Context, args json.RawMessage) (string, error) {
+	m, err := parseArgs(args)
+	if err != nil {
+		return "", err
+	}
+
 	var params struct {
-		ID            int64   `json:"id"`
-		MinConfidence float64 `json:"min_confidence"`
-		Limit         int     `json:"limit"`
+		ID            int64
+		MinConfidence float64
+		Limit         int
 	}
-	if err := json.Unmarshal(args, &params); err != nil {
-		return "", fmt.Errorf("invalid arguments: %w", err)
-	}
+	params.ID = coerceInt64(m["id"], 0)
+	params.MinConfidence = coerceFloat64(m["min_confidence"], 0)
+	params.Limit = coerceInt(m["limit"], 0)
 
 	if params.ID == 0 {
 		return "", fmt.Errorf("id is required")
@@ -1639,15 +1639,21 @@ func (s *Server) sendError(id any, code int, message string, data any) {
 
 // handleFindSimilarObservations finds observations semantically similar to a query.
 func (s *Server) handleFindSimilarObservations(ctx context.Context, args json.RawMessage) (string, error) {
+	m, err := parseArgs(args)
+	if err != nil {
+		return "", err
+	}
+
 	var params struct {
-		Query         string  `json:"query"`
-		Project       string  `json:"project"`
-		MinSimilarity float64 `json:"min_similarity"`
-		Limit         int     `json:"limit"`
+		Query         string
+		Project       string
+		MinSimilarity float64
+		Limit         int
 	}
-	if err := json.Unmarshal(args, &params); err != nil {
-		return "", fmt.Errorf("invalid arguments: %w", err)
-	}
+	params.Query = coerceString(m["query"], "")
+	params.Project = coerceString(m["project"], "")
+	params.MinSimilarity = coerceFloat64(m["min_similarity"], 0)
+	params.Limit = coerceInt(m["limit"], 0)
 
 	if params.Query == "" {
 		return "", fmt.Errorf("query is required")
@@ -1733,15 +1739,21 @@ func (s *Server) handleFindSimilarObservations(ctx context.Context, args json.Ra
 
 // handleGetPatterns returns patterns from the pattern store.
 func (s *Server) handleGetPatterns(ctx context.Context, args json.RawMessage) (string, error) {
+	m, err := parseArgs(args)
+	if err != nil {
+		return "", err
+	}
+
 	var params struct {
-		Type    string `json:"type"`
-		Project string `json:"project"`
-		Query   string `json:"query"`
-		Limit   int    `json:"limit"`
+		Type    string
+		Project string
+		Query   string
+		Limit   int
 	}
-	if err := json.Unmarshal(args, &params); err != nil {
-		return "", fmt.Errorf("invalid arguments: %w", err)
-	}
+	params.Type = coerceString(m["type"], "")
+	params.Project = coerceString(m["project"], "")
+	params.Query = coerceString(m["query"], "")
+	params.Limit = coerceInt(m["limit"], 0)
 
 	if params.Limit == 0 {
 		params.Limit = 20
@@ -1751,7 +1763,6 @@ func (s *Server) handleGetPatterns(ctx context.Context, args json.RawMessage) (s
 	}
 
 	var patterns []*models.Pattern
-	var err error
 
 	// Query patterns based on filters
 	if params.Query != "" {
@@ -1839,15 +1850,17 @@ func (s *Server) handleGetMemoryStats(ctx context.Context) (string, error) {
 
 // handleBulkDeleteObservations deletes multiple observations by ID.
 func (s *Server) handleBulkDeleteObservations(ctx context.Context, args json.RawMessage) (string, error) {
-	var params struct {
-		IDs           []int64 `json:"ids"`
-		DeleteVectors bool    `json:"delete_vectors"`
+	m, err := parseArgs(args)
+	if err != nil {
+		return "", err
 	}
-	params.DeleteVectors = true // default
 
-	if err := json.Unmarshal(args, &params); err != nil {
-		return "", fmt.Errorf("invalid arguments: %w", err)
+	var params struct {
+		IDs           []int64
+		DeleteVectors bool
 	}
+	params.IDs = coerceInt64Slice(m["ids"])
+	params.DeleteVectors = coerceBool(m["delete_vectors"], true)
 
 	if len(params.IDs) == 0 {
 		return "", fmt.Errorf("ids is required")
@@ -1903,12 +1916,15 @@ func (s *Server) handleBulkDeleteObservations(ctx context.Context, args json.Raw
 
 // handleBulkMarkSuperseded marks multiple observations as superseded.
 func (s *Server) handleBulkMarkSuperseded(ctx context.Context, args json.RawMessage) (string, error) {
+	m, err := parseArgs(args)
+	if err != nil {
+		return "", err
+	}
+
 	var params struct {
-		IDs []int64 `json:"ids"`
+		IDs []int64
 	}
-	if err := json.Unmarshal(args, &params); err != nil {
-		return "", fmt.Errorf("invalid arguments: %w", err)
-	}
+	params.IDs = coerceInt64Slice(m["ids"])
 
 	if len(params.IDs) == 0 {
 		return "", fmt.Errorf("ids is required")
@@ -1939,13 +1955,17 @@ func (s *Server) handleBulkMarkSuperseded(ctx context.Context, args json.RawMess
 
 // handleBulkBoostObservations boosts the importance score of multiple observations.
 func (s *Server) handleBulkBoostObservations(ctx context.Context, args json.RawMessage) (string, error) {
+	m, err := parseArgs(args)
+	if err != nil {
+		return "", err
+	}
+
 	var params struct {
-		IDs   []int64 `json:"ids"`
-		Boost float64 `json:"boost"`
+		IDs   []int64
+		Boost float64
 	}
-	if err := json.Unmarshal(args, &params); err != nil {
-		return "", fmt.Errorf("invalid arguments: %w", err)
-	}
+	params.IDs = coerceInt64Slice(m["ids"])
+	params.Boost = coerceFloat64(m["boost"], 0)
 
 	if len(params.IDs) == 0 {
 		return "", fmt.Errorf("ids is required")
@@ -2058,14 +2078,19 @@ func (s *Server) handleGetMaintenanceStats(_ context.Context) (string, error) {
 
 // handleMergeObservations merges two observations, keeping the target and superseding the source.
 func (s *Server) handleMergeObservations(ctx context.Context, args json.RawMessage) (string, error) {
+	m, err := parseArgs(args)
+	if err != nil {
+		return "", err
+	}
+
 	var params struct {
-		SourceID int64   `json:"source_id"`
-		TargetID int64   `json:"target_id"`
-		Boost    float64 `json:"boost"`
+		SourceID int64
+		TargetID int64
+		Boost    float64
 	}
-	if err := json.Unmarshal(args, &params); err != nil {
-		return "", fmt.Errorf("invalid arguments: %w", err)
-	}
+	params.SourceID = coerceInt64(m["source_id"], 0)
+	params.TargetID = coerceInt64(m["target_id"], 0)
+	params.Boost = coerceFloat64(m["boost"], 0)
 
 	if params.SourceID == 0 || params.TargetID == 0 {
 		return "", fmt.Errorf("source_id and target_id are required")
@@ -2135,12 +2160,15 @@ func (s *Server) handleMergeObservations(ctx context.Context, args json.RawMessa
 
 // handleGetObservation returns a single observation by ID.
 func (s *Server) handleGetObservation(ctx context.Context, args json.RawMessage) (string, error) {
+	m, err := parseArgs(args)
+	if err != nil {
+		return "", err
+	}
+
 	var params struct {
-		ID int64 `json:"id"`
+		ID int64
 	}
-	if err := json.Unmarshal(args, &params); err != nil {
-		return "", fmt.Errorf("invalid arguments: %w", err)
-	}
+	params.ID = coerceInt64(m["id"], 0)
 
 	if params.ID == 0 {
 		return "", fmt.Errorf("id is required")
@@ -2164,20 +2192,43 @@ func (s *Server) handleGetObservation(ctx context.Context, args json.RawMessage)
 
 // handleEditObservation updates an existing observation with provided fields.
 func (s *Server) handleEditObservation(ctx context.Context, args json.RawMessage) (string, error) {
+	m, err := parseArgs(args)
+	if err != nil {
+		return "", err
+	}
+
 	var params struct {
-		Title         *string  `json:"title,omitempty"`
-		Subtitle      *string  `json:"subtitle,omitempty"`
-		Narrative     *string  `json:"narrative,omitempty"`
-		Scope         *string  `json:"scope,omitempty"`
-		Facts         []string `json:"facts,omitempty"`
-		Concepts      []string `json:"concepts,omitempty"`
-		FilesRead     []string `json:"files_read,omitempty"`
-		FilesModified []string `json:"files_modified,omitempty"`
-		ID            int64    `json:"id"`
+		Title         *string
+		Subtitle      *string
+		Narrative     *string
+		Scope         *string
+		Facts         []string
+		Concepts      []string
+		FilesRead     []string
+		FilesModified []string
+		ID            int64
 	}
-	if err := json.Unmarshal(args, &params); err != nil {
-		return "", fmt.Errorf("invalid arguments: %w", err)
+	params.ID = coerceInt64(m["id"], 0)
+	if v, ok := m["title"]; ok && v != nil {
+		s := coerceString(v, "")
+		params.Title = &s
 	}
+	if v, ok := m["subtitle"]; ok && v != nil {
+		s := coerceString(v, "")
+		params.Subtitle = &s
+	}
+	if v, ok := m["narrative"]; ok && v != nil {
+		s := coerceString(v, "")
+		params.Narrative = &s
+	}
+	if v, ok := m["scope"]; ok && v != nil {
+		s := coerceString(v, "")
+		params.Scope = &s
+	}
+	params.Facts = coerceStringSlice(m["facts"])
+	params.Concepts = coerceStringSlice(m["concepts"])
+	params.FilesRead = coerceStringSlice(m["files_read"])
+	params.FilesModified = coerceStringSlice(m["files_modified"])
 
 	if params.ID == 0 {
 		return "", fmt.Errorf("id is required")
@@ -2240,12 +2291,15 @@ func (s *Server) handleEditObservation(ctx context.Context, args json.RawMessage
 
 // handleGetObservationQuality returns quality metrics for an observation.
 func (s *Server) handleGetObservationQuality(ctx context.Context, args json.RawMessage) (string, error) {
+	m, err := parseArgs(args)
+	if err != nil {
+		return "", err
+	}
+
 	var params struct {
-		ID int64 `json:"id"`
+		ID int64
 	}
-	if err := json.Unmarshal(args, &params); err != nil {
-		return "", fmt.Errorf("invalid arguments: %w", err)
-	}
+	params.ID = coerceInt64(m["id"], 0)
 
 	if params.ID == 0 {
 		return "", fmt.Errorf("id is required")
@@ -2350,14 +2404,19 @@ func (s *Server) handleGetObservationQuality(ctx context.Context, args json.RawM
 
 // handleSuggestConsolidations finds observations that could be merged.
 func (s *Server) handleSuggestConsolidations(ctx context.Context, args json.RawMessage) (string, error) {
+	m, err := parseArgs(args)
+	if err != nil {
+		return "", err
+	}
+
 	var params struct {
-		Project       string  `json:"project"`
-		MinSimilarity float64 `json:"min_similarity"`
-		Limit         int     `json:"limit"`
+		Project       string
+		MinSimilarity float64
+		Limit         int
 	}
-	if err := json.Unmarshal(args, &params); err != nil {
-		return "", fmt.Errorf("invalid arguments: %w", err)
-	}
+	params.Project = coerceString(m["project"], "")
+	params.MinSimilarity = coerceFloat64(m["min_similarity"], 0)
+	params.Limit = coerceInt(m["limit"], 0)
 
 	// Set defaults
 	if params.MinSimilarity == 0 {
@@ -2499,16 +2558,19 @@ func (s *Server) handleSuggestConsolidations(ctx context.Context, args json.RawM
 
 // handleTagObservation adds, removes, or sets tags on an observation.
 func (s *Server) handleTagObservation(ctx context.Context, args json.RawMessage) (string, error) {
-	var params struct {
-		Mode string   `json:"mode"`
-		Tags []string `json:"tags"`
-		ID   int64    `json:"id"`
+	m, err := parseArgs(args)
+	if err != nil {
+		return "", err
 	}
-	params.Mode = "add" // default
 
-	if err := json.Unmarshal(args, &params); err != nil {
-		return "", fmt.Errorf("invalid arguments: %w", err)
+	var params struct {
+		Mode string
+		Tags []string
+		ID   int64
 	}
+	params.Mode = coerceString(m["mode"], "add")
+	params.Tags = coerceStringSlice(m["tags"])
+	params.ID = coerceInt64(m["id"], 0)
 
 	if params.ID == 0 {
 		return "", fmt.Errorf("id is required")
@@ -2586,16 +2648,19 @@ func (s *Server) handleTagObservation(ctx context.Context, args json.RawMessage)
 
 // handleGetObservationsByTag retrieves observations with a specific concept tag.
 func (s *Server) handleGetObservationsByTag(ctx context.Context, args json.RawMessage) (string, error) {
-	var params struct {
-		Tag     string `json:"tag"`
-		Project string `json:"project"`
-		Limit   int    `json:"limit"`
+	m, err := parseArgs(args)
+	if err != nil {
+		return "", err
 	}
-	params.Limit = 50 // default
 
-	if err := json.Unmarshal(args, &params); err != nil {
-		return "", fmt.Errorf("invalid arguments: %w", err)
+	var params struct {
+		Tag     string
+		Project string
+		Limit   int
 	}
+	params.Tag = coerceString(m["tag"], "")
+	params.Project = coerceString(m["project"], "")
+	params.Limit = coerceInt(m["limit"], 50)
 
 	if params.Tag == "" {
 		return "", fmt.Errorf("tag is required")
@@ -2651,17 +2716,19 @@ func (s *Server) handleGetObservationsByTag(ctx context.Context, args json.RawMe
 
 // handleGetTemporalTrends analyzes observation creation patterns over time.
 func (s *Server) handleGetTemporalTrends(ctx context.Context, args json.RawMessage) (string, error) {
-	var params struct {
-		Project string `json:"project"`
-		GroupBy string `json:"group_by"`
-		Days    int    `json:"days"`
+	m, err := parseArgs(args)
+	if err != nil {
+		return "", err
 	}
-	params.Days = 30
-	params.GroupBy = "day"
 
-	if err := json.Unmarshal(args, &params); err != nil {
-		return "", fmt.Errorf("invalid arguments: %w", err)
+	var params struct {
+		Project string
+		GroupBy string
+		Days    int
 	}
+	params.Project = coerceString(m["project"], "")
+	params.GroupBy = coerceString(m["group_by"], "day")
+	params.Days = coerceInt(m["days"], 30)
 
 	if params.Days < 1 || params.Days > 365 {
 		params.Days = 30
@@ -2775,15 +2842,17 @@ func (s *Server) handleGetTemporalTrends(ctx context.Context, args json.RawMessa
 
 // handleGetDataQualityReport generates a comprehensive quality assessment.
 func (s *Server) handleGetDataQualityReport(ctx context.Context, args json.RawMessage) (string, error) {
-	var params struct {
-		Project string `json:"project"`
-		Limit   int    `json:"limit"`
+	m, err := parseArgs(args)
+	if err != nil {
+		return "", err
 	}
-	params.Limit = 100
 
-	if err := json.Unmarshal(args, &params); err != nil {
-		return "", fmt.Errorf("invalid arguments: %w", err)
+	var params struct {
+		Project string
+		Limit   int
 	}
+	params.Project = coerceString(m["project"], "")
+	params.Limit = coerceInt(m["limit"], 100)
 
 	if params.Limit < 10 || params.Limit > 500 {
 		params.Limit = 100
@@ -2925,19 +2994,23 @@ func (s *Server) handleGetDataQualityReport(ctx context.Context, args json.RawMe
 
 // handleBatchTagByPattern applies tags to observations matching a pattern.
 func (s *Server) handleBatchTagByPattern(ctx context.Context, args json.RawMessage) (string, error) {
-	var params struct {
-		Pattern    string   `json:"pattern"`
-		Project    string   `json:"project"`
-		Tags       []string `json:"tags"`
-		MaxMatches int      `json:"max_matches"`
-		DryRun     bool     `json:"dry_run"`
+	m, err := parseArgs(args)
+	if err != nil {
+		return "", err
 	}
-	params.DryRun = true
-	params.MaxMatches = 100
 
-	if err := json.Unmarshal(args, &params); err != nil {
-		return "", fmt.Errorf("invalid arguments: %w", err)
+	var params struct {
+		Pattern    string
+		Project    string
+		Tags       []string
+		MaxMatches int
+		DryRun     bool
 	}
+	params.Pattern = coerceString(m["pattern"], "")
+	params.Project = coerceString(m["project"], "")
+	params.Tags = coerceStringSlice(m["tags"])
+	params.MaxMatches = coerceInt(m["max_matches"], 100)
+	params.DryRun = coerceBool(m["dry_run"], true)
 
 	if params.Pattern == "" {
 		return "", fmt.Errorf("pattern is required")
@@ -3031,16 +3104,19 @@ func (s *Server) handleBatchTagByPattern(ctx context.Context, args json.RawMessa
 
 // handleExplainSearchRanking explains why each observation ranked where it did in search results.
 func (s *Server) handleExplainSearchRanking(ctx context.Context, args json.RawMessage) (string, error) {
-	var params struct {
-		Query   string `json:"query"`
-		Project string `json:"project"`
-		TopN    int    `json:"top_n"`
+	m, err := parseArgs(args)
+	if err != nil {
+		return "", err
 	}
-	params.TopN = 5 // default
 
-	if err := json.Unmarshal(args, &params); err != nil {
-		return "", fmt.Errorf("invalid arguments: %w", err)
+	var params struct {
+		Query   string
+		Project string
+		TopN    int
 	}
+	params.Query = coerceString(m["query"], "")
+	params.Project = coerceString(m["project"], "")
+	params.TopN = coerceInt(m["top_n"], 5)
 
 	if params.Query == "" {
 		return "", fmt.Errorf("query is required")
@@ -3139,20 +3215,25 @@ func (s *Server) handleExplainSearchRanking(ctx context.Context, args json.RawMe
 
 // handleExportObservations exports observations in various formats.
 func (s *Server) handleExportObservations(ctx context.Context, args json.RawMessage) (string, error) {
-	var params struct {
-		Format    string `json:"format"`
-		Project   string `json:"project"`
-		ObsType   string `json:"obs_type"`
-		Limit     int    `json:"limit"`
-		DateStart int64  `json:"date_start"`
-		DateEnd   int64  `json:"date_end"`
+	m, err := parseArgs(args)
+	if err != nil {
+		return "", err
 	}
-	params.Format = "json"
-	params.Limit = 100
 
-	if err := json.Unmarshal(args, &params); err != nil {
-		return "", fmt.Errorf("invalid arguments: %w", err)
+	var params struct {
+		Format    string
+		Project   string
+		ObsType   string
+		Limit     int
+		DateStart int64
+		DateEnd   int64
 	}
+	params.Format = coerceString(m["format"], "json")
+	params.Project = coerceString(m["project"], "")
+	params.ObsType = coerceString(m["obs_type"], "")
+	params.Limit = coerceInt(m["limit"], 100)
+	params.DateStart = coerceInt64(m["date_start"], 0)
+	params.DateEnd = coerceInt64(m["date_end"], 0)
 
 	if params.Limit < 1 || params.Limit > 1000 {
 		params.Limit = 100
@@ -3484,13 +3565,17 @@ func (s *Server) handleCheckSystemHealth(ctx context.Context) (string, error) {
 
 // handleAnalyzeSearchPatterns analyzes search query patterns.
 func (s *Server) handleAnalyzeSearchPatterns(ctx context.Context, args json.RawMessage) (string, error) {
+	m, err := parseArgs(args)
+	if err != nil {
+		return "", err
+	}
+
 	var params struct {
-		Days int `json:"days"`
-		TopN int `json:"top_n"`
+		Days int
+		TopN int
 	}
-	if err := json.Unmarshal(args, &params); err != nil {
-		return "", fmt.Errorf("invalid params: %w", err)
-	}
+	params.Days = coerceInt(m["days"], 0)
+	params.TopN = coerceInt(m["top_n"], 0)
 
 	if params.Days <= 0 {
 		params.Days = 7
@@ -3602,13 +3687,17 @@ func (s *Server) handleAnalyzeSearchPatterns(ctx context.Context, args json.RawM
 
 // handleGetObservationRelationships returns the relationship graph for an observation.
 func (s *Server) handleGetObservationRelationships(ctx context.Context, args json.RawMessage) (string, error) {
+	m, err := parseArgs(args)
+	if err != nil {
+		return "", err
+	}
+
 	var params struct {
-		ID       int64 `json:"id"`
-		MaxDepth int   `json:"max_depth"`
+		ID       int64
+		MaxDepth int
 	}
-	if err := json.Unmarshal(args, &params); err != nil {
-		return "", fmt.Errorf("invalid params: %w", err)
-	}
+	params.ID = coerceInt64(m["id"], 0)
+	params.MaxDepth = coerceInt(m["max_depth"], 0)
 
 	if params.ID <= 0 {
 		return "", fmt.Errorf("id is required and must be positive")
@@ -3696,12 +3785,15 @@ func (s *Server) handleGetObservationRelationships(ctx context.Context, args jso
 
 // handleGetObservationScoringBreakdown returns detailed scoring breakdown for an observation.
 func (s *Server) handleGetObservationScoringBreakdown(ctx context.Context, args json.RawMessage) (string, error) {
+	m, err := parseArgs(args)
+	if err != nil {
+		return "", err
+	}
+
 	var params struct {
-		ID int64 `json:"id"`
+		ID int64
 	}
-	if err := json.Unmarshal(args, &params); err != nil {
-		return "", fmt.Errorf("invalid arguments: %w", err)
-	}
+	params.ID = coerceInt64(m["id"], 0)
 
 	if params.ID <= 0 {
 		return "", fmt.Errorf("id is required and must be positive")
@@ -3760,15 +3852,31 @@ func (s *Server) handleGetObservationScoringBreakdown(ctx context.Context, args 
 
 // handleAnalyzeObservationImportance returns importance analysis for a project's observations.
 func (s *Server) handleAnalyzeObservationImportance(ctx context.Context, args json.RawMessage) (string, error) {
-	var params struct {
-		IncludeTopScored      *bool  `json:"include_top_scored"`
-		IncludeMostRetrieved  *bool  `json:"include_most_retrieved"`
-		IncludeConceptWeights *bool  `json:"include_concept_weights"`
-		Project               string `json:"project"`
-		Limit                 int    `json:"limit"`
+	m, err := parseArgs(args)
+	if err != nil {
+		return "", err
 	}
-	if err := json.Unmarshal(args, &params); err != nil {
-		return "", fmt.Errorf("invalid arguments: %w", err)
+
+	var params struct {
+		IncludeTopScored      *bool
+		IncludeMostRetrieved  *bool
+		IncludeConceptWeights *bool
+		Project               string
+		Limit                 int
+	}
+	params.Project = coerceString(m["project"], "")
+	params.Limit = coerceInt(m["limit"], 0)
+	if v, ok := m["include_top_scored"]; ok && v != nil {
+		b := coerceBool(v, true)
+		params.IncludeTopScored = &b
+	}
+	if v, ok := m["include_most_retrieved"]; ok && v != nil {
+		b := coerceBool(v, true)
+		params.IncludeMostRetrieved = &b
+	}
+	if v, ok := m["include_concept_weights"]; ok && v != nil {
+		b := coerceBool(v, true)
+		params.IncludeConceptWeights = &b
 	}
 
 	// Set defaults
@@ -3876,13 +3984,17 @@ func (s *Server) handleSearchSessions(ctx context.Context, args json.RawMessage)
 		return "", fmt.Errorf("session indexing not configured")
 	}
 
+	m, err := parseArgs(args)
+	if err != nil {
+		return "", err
+	}
+
 	var params struct {
-		Query string `json:"query"`
-		Limit int    `json:"limit"`
+		Query string
+		Limit int
 	}
-	if err := json.Unmarshal(args, &params); err != nil {
-		return "", fmt.Errorf("invalid arguments: %w", err)
-	}
+	params.Query = coerceString(m["query"], "")
+	params.Limit = coerceInt(m["limit"], 0)
 	if params.Query == "" {
 		return "", fmt.Errorf("query is required")
 	}
@@ -3938,15 +4050,21 @@ func (s *Server) handleListSessions(ctx context.Context, args json.RawMessage) (
 		return "", fmt.Errorf("session indexing not configured")
 	}
 
+	m, err := parseArgs(args)
+	if err != nil {
+		return "", err
+	}
+
 	var params struct {
-		WorkstationID string `json:"workstation_id"`
-		ProjectID     string `json:"project_id"`
-		Limit         int    `json:"limit"`
-		Offset        int    `json:"offset"`
+		WorkstationID string
+		ProjectID     string
+		Limit         int
+		Offset        int
 	}
-	if err := json.Unmarshal(args, &params); err != nil {
-		return "", fmt.Errorf("invalid arguments: %w", err)
-	}
+	params.WorkstationID = coerceString(m["workstation_id"], "")
+	params.ProjectID = coerceString(m["project_id"], "")
+	params.Limit = coerceInt(m["limit"], 0)
+	params.Offset = coerceInt(m["offset"], 0)
 	if params.Limit <= 0 {
 		params.Limit = 20
 	}
@@ -4005,17 +4123,19 @@ func (s *Server) handleRunConsolidation(ctx context.Context, args json.RawMessag
 		return "", fmt.Errorf("consolidation scheduler not available")
 	}
 
+	m, err := parseArgs(args)
+	if err != nil {
+		return "", err
+	}
+
 	var params struct {
-		Cycle string `json:"cycle"`
+		Cycle string
 	}
-	if err := json.Unmarshal(args, &params); err != nil {
-		params.Cycle = "all"
-	}
+	params.Cycle = coerceString(m["cycle"], "all")
 	if params.Cycle == "" {
 		params.Cycle = "all"
 	}
 
-	var err error
 	switch params.Cycle {
 	case "all":
 		err = s.consolidationScheduler.RunAll(ctx)
@@ -4043,14 +4163,19 @@ func (s *Server) handleRunConsolidation(ctx context.Context, args json.RawMessag
 
 // handleGetGraphNeighbors returns graph neighbors via FalkorDB.
 func (s *Server) handleGetGraphNeighbors(ctx context.Context, args json.RawMessage) (string, error) {
+	m, err := parseArgs(args)
+	if err != nil {
+		return "", err
+	}
+
 	var params struct {
-		ObservationID int64 `json:"observation_id"`
-		MaxHops       int   `json:"max_hops"`
-		Limit         int   `json:"limit"`
+		ObservationID int64
+		MaxHops       int
+		Limit         int
 	}
-	if err := json.Unmarshal(args, &params); err != nil {
-		return "", fmt.Errorf("invalid parameters: %w", err)
-	}
+	params.ObservationID = coerceInt64(m["observation_id"], 0)
+	params.MaxHops = coerceInt(m["max_hops"], 0)
+	params.Limit = coerceInt(m["limit"], 0)
 	if params.ObservationID <= 0 {
 		return "", fmt.Errorf("observation_id is required")
 	}
