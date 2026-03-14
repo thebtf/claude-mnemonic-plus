@@ -194,6 +194,79 @@ func TestSanitizeObservation(t *testing.T) {
 	}
 }
 
+func TestExtractSecrets(t *testing.T) {
+	tests := []struct {
+		name          string
+		input         string
+		expectedCount int
+		expectedNames []string // subset of names to verify
+	}{
+		{
+			name:          "empty string",
+			input:         "",
+			expectedCount: 0,
+		},
+		{
+			name:          "no secrets",
+			input:         "This is just regular text",
+			expectedCount: 0,
+		},
+		{
+			name:          "single OpenAI key",
+			input:         "key is sk-abc123def456ghi789jkl012mno345pqr678",
+			expectedCount: 1,
+		},
+		{
+			name:          "duplicate same secret",
+			input:         "sk-abc123def456ghi789jkl012mno345pqr678 and again sk-abc123def456ghi789jkl012mno345pqr678",
+			expectedCount: 1, // deduped by hash
+		},
+		{
+			name:          "two different secrets",
+			input:         "sk-abc123def456ghi789jkl012mno345pqr678 and ghp_1234567890abcdefghijklmnopqrstuvwxyz",
+			expectedCount: 2,
+		},
+		{
+			name:          "API key with prefix",
+			input:         "api_key=abc123def456ghi789jkl012mno345pqr678",
+			expectedCount: 1,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			results := ExtractSecrets(tt.input)
+			if len(results) != tt.expectedCount {
+				t.Errorf("ExtractSecrets() returned %d secrets, want %d", len(results), tt.expectedCount)
+				for _, s := range results {
+					t.Logf("  name=%s value=%s", s.Name, s.Value)
+				}
+			}
+			// Verify all names start with "auto:"
+			for _, s := range results {
+				if len(s.Name) < 5 || s.Name[:5] != "auto:" {
+					t.Errorf("secret name %q does not start with 'auto:'", s.Name)
+				}
+				if s.Value == "" {
+					t.Error("secret value is empty")
+				}
+			}
+			// Verify deterministic: same input = same names
+			if tt.expectedCount > 0 {
+				results2 := ExtractSecrets(tt.input)
+				if len(results) != len(results2) {
+					t.Fatalf("non-deterministic: got %d then %d", len(results), len(results2))
+				}
+				for i := range results {
+					if results[i].Name != results2[i].Name {
+						t.Errorf("non-deterministic names: %q vs %q", results[i].Name, results2[i].Name)
+					}
+				}
+			}
+		})
+	}
+}
+
 func BenchmarkContainsSecrets(b *testing.B) {
 	text := "This is a normal piece of text that does not contain any secrets or sensitive information"
 

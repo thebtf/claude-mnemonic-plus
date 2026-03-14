@@ -2,6 +2,8 @@
 package privacy
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"regexp"
 	"slices"
 	"strings"
@@ -41,6 +43,63 @@ var secretPatterns = []*regexp.Regexp{
 
 	// Generic secret assignment patterns
 	regexp.MustCompile(`(?i)bearer\s+[a-zA-Z0-9_-]{20,}`),
+}
+
+// DetectedSecret represents a secret value found in text, with a deterministic name
+// derived from a SHA-256 hash prefix of the value.
+type DetectedSecret struct {
+	Name  string // deterministic: "auto:{hash[:8]}"
+	Value string // the raw secret value
+}
+
+// ExtractSecrets scans text for secret patterns and returns all unique matches.
+// Each secret gets a deterministic name based on the SHA-256 hash of its value,
+// ensuring idempotent vault storage (same secret = same name = one entry).
+func ExtractSecrets(text string) []DetectedSecret {
+	if text == "" {
+		return nil
+	}
+
+	seen := make(map[string]struct{})
+	var results []DetectedSecret
+
+	for _, pattern := range secretPatterns {
+		matches := pattern.FindAllString(text, -1)
+		for _, match := range matches {
+			// Extract just the secret value (strip key name prefix).
+			value := extractSecretValue(match)
+			if value == "" {
+				value = match
+			}
+
+			hash := sha256.Sum256([]byte(value))
+			hashPrefix := hex.EncodeToString(hash[:])[:8]
+			name := "auto:" + hashPrefix
+
+			if _, ok := seen[name]; ok {
+				continue
+			}
+			seen[name] = struct{}{}
+			results = append(results, DetectedSecret{Name: name, Value: value})
+		}
+	}
+
+	return results
+}
+
+// extractSecretValue strips key= or key: prefixes from a matched secret string,
+// returning just the sensitive value portion.
+func extractSecretValue(match string) string {
+	for _, sep := range []string{"=", ":"} {
+		if idx := strings.Index(match, sep); idx != -1 {
+			val := strings.TrimSpace(match[idx+1:])
+			val = strings.Trim(val, `'"`)
+			if val != "" {
+				return val
+			}
+		}
+	}
+	return ""
 }
 
 // ContainsSecrets checks if the given text contains any patterns that look like secrets.

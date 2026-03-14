@@ -8,7 +8,6 @@
 import type { EngramRestClient } from '../client.js';
 import type { PluginConfig } from '../config.js';
 import { resolveIdentity } from '../identity.js';
-import { redactSecrets } from '../security/redactor.js';
 import type { SessionEndEvent, ConversationMessage, PluginHookContext, PluginLogger } from '../types/openclaw.js';
 
 const MAX_MESSAGES = 20;
@@ -48,10 +47,9 @@ export function handleSessionEnd(
     if (!content) return;
 
     const stripped = stripEngramContext(content);
-    const redacted = redactSecrets(stripped);
-    const truncated = redacted.length > CONTENT_MAX_CHARS
-      ? redacted.slice(0, CONTENT_MAX_CHARS)
-      : redacted;
+    const truncated = stripped.length > CONTENT_MAX_CHARS
+      ? stripped.slice(0, CONTENT_MAX_CHARS)
+      : stripped;
 
     const sessionId = ctx.sessionId ?? '';
     if (!sessionId) return;
