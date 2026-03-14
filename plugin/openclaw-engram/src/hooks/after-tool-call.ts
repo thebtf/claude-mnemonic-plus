@@ -9,7 +9,7 @@
 import type { EngramRestClient } from '../client.js';
 import type { PluginConfig } from '../config.js';
 import { resolveIdentity } from '../identity.js';
-import type { AfterToolCallEvent } from '../types/openclaw.js';
+import type { AfterToolCallEvent, PluginHookContext } from '../types/openclaw.js';
 
 const TOOL_INPUT_MAX_CHARS = 500;
 const TOOL_RESULT_MAX_CHARS = 500;
@@ -18,19 +18,21 @@ const TOOL_RESULT_MAX_CHARS = 500;
  * Handle the after_tool_call hook.
  *
  * @param event  - The after_tool_call event from OpenClaw.
+ * @param ctx    - The hook context containing agent identity fields.
  * @param client - Shared engram REST client.
  * @param config - Resolved plugin config.
  */
 export function handleAfterToolCall(
   event: AfterToolCallEvent,
+  ctx: PluginHookContext,
   client: EngramRestClient,
   config: PluginConfig,
 ): void {
   if (!client.isAvailable()) return;
   if (!config.autoExtract) return;
 
-  const agentId = event.agentId ?? '';
-  const identity = resolveIdentity(agentId, event.workspaceDir);
+  const agentId = ctx.agentId ?? '';
+  const identity = resolveIdentity(agentId, ctx.workspaceDir);
   const project = config.project ?? identity.projectId;
 
   let toolInput: string;

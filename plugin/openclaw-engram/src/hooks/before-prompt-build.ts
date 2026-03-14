@@ -10,22 +10,29 @@ import type { EngramRestClient } from '../client.js';
 import type { PluginConfig } from '../config.js';
 import { resolveIdentity } from '../identity.js';
 import { formatContext } from '../context/formatter.js';
+import { TurnTracker } from '../context/tiers.js';
+import type { TierResult } from '../context/tiers.js';
 import type {
   BeforePromptBuildEvent,
   PromptBuildResult,
+  PluginHookContext,
   PluginLogger,
 } from '../types/openclaw.js';
+
+const turnTracker = new TurnTracker();
 
 /**
  * Handle the before_prompt_build hook.
  *
  * @param event  - The before_prompt_build event from OpenClaw.
+ * @param ctx    - The hook context containing agent identity fields.
  * @param client - Shared engram REST client.
  * @param config - Resolved plugin config.
  * @returns      Context to prepend, or void if nothing to inject.
  */
 export async function handleBeforePromptBuild(
   event: BeforePromptBuildEvent,
+  ctx: PluginHookContext,
   client: EngramRestClient,
   config: PluginConfig,
   logger?: PluginLogger,
@@ -34,8 +41,13 @@ export async function handleBeforePromptBuild(
     if (!client.isAvailable()) return;
     if (!event.prompt || event.prompt.trim() === '') return;
 
-    const agentId = event.agentId ?? '';
-    const identity = resolveIdentity(agentId, event.workspaceDir);
+    const tier: TierResult = turnTracker.classify(event.prompt ?? '');
+    logger?.debug(`[engram] before-prompt-build: tier=${tier.tier} reason=${tier.reason}`);
+
+    if (tier.tier === 'NONE') return;
+
+    const agentId = ctx.agentId ?? '';
+    const identity = resolveIdentity(agentId, ctx.workspaceDir);
     const project = config.project ?? identity.projectId;
 
     let response;
@@ -43,7 +55,7 @@ export async function handleBeforePromptBuild(
       response = await client.searchContext({
         project,
         query: event.prompt,
-        cwd: event.workspaceDir,
+        cwd: ctx.workspaceDir,
         agent_id: agentId,
       });
     } catch (err) {
@@ -57,7 +69,7 @@ export async function handleBeforePromptBuild(
 
     const { context, injectedIds, trimmedCount } = formatContext(
       response.observations,
-      { tokenBudget: config.tokenBudget },
+      { tokenBudget: tier.tokenBudget },
     );
 
     if (trimmedCount > 0) {
@@ -76,7 +88,7 @@ export async function handleBeforePromptBuild(
     if (injectedIds.length > 0) {
       try {
         const sessionResp = await client.initSession({
-          claudeSessionId: event.sessionId ?? agentId,
+          claudeSessionId: ctx.sessionId ?? agentId,
           project,
           prompt: event.prompt,
         });

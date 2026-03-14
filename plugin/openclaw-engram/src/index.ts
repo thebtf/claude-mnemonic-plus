@@ -19,6 +19,7 @@ import type {
   OpenClawPluginApi,
   OpenClawPluginToolContext,
   PluginCommandContext,
+  PluginHookContext,
 } from './types/openclaw.js';
 import { parseConfig, getJsonSchema } from './config.js';
 import { EngramRestClient } from './client.js';
@@ -27,6 +28,7 @@ import { join } from 'node:path';
 import { resolveIdentity } from './identity.js';
 
 import { handleSessionStart } from './hooks/session-start.js';
+import { handleBeforeAgentStart } from './hooks/before-agent-start.js';
 import { handleBeforePromptBuild } from './hooks/before-prompt-build.js';
 import { handleAfterToolCall } from './hooks/after-tool-call.js';
 import { handleBeforeCompaction } from './hooks/before-compaction.js';
@@ -65,24 +67,28 @@ const plugin: OpenClawPluginDefinition = {
     // Hooks
     // ------------------------------------------------------------------
 
-    api.on('session_start', (event) =>
-      handleSessionStart(event, client, config, api.logger),
+    api.on('session_start', (event, ctx: PluginHookContext) =>
+      handleSessionStart(event, ctx, client, config, api.logger),
     );
 
-    api.on('before_prompt_build', (event) =>
-      handleBeforePromptBuild(event, client, config, api.logger),
+    api.on('before_agent_start', (event, ctx: PluginHookContext) =>
+      handleBeforeAgentStart(event, ctx, client, config, api.logger),
     );
 
-    api.on('after_tool_call', (event) => {
-      handleAfterToolCall(event, client, config);
+    api.on('before_prompt_build', (event, ctx: PluginHookContext) =>
+      handleBeforePromptBuild(event, ctx, client, config, api.logger),
+    );
+
+    api.on('after_tool_call', (event, ctx: PluginHookContext) => {
+      handleAfterToolCall(event, ctx, client, config);
     });
 
-    api.on('before_compaction', (event) => {
-      handleBeforeCompaction(event, client, config, api.logger);
+    api.on('before_compaction', (event, ctx: PluginHookContext) => {
+      handleBeforeCompaction(event, ctx, client, config, api.logger);
     });
 
-    api.on('session_end', (event) => {
-      handleSessionEnd(event, client, config, api.logger);
+    api.on('session_end', (event, ctx: PluginHookContext) => {
+      handleSessionEnd(event, ctx, client, config, api.logger);
     });
 
     // ------------------------------------------------------------------

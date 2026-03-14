@@ -140,17 +140,35 @@ export type PluginHookName =
   | 'subagent_spawning' | 'subagent_delivery_target' | 'subagent_spawned'
   | 'subagent_ended' | 'gateway_start' | 'gateway_stop';
 
-/** Base fields present in every hook event. */
-export interface BaseHookEvent {
+/**
+ * Context object passed as the second argument to every hook handler.
+ * Contains the agent identity and session information supplied by the SDK.
+ */
+export interface PluginHookContext {
   agentId?: string;
   sessionId?: string;
   sessionKey?: string;
   workspaceDir?: string;
+  agentDir?: string;
+  config?: OpenClawConfig;
+}
+
+/** Base fields present in every hook event. */
+export interface BaseHookEvent {
   timestamp?: string;
 }
 
 export interface SessionStartEvent extends BaseHookEvent {
   initialPrompt?: string;
+}
+
+export interface BeforeAgentStartEvent extends BaseHookEvent {
+  initialPrompt?: string;
+}
+
+export interface BeforeAgentStartResult {
+  prependContext?: string;
+  appendSystemContext?: string;
 }
 
 export interface BeforePromptBuildEvent extends BaseHookEvent {
@@ -194,22 +212,23 @@ export interface SessionStartResult {
   appendSystemContext?: string;
 }
 
-export type HookResult = void | PromptBuildResult | SessionStartResult | undefined;
+export type HookResult = void | PromptBuildResult | SessionStartResult | BeforeAgentStartResult | undefined;
 
 /** Map hook names to their event types (for hooks we use). */
 export interface HookEventMap {
   session_start: SessionStartEvent;
+  before_agent_start: BeforeAgentStartEvent;
   before_prompt_build: BeforePromptBuildEvent;
   after_tool_call: AfterToolCallEvent;
   before_compaction: BeforeCompactionEvent;
   session_end: SessionEndEvent;
 }
 
-/** Generic hook handler type. */
+/** Generic hook handler type — two-param: (event, ctx). */
 export type PluginHookHandler<K extends PluginHookName> =
   K extends keyof HookEventMap
-    ? (event: HookEventMap[K]) => HookResult | Promise<HookResult>
-    : (event: BaseHookEvent) => HookResult | Promise<HookResult>;
+    ? (event: HookEventMap[K], ctx: PluginHookContext) => HookResult | Promise<HookResult>
+    : (event: BaseHookEvent, ctx: PluginHookContext) => HookResult | Promise<HookResult>;
 
 // ---------------------------------------------------------------------------
 // Service types

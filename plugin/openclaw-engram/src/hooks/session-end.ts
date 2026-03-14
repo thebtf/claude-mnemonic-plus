@@ -8,7 +8,8 @@
 import type { EngramRestClient } from '../client.js';
 import type { PluginConfig } from '../config.js';
 import { resolveIdentity } from '../identity.js';
-import type { SessionEndEvent, ConversationMessage, PluginLogger } from '../types/openclaw.js';
+import { redactSecrets } from '../security/redactor.js';
+import type { SessionEndEvent, ConversationMessage, PluginHookContext, PluginLogger } from '../types/openclaw.js';
 
 const MAX_MESSAGES = 20;
 const CONTENT_MAX_CHARS = 6000;
@@ -17,11 +18,13 @@ const CONTENT_MAX_CHARS = 6000;
  * Handle the session_end hook.
  *
  * @param event  - The session_end event from OpenClaw.
+ * @param ctx    - The hook context containing agent identity fields.
  * @param client - Shared engram REST client.
  * @param config - Resolved plugin config.
  */
 export function handleSessionEnd(
   event: SessionEndEvent,
+  ctx: PluginHookContext,
   client: EngramRestClient,
   config: PluginConfig,
   logger?: PluginLogger,
@@ -30,8 +33,8 @@ export function handleSessionEnd(
     if (!client.isAvailable()) return;
     if (!config.autoExtract) return;
 
-    const agentId = event.agentId ?? '';
-    const identity = resolveIdentity(agentId, event.workspaceDir);
+    const agentId = ctx.agentId ?? '';
+    const identity = resolveIdentity(agentId, ctx.workspaceDir);
     const project = config.project ?? identity.projectId;
 
     const messages: ConversationMessage[] = Array.isArray(event.messages) ? event.messages : [];
@@ -44,11 +47,13 @@ export function handleSessionEnd(
 
     if (!content) return;
 
-    const truncated = content.length > CONTENT_MAX_CHARS
-      ? content.slice(0, CONTENT_MAX_CHARS)
-      : content;
+    const stripped = stripEngramContext(content);
+    const redacted = redactSecrets(stripped);
+    const truncated = redacted.length > CONTENT_MAX_CHARS
+      ? redacted.slice(0, CONTENT_MAX_CHARS)
+      : redacted;
 
-    const sessionId = event.sessionId ?? '';
+    const sessionId = ctx.sessionId ?? '';
     if (!sessionId) return;
 
     // Fire-and-forget — do not await
@@ -65,4 +70,12 @@ export function handleSessionEnd(
   } catch (err) {
     (logger ?? console).error('[engram] hook error:', err);
   }
+}
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+function stripEngramContext(text: string): string {
+  return text.replace(/<engram-context>[\s\S]*?<\/engram-context>/g, '');
 }

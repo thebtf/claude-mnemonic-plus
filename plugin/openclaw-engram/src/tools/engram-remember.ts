@@ -15,7 +15,7 @@ const RememberParamsSchema = z.object({
   title: z.string().min(1),
   content: z.string().min(1),
   type: z.enum(['decision', 'feature', 'change', 'refactor', 'discovery', 'bugfix']).default('change'),
-  scope: z.enum(['project', 'global']).default('project'),
+  scope: z.enum(['project', 'global', 'agent']).default('project'),
   tags: z.array(z.string()).optional(),
 });
 
@@ -35,8 +35,8 @@ const rememberParameters = Type.Object({
     Type.Literal('refactor'), Type.Literal('discovery'), Type.Literal('bugfix'),
   ], { description: 'Observation type', default: 'change' })),
   scope: Type.Optional(Type.Union([
-    Type.Literal('project'), Type.Literal('global'),
-  ], { description: 'Scope: project-local or global', default: 'project' })),
+    Type.Literal('project'), Type.Literal('global'), Type.Literal('agent'),
+  ], { description: 'Scope: project-local, global, or agent-private', default: 'project' })),
   tags: Type.Optional(Type.Array(Type.String(), { description: 'Optional tags' })),
 });
 
@@ -112,7 +112,8 @@ export function createEngramRememberTool(
     name: 'engram_remember',
     description:
       'Store an observation in engram persistent memory. ' +
-      'Use this to record decisions, discoveries, patterns, or important context for future sessions.',
+      'Use this to record decisions, discoveries, patterns, or important context for future sessions. ' +
+      'Use scope "agent" for private agent-specific memories.',
     parameters: rememberParameters,
 
     async execute(_toolCallId: string, params: Record<string, unknown>): Promise<string> {

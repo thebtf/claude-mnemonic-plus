@@ -196,7 +196,7 @@ function applyTokenBudget(
 }
 
 function renderXml(groups: GroupedObservations): string {
-  let out = '<relevant-memory>\n';
+  let out = '<engram-context>\n';
   out += '# Relevant Knowledge From Previous Sessions\n';
   out +=
     'IMPORTANT: Use this information to answer the question directly. Do NOT explore the codebase if the answer is here.\n\n';
@@ -243,6 +243,6 @@ function renderXml(groups: GroupedObservations): string {
     'REMINDER: Before modifying any file mentioned above, call `engram_search(query="path")` to check for additional context. ';
   out +=
     'Before architectural decisions, call `engram_decisions(query="...")`. These engram tools are available and MUST be used.\n';
-  out += '</relevant-memory>\n';
+  out += '</engram-context>\n';
   return out;
 }
