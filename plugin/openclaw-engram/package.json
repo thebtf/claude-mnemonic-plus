@@ -1,19 +1,29 @@
 {
-  "name": "engram",
+  "name": "openclaw-engram",
   "version": "0.2.0",
   "description": "OpenClaw plugin that connects to engram persistent memory server",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "scripts": {
     "build": "tsc",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "prepublishOnly": "npm run build"
   },
+  "files": [
+    "dist/",
+    "openclaw.plugin.json"
+  ],
   "keywords": [
     "openclaw",
     "engram",
     "memory",
     "plugin"
   ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/thebtf/engram.git",
+    "directory": "plugin/openclaw-engram"
+  },
   "license": "MIT",
   "dependencies": {
     "@sinclair/typebox": "^0.34.0",
