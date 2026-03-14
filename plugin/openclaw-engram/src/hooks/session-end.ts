@@ -51,7 +51,7 @@ export function handleSessionEnd(
       ? stripped.slice(0, CONTENT_MAX_CHARS)
       : stripped;
 
-    const sessionId = ctx.sessionId ?? '';
+    const sessionId = ctx.sessionId ?? ctx.sessionKey ?? agentId;
     if (!sessionId) return;
 
     // Fire-and-forget — do not await

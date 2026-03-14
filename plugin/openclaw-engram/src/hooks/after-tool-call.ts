@@ -32,6 +32,8 @@ export function handleAfterToolCall(
   if (!config.autoExtract) return;
 
   const agentId = ctx.agentId ?? '';
+  const sessionId = ctx.sessionId ?? ctx.sessionKey ?? agentId;
+  if (!sessionId) return; // no session identity available — skip
   const identity = resolveIdentity(agentId, ctx.workspaceDir);
   const project = config.project ?? identity.projectId;
 
@@ -47,7 +49,7 @@ export function handleAfterToolCall(
 
   // Fire-and-forget — do not await
   void client.ingestEvent({
-    session_id: agentId,
+    session_id: sessionId,
     project,
     tool_name: event.toolName ?? 'unknown',
     tool_input: toolInput,
