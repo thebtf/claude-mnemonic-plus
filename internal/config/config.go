@@ -115,8 +115,9 @@ type Config struct {
 	StoreMemorySoftLimit        int      `json:"store_memory_soft_limit"`       // Chars above which content is truncated (default: 1000)
 	StoreMemoryDedupThreshold   float64  `json:"store_memory_dedup_threshold"`  // Cosine similarity for dedup (default: 0.92)
 	StoreMemorySummarize        bool     `json:"store_memory_summarize"`        // Use LLM to summarize long content (default: false)
-	EncryptionKeyFile string `json:"-"` // env-only: ENGRAM_ENCRYPTION_KEY_FILE (path to vault.key)
-	EncryptionKey     string `json:"-"` // env-only: ENGRAM_ENCRYPTION_KEY (hex-encoded 256-bit key)
+	EncryptionKeyFile      string `json:"-"` // env-only: ENGRAM_ENCRYPTION_KEY_FILE (path to vault.key)
+	EncryptionKey          string `json:"-"` // env-only: ENGRAM_ENCRYPTION_KEY (hex-encoded 256-bit key)
+	LocalVerificationEnabled bool `json:"local_verification_enabled"` // Enable local file reads and CLI calls (default: false, for Docker/remote)
 }
 
 var (
@@ -519,6 +520,9 @@ func Load() (*Config, error) {
 	}
 	if v := strings.TrimSpace(os.Getenv("ENGRAM_ENCRYPTION_KEY")); v != "" {
 		cfg.EncryptionKey = v
+	}
+	if v := strings.TrimSpace(os.Getenv("LOCAL_VERIFICATION_ENABLED")); v != "" {
+		cfg.LocalVerificationEnabled = v == "true" || v == "1"
 	}
 
 	return cfg, nil
