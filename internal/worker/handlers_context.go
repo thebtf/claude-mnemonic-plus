@@ -35,6 +35,7 @@ func (s *Service) handleSearchByPrompt(w http.ResponseWriter, r *http.Request) {
 			Project string `json:"project"`
 			Query   string `json:"query"`
 			Cwd     string `json:"cwd"`
+			AgentID string `json:"agent_id"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&body); err == nil {
 			if body.Project != "" {
@@ -46,6 +47,17 @@ func (s *Service) handleSearchByPrompt(w http.ResponseWriter, r *http.Request) {
 			if body.Cwd != "" {
 				cwd = body.Cwd
 			}
+			// agent_id acts as project scope for OpenClaw agents without filesystem context
+			if project == "" && body.AgentID != "" {
+				project = body.AgentID
+			}
+		}
+	}
+
+	// Also accept agent_id as query param fallback
+	if project == "" {
+		if agentID := r.URL.Query().Get("agent_id"); agentID != "" {
+			project = agentID
 		}
 	}
 
@@ -706,6 +718,12 @@ func splitCamelCase(s string) string {
 //   - relevant: top 10 semantic search results (if vector store is connected)
 func (s *Service) handleContextInject(w http.ResponseWriter, r *http.Request) {
 	project := r.URL.Query().Get("project")
+	// agent_id acts as project scope for OpenClaw agents without filesystem context
+	if project == "" {
+		if agentID := r.URL.Query().Get("agent_id"); agentID != "" {
+			project = agentID
+		}
+	}
 	if project == "" {
 		http.Error(w, "project required", http.StatusBadRequest)
 		return

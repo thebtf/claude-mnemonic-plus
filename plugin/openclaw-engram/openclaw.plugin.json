@@ -1,0 +1,86 @@
+{
+  "name": "engram",
+  "id": "engram",
+  "version": "0.2.0",
+  "displayName": "Engram Memory",
+  "description": "Connects OpenClaw agents to engram persistent memory server for long-term context retention",
+  "kind": "memory",
+  "author": "thebtf",
+  "main": "dist/index.js",
+  "configSchema": {
+    "type": "object",
+    "properties": {
+      "url": {
+        "type": "string",
+        "description": "Engram server URL (e.g. http://localhost:37777)",
+        "default": "http://localhost:37777"
+      },
+      "token": {
+        "type": "string",
+        "description": "Bearer token for engram API authentication",
+        "uiHints": { "sensitive": true }
+      },
+      "project": {
+        "type": "string",
+        "description": "Project scope override (defaults to auto-detected from workspace)"
+      },
+      "contextLimit": {
+        "type": "number",
+        "description": "Maximum observations to inject per prompt",
+        "default": 10
+      },
+      "sessionContextLimit": {
+        "type": "number",
+        "description": "Maximum observations to inject at session start",
+        "default": 20
+      },
+      "tokenBudget": {
+        "type": "number",
+        "description": "Maximum token budget for context injection (approx 4 chars per token)",
+        "default": 2000
+      },
+      "timeoutMs": {
+        "type": "number",
+        "description": "Per-request timeout in milliseconds",
+        "default": 5000
+      },
+      "autoExtract": {
+        "type": "boolean",
+        "description": "Enable automatic observation extraction on compaction/session-end",
+        "default": true
+      },
+      "logLevel": {
+        "type": "string",
+        "enum": ["debug", "info", "warn", "error"],
+        "description": "Log verbosity level",
+        "default": "warn"
+      }
+    },
+    "required": ["url", "token"]
+  },
+  "hooks": [
+    "session_start",
+    "before_prompt_build",
+    "after_tool_call",
+    "before_compaction",
+    "session_end"
+  ],
+  "tools": [
+    "engram_search",
+    "engram_remember",
+    "engram_decisions",
+    "memory_search",
+    "memory_store",
+    "memory_forget",
+    "memory_get",
+    "memory_migrate"
+  ],
+  "commands": [
+    "memory",
+    "remember",
+    "migrate"
+  ],
+  "cli": {
+    "commands": ["memory"]
+  }
+}
