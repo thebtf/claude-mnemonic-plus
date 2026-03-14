@@ -33,8 +33,15 @@ export function handleAfterToolCall(
   const identity = resolveIdentity(agentId, event.workspaceDir);
   const project = config.project ?? identity.projectId;
 
-  const toolInput = truncate(JSON.stringify(event.toolInput ?? ''), TOOL_INPUT_MAX_CHARS);
-  const toolResult = truncate(JSON.stringify(event.toolResult ?? ''), TOOL_RESULT_MAX_CHARS);
+  let toolInput: string;
+  let toolResult: string;
+  try {
+    toolInput = truncate(JSON.stringify(event.toolInput ?? ''), TOOL_INPUT_MAX_CHARS);
+    toolResult = truncate(JSON.stringify(event.toolResult ?? ''), TOOL_RESULT_MAX_CHARS);
+  } catch {
+    toolInput = '[unserializable]';
+    toolResult = '[unserializable]';
+  }
 
   // Fire-and-forget — do not await
   void client.ingestEvent({
@@ -43,7 +50,7 @@ export function handleAfterToolCall(
     tool_name: event.toolName ?? 'unknown',
     tool_input: toolInput,
     tool_result: toolResult,
-  });
+  }).catch(() => { /* swallow — fire-and-forget */ });
 }
 
 function truncate(value: string, maxChars: number): string {

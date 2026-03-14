@@ -9,6 +9,10 @@ export const PluginConfigSchema = z.object({
   url: z
     .string()
     .url('url must be a valid HTTP URL')
+    .refine(
+      (u) => /^https?:\/\//i.test(u),
+      { message: 'url must use http or https scheme' },
+    )
     .default('http://localhost:37777'),
 
   /** Bearer token for engram API authentication. Marked sensitive in UI hints. */

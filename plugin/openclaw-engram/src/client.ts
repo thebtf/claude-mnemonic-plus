@@ -305,7 +305,7 @@ function extractOrigin(rawUrl: string): string {
   const trimmed = rawUrl.trim();
   try {
     const parsed = new URL(trimmed);
-    return `${parsed.protocol}//${parsed.host}`;
+    return `${parsed.protocol}//${parsed.host}${parsed.pathname.replace(/\/+$/, '')}`;
   } catch {
     return trimmed.replace(/\/[^/]*$/, '');
   }

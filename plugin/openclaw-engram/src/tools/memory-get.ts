@@ -61,6 +61,12 @@ export function createMemoryGetTool(
 async function readLocalFile(filePath: string, api: OpenClawPluginApi): Promise<string> {
   try {
     const resolved = api.resolvePath(filePath);
+
+    // Security: only allow markdown files
+    if (!/\.(md|markdown)$/i.test(resolved)) {
+      return `Refused to read "${filePath}": only .md and .markdown files are allowed.`;
+    }
+
     const content = await readFile(resolved, 'utf-8');
     if (!content.trim()) {
       return `File is empty: ${filePath}`;

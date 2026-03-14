@@ -240,9 +240,9 @@ function renderXml(groups: GroupedObservations): string {
 
   out += '\n---\n';
   out +=
-    'REMINDER: Before modifying any file mentioned above, call `find_by_file(files="path")` to check for additional context. ';
+    'REMINDER: Before modifying any file mentioned above, call `engram_search(query="path")` to check for additional context. ';
   out +=
-    'Before architectural decisions, call `decisions(query="...")`. These engram MCP tools are available and MUST be used.\n';
+    'Before architectural decisions, call `engram_decisions(query="...")`. These engram tools are available and MUST be used.\n';
   out += '</relevant-memory>\n';
   return out;
 }

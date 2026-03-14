@@ -24,6 +24,7 @@ import { parseConfig, getJsonSchema } from './config.js';
 import { EngramRestClient } from './client.js';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
+import { resolveIdentity } from './identity.js';
 
 import { handleSessionStart } from './hooks/session-start.js';
 import { handleBeforePromptBuild } from './hooks/before-prompt-build.js';
@@ -162,8 +163,9 @@ const plugin: OpenClawPluginDefinition = {
         .description('Search engram memory')
         .argument('<query>', 'Search query')
         .action(async (query: unknown) => {
+          const identity = resolveIdentity('', process.cwd());
           const response = await client.searchContext({
-            project: config.project ?? 'cli',
+            project: config.project ?? identity.projectId,
             query: String(query),
           });
           const obs = response?.observations ?? [];
@@ -184,11 +186,12 @@ const plugin: OpenClawPluginDefinition = {
         .action(async (text: unknown) => {
           const textStr = String(text);
           const title = textStr.length > 80 ? textStr.slice(0, 77) + '...' : textStr;
+          const storeIdentity = resolveIdentity('', process.cwd());
           const response = await client.bulkImport([{
             title,
             content: textStr.slice(0, 900),
             type: 'change',
-            project: config.project ?? 'cli',
+            project: config.project ?? storeIdentity.projectId,
             scope: 'project',
           }]);
           if (response && response.imported > 0) {

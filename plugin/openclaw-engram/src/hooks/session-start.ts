@@ -59,11 +59,14 @@ export async function handleSessionStart(
   }
 
   // Initialize session tracking (fire-and-forget)
-  void client.initSession({
-    claudeSessionId: agentId,
-    project,
-    prompt: event.initialPrompt,
-  });
+  const sessionId = event.sessionId ?? agentId;
+  if (sessionId) {
+    void client.initSession({
+      claudeSessionId: sessionId,
+      project,
+      prompt: event.initialPrompt,
+    });
+  }
 
   (logger ?? console).warn(
     `[engram] session-start: injected ${injectedIds.length} observations for project ${project}`,

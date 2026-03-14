@@ -7,7 +7,7 @@
 
 import { z } from 'zod';
 import { Type } from '@sinclair/typebox';
-import { join, relative, resolve, normalize } from 'node:path';
+import { join, relative, resolve, normalize, isAbsolute } from 'node:path';
 import { createHash } from 'node:crypto';
 import type { EngramRestClient, BulkImportRequest } from '../client.js';
 import type { PluginConfig } from '../config.js';
@@ -93,14 +93,15 @@ async function runMigration(
 
   // Load existing marker
   const markerPath = join(workspaceDir, MARKER_FILE);
-  const marker = params.force ? null : await loadMarker(markerPath);
+  const marker = await loadMarker(markerPath);
 
   // Discover files
   let filePaths: string[];
   if (params.path) {
     const resolved = normalize(resolve(api.resolvePath(params.path)));
     const normalizedWs = normalize(resolve(workspaceDir));
-    if (!resolved.startsWith(normalizedWs)) {
+    const rel = relative(normalizedWs, resolved);
+    if (rel.startsWith('..') || isAbsolute(rel)) {
       return `Path "${params.path}" resolves outside the workspace — access denied.`;
     }
     filePaths = [resolved];
@@ -125,8 +126,8 @@ async function runMigration(
     const hash = createHash('sha256').update(fileContent).digest('hex');
     newFileHashes[relPath] = hash;
 
-    // Skip if already migrated with same hash
-    if (marker?.files[relPath] === hash) {
+    // Skip if already migrated with same hash (unless force)
+    if (!params.force && marker?.files[relPath] === hash) {
       skippedFiles.push(relPath);
       continue;
     }

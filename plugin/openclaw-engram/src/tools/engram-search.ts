@@ -57,10 +57,13 @@ function createSearchTool(
         return 'engram search failed — server returned no response';
       }
 
-      const observations = Array.isArray(response.observations) ? response.observations : [];
-      if (observations.length === 0) {
+      const allObservations = Array.isArray(response.observations) ? response.observations : [];
+      if (allObservations.length === 0) {
         return 'No relevant observations found for this query.';
       }
+
+      const limit = parsed.data.limit ?? allObservations.length;
+      const observations = allObservations.slice(0, limit);
 
       const { context } = formatContext(observations, { tokenBudget: config.tokenBudget });
       return context || `Found ${observations.length} observation(s) but could not format context.`;

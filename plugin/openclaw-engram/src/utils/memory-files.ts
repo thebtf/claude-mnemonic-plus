@@ -118,8 +118,9 @@ export async function saveMarker(markerPath: string, marker: MigrationMarker): P
   try {
     await writeFile(tmp, JSON.stringify(marker, null, 2), 'utf-8');
     await rename(tmp, markerPath);
-  } catch {
-    // Non-critical — migration still succeeded
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.warn(`[engram] failed to save migration marker: ${msg}`);
   }
 }
 

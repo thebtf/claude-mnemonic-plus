@@ -47,9 +47,12 @@ export function handleSessionEnd(
     ? content.slice(0, CONTENT_MAX_CHARS)
     : content;
 
+  const sessionId = event.sessionId ?? agentId;
+  if (!sessionId) return;
+
   // Fire-and-forget — do not await
   void client.backfillSession({
-    session_id: agentId,
+    session_id: sessionId,
     project,
     content: truncated,
   });

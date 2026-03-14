@@ -67,13 +67,18 @@ export async function handleBeforePromptBuild(
 
   // Mark injected observations (fire-and-forget)
   if (injectedIds.length > 0) {
-    const sessionResp = await client.initSession({
-      claudeSessionId: agentId,
-      project,
-      prompt: event.prompt,
-    });
-    if (sessionResp && !sessionResp.skipped && sessionResp.sessionDbId) {
-      void client.markInjected(sessionResp.sessionDbId, injectedIds);
+    try {
+      const sessionResp = await client.initSession({
+        claudeSessionId: event.sessionId ?? agentId,
+        project,
+        prompt: event.prompt,
+      });
+      if (sessionResp && !sessionResp.skipped && sessionResp.sessionDbId) {
+        void client.markInjected(sessionResp.sessionDbId, injectedIds)
+          .catch(() => { /* swallow — fire-and-forget */ });
+      }
+    } catch {
+      // Non-critical — context was already injected
     }
   }
 
