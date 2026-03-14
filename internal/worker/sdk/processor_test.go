@@ -1449,24 +1449,6 @@ func TestHashRequest_OutputTruncation(t *testing.T) {
 // TESTS FOR Processor methods
 // =============================================================================
 
-func TestProcessor_CircuitBreakerState(t *testing.T) {
-	p := &Processor{
-		circuitBreaker: NewCircuitBreaker(2, 60),
-	}
-
-	// Initially closed
-	assert.Equal(t, "closed", p.CircuitBreakerState())
-
-	// After enough failures, open
-	p.circuitBreaker.RecordFailure()
-	p.circuitBreaker.RecordFailure()
-	assert.Equal(t, "open", p.CircuitBreakerState())
-
-	// After success, closed
-	p.circuitBreaker.RecordSuccess()
-	assert.Equal(t, "closed", p.CircuitBreakerState())
-}
-
 func TestProcessor_CircuitBreakerMetrics(t *testing.T) {
 	p := &Processor{
 		circuitBreaker: NewCircuitBreaker(5, 120),

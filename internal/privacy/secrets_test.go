@@ -145,54 +145,6 @@ func TestRedactSecrets(t *testing.T) {
 	}
 }
 
-func TestSanitizeObservation(t *testing.T) {
-	tests := []struct {
-		name      string
-		narrative string
-		facts     []string
-		expected  bool
-	}{
-		{
-			name:      "clean observation",
-			narrative: "Fixed a bug in the login flow",
-			facts:     []string{"Users can now log in", "Session management improved"},
-			expected:  false,
-		},
-		{
-			name:      "secret in narrative",
-			narrative: "Set API key api_key=abc123def456ghi789jkl012mno345",
-			facts:     []string{"Configuration updated"},
-			expected:  true,
-		},
-		{
-			name:      "secret in facts",
-			narrative: "Updated configuration",
-			facts:     []string{"Added api_key=abc123def456ghi789jkl012mno345"},
-			expected:  true,
-		},
-		{
-			name:      "empty facts",
-			narrative: "Clean narrative",
-			facts:     []string{},
-			expected:  false,
-		},
-		{
-			name:      "nil facts",
-			narrative: "Clean narrative",
-			facts:     nil,
-			expected:  false,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := SanitizeObservation(tt.narrative, tt.facts)
-			if result != tt.expected {
-				t.Errorf("SanitizeObservation() = %v, want %v", result, tt.expected)
-			}
-		})
-	}
-}
 
 func TestExtractSecrets(t *testing.T) {
 	tests := []struct {

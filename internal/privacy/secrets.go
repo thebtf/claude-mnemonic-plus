@@ -5,7 +5,6 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"regexp"
-	"slices"
 	"strings"
 )
 
@@ -144,14 +143,3 @@ func RedactSecrets(text string) string {
 	return result
 }
 
-// SanitizeObservation checks multiple fields of an observation for secrets.
-// Returns true if any secrets were found.
-// This function is used as a validation gate before storing observations.
-func SanitizeObservation(narrative string, facts []string) bool {
-	if ContainsSecrets(narrative) {
-		return true
-	}
-	return slices.ContainsFunc(facts, func(fact string) bool {
-		return ContainsSecrets(fact)
-	})
-}

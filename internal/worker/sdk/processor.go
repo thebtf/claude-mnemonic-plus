@@ -380,11 +380,6 @@ func (p *Processor) vectorSyncWorker() {
 	}
 }
 
-// CircuitBreakerState returns the current state of the circuit breaker.
-func (p *Processor) CircuitBreakerState() string {
-	return p.circuitBreaker.State()
-}
-
 // CircuitBreakerMetrics returns detailed metrics about the circuit breaker.
 func (p *Processor) CircuitBreakerMetrics() CircuitBreakerMetrics {
 	return p.circuitBreaker.Metrics()
