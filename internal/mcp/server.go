@@ -137,11 +137,19 @@ type ToolCallParams struct {
 	Arguments json.RawMessage `json:"arguments"`
 }
 
+// Tool tier constants for tool visibility grouping.
+const (
+	tierCore    = 1 // T1: Always visible — most-used tools
+	tierUseful  = 2 // T2: Visible by default — regularly useful tools
+	tierAdmin   = 3 // T3+: Hidden by default — admin, analytics, bulk ops
+)
+
 // Tool represents an MCP tool definition.
 type Tool struct {
 	InputSchema map[string]any `json:"inputSchema"`
 	Name        string         `json:"name"`
 	Description string         `json:"description"`
+	tier        int            // not exported, not serialized — used for tiering
 }
 
 // Run starts the MCP server loop.
@@ -452,6 +460,7 @@ func (s *Server) handleToolsList(req *Request) *Response {
 		{
 			Name:        "search",
 			Description: "Unified search across all memory types (observations, sessions, and user prompts) using vector-first semantic search (pgvector).",
+			tier:        tierCore,
 			InputSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -474,6 +483,7 @@ func (s *Server) handleToolsList(req *Request) *Response {
 		{
 			Name:        "timeline",
 			Description: "Fetch timeline of observations around a specific point in time.",
+			tier:        tierUseful,
 			InputSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -492,6 +502,7 @@ func (s *Server) handleToolsList(req *Request) *Response {
 		{
 			Name:        "decisions",
 			Description: "Semantic shortcut for finding architectural, design, and implementation decisions.",
+			tier:        tierCore,
 			InputSchema: map[string]any{
 				"type":     "object",
 				"required": []string{"query"},
@@ -507,6 +518,7 @@ func (s *Server) handleToolsList(req *Request) *Response {
 		{
 			Name:        "changes",
 			Description: "Semantic shortcut for finding code changes, refactorings, and modifications.",
+			tier:        tierUseful,
 			InputSchema: map[string]any{
 				"type":     "object",
 				"required": []string{"query"},
@@ -522,6 +534,7 @@ func (s *Server) handleToolsList(req *Request) *Response {
 		{
 			Name:        "how_it_works",
 			Description: "Semantic shortcut for understanding system architecture, design patterns, and implementation details.",
+			tier:        tierCore,
 			InputSchema: map[string]any{
 				"type":     "object",
 				"required": []string{"query"},
@@ -537,6 +550,7 @@ func (s *Server) handleToolsList(req *Request) *Response {
 		{
 			Name:        "find_by_concept",
 			Description: "Find observations tagged with specific concepts.",
+			tier:        tierUseful,
 			InputSchema: map[string]any{
 				"type":     "object",
 				"required": []string{"concepts"},
@@ -557,6 +571,7 @@ func (s *Server) handleToolsList(req *Request) *Response {
 		{
 			Name:        "find_by_file",
 			Description: "Find observations related to specific file paths.",
+			tier:        tierCore,
 			InputSchema: map[string]any{
 				"type":     "object",
 				"required": []string{"files"},
@@ -577,6 +592,7 @@ func (s *Server) handleToolsList(req *Request) *Response {
 		{
 			Name:        "find_by_type",
 			Description: "Find observations of specific types.",
+			tier:        tierUseful,
 			InputSchema: map[string]any{
 				"type":     "object",
 				"required": []string{"type"},
@@ -597,6 +613,7 @@ func (s *Server) handleToolsList(req *Request) *Response {
 		{
 			Name:        "get_recent_context",
 			Description: "Get recent session context for timeline display.",
+			tier:        tierUseful,
 			InputSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -614,6 +631,7 @@ func (s *Server) handleToolsList(req *Request) *Response {
 		{
 			Name:        "get_context_timeline",
 			Description: "Get timeline of observations around a specific observation ID.",
+			tier:        tierAdmin,
 			InputSchema: map[string]any{
 				"type":     "object",
 				"required": []string{"anchor_id"},
@@ -632,6 +650,7 @@ func (s *Server) handleToolsList(req *Request) *Response {
 		{
 			Name:        "get_timeline_by_query",
 			Description: "Combined search + timeline tool. First searches for observations matching the query, then returns timeline around the best match.",
+			tier:        tierAdmin,
 			InputSchema: map[string]any{
 				"type":     "object",
 				"required": []string{"query"},
@@ -652,6 +671,7 @@ func (s *Server) handleToolsList(req *Request) *Response {
 		{
 			Name:        "find_related_observations",
 			Description: "Find observations related to a given observation ID filtered by confidence threshold. Returns related observations sorted by confidence score. Useful for discovering relevant context.",
+			tier:        tierAdmin,
 			InputSchema: map[string]any{
 				"type":     "object",
 				"required": []string{"id"},
@@ -665,6 +685,7 @@ func (s *Server) handleToolsList(req *Request) *Response {
 		{
 			Name:        "find_similar_observations",
 			Description: "Find observations semantically similar to a query or observation. Uses vector similarity search to find related content. Useful for detecting duplicates before creating new observations.",
+			tier:        tierUseful,
 			InputSchema: map[string]any{
 				"type":     "object",
 				"required": []string{"query"},
@@ -679,6 +700,7 @@ func (s *Server) handleToolsList(req *Request) *Response {
 		{
 			Name:        "get_patterns",
 			Description: "Get detected patterns from observations. Patterns represent recurring themes, workflows, or practices discovered across observations.",
+			tier:        tierAdmin,
 			InputSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -692,6 +714,7 @@ func (s *Server) handleToolsList(req *Request) *Response {
 		{
 			Name:        "get_memory_stats",
 			Description: "Get statistics about the memory system including observation counts, vector stats, pattern counts, and search metrics.",
+			tier:        tierAdmin,
 			InputSchema: map[string]any{
 				"type":       "object",
 				"properties": map[string]any{},
@@ -700,6 +723,7 @@ func (s *Server) handleToolsList(req *Request) *Response {
 		{
 			Name:        "bulk_delete_observations",
 			Description: "Delete multiple observations by their IDs. Returns count of successfully deleted observations.",
+			tier:        tierAdmin,
 			InputSchema: map[string]any{
 				"type":     "object",
 				"required": []string{"ids"},
@@ -712,6 +736,7 @@ func (s *Server) handleToolsList(req *Request) *Response {
 		{
 			Name:        "bulk_mark_superseded",
 			Description: "Mark multiple observations as superseded (stale). Useful for cleanup without permanent deletion.",
+			tier:        tierAdmin,
 			InputSchema: map[string]any{
 				"type":     "object",
 				"required": []string{"ids"},
@@ -723,6 +748,7 @@ func (s *Server) handleToolsList(req *Request) *Response {
 		{
 			Name:        "bulk_boost_observations",
 			Description: "Boost or reduce the importance score of multiple observations. Positive values increase importance, negative decrease.",
+			tier:        tierAdmin,
 			InputSchema: map[string]any{
 				"type":     "object",
 				"required": []string{"ids", "boost"},
@@ -735,6 +761,7 @@ func (s *Server) handleToolsList(req *Request) *Response {
 		{
 			Name:        "trigger_maintenance",
 			Description: "Trigger an immediate maintenance run (cleanup old observations, optimize database).",
+			tier:        tierAdmin,
 			InputSchema: map[string]any{
 				"type":       "object",
 				"properties": map[string]any{},
@@ -743,6 +770,7 @@ func (s *Server) handleToolsList(req *Request) *Response {
 		{
 			Name:        "get_maintenance_stats",
 			Description: "Get statistics about the maintenance system including last run time, cleanup counts, and configuration.",
+			tier:        tierAdmin,
 			InputSchema: map[string]any{
 				"type":       "object",
 				"properties": map[string]any{},
@@ -751,6 +779,7 @@ func (s *Server) handleToolsList(req *Request) *Response {
 		{
 			Name:        "merge_observations",
 			Description: "Merge two observations into one. The target observation is kept and boosted, the source is marked as superseded. Useful for deduplication without data loss.",
+			tier:        tierAdmin,
 			InputSchema: map[string]any{
 				"type":     "object",
 				"required": []string{"source_id", "target_id"},
@@ -764,6 +793,7 @@ func (s *Server) handleToolsList(req *Request) *Response {
 		{
 			Name:        "get_observation",
 			Description: "Get a single observation by its ID. Returns full observation details including all metadata.",
+			tier:        tierAdmin,
 			InputSchema: map[string]any{
 				"type":     "object",
 				"required": []string{"id"},
@@ -775,6 +805,7 @@ func (s *Server) handleToolsList(req *Request) *Response {
 		{
 			Name:        "edit_observation",
 			Description: "Edit an existing observation. Only provided fields will be updated, others remain unchanged. Useful for correcting errors, adding details, or updating scope.",
+			tier:        tierAdmin,
 			InputSchema: map[string]any{
 				"type":     "object",
 				"required": []string{"id"},
@@ -794,6 +825,7 @@ func (s *Server) handleToolsList(req *Request) *Response {
 		{
 			Name:        "get_observation_quality",
 			Description: "Get quality metrics for an observation. Returns completeness score, usage stats, and improvement suggestions.",
+			tier:        tierAdmin,
 			InputSchema: map[string]any{
 				"type":     "object",
 				"required": []string{"id"},
@@ -805,6 +837,7 @@ func (s *Server) handleToolsList(req *Request) *Response {
 		{
 			Name:        "suggest_consolidations",
 			Description: "Find observations that could be merged or consolidated. Returns groups of similar observations with merge recommendations.",
+			tier:        tierAdmin,
 			InputSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -817,6 +850,7 @@ func (s *Server) handleToolsList(req *Request) *Response {
 		{
 			Name:        "tag_observation",
 			Description: "Add or remove concept tags from an observation. Tags help with organization and filtering. Use mode 'add' to add new tags, 'remove' to remove specific tags, or 'set' to replace all tags.",
+			tier:        tierAdmin,
 			InputSchema: map[string]any{
 				"type":     "object",
 				"required": []string{"id", "tags"},
@@ -830,6 +864,7 @@ func (s *Server) handleToolsList(req *Request) *Response {
 		{
 			Name:        "get_observations_by_tag",
 			Description: "Find all observations that have a specific concept tag. Useful for browsing by category.",
+			tier:        tierAdmin,
 			InputSchema: map[string]any{
 				"type":     "object",
 				"required": []string{"tag"},
@@ -843,6 +878,7 @@ func (s *Server) handleToolsList(req *Request) *Response {
 		{
 			Name:        "get_temporal_trends",
 			Description: "Analyze observation creation patterns over time. Returns daily counts, peak activity times, and trend insights. Useful for understanding work patterns.",
+			tier:        tierAdmin,
 			InputSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -855,6 +891,7 @@ func (s *Server) handleToolsList(req *Request) *Response {
 		{
 			Name:        "get_data_quality_report",
 			Description: "Get a comprehensive quality assessment of observations. Shows completeness distribution, common issues, and improvement suggestions.",
+			tier:        tierAdmin,
 			InputSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -866,6 +903,7 @@ func (s *Server) handleToolsList(req *Request) *Response {
 		{
 			Name:        "batch_tag_by_pattern",
 			Description: "Apply tags to observations matching a pattern. Useful for retroactive organization and categorization.",
+			tier:        tierAdmin,
 			InputSchema: map[string]any{
 				"type":     "object",
 				"required": []string{"pattern", "tags"},
@@ -881,6 +919,7 @@ func (s *Server) handleToolsList(req *Request) *Response {
 		{
 			Name:        "explain_search_ranking",
 			Description: "Debug search results by showing score breakdown for top matches. Explains why each observation ranked where it did.",
+			tier:        tierAdmin,
 			InputSchema: map[string]any{
 				"type":     "object",
 				"required": []string{"query"},
@@ -894,6 +933,7 @@ func (s *Server) handleToolsList(req *Request) *Response {
 		{
 			Name:        "export_observations",
 			Description: "Export observations in various formats for backup or analysis.",
+			tier:        tierAdmin,
 			InputSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -909,6 +949,7 @@ func (s *Server) handleToolsList(req *Request) *Response {
 		{
 			Name:        "check_system_health",
 			Description: "Comprehensive system health check. Returns status of all subsystems (database, vectors, cache, search) with actionable diagnostics.",
+			tier:        tierCore,
 			InputSchema: map[string]any{
 				"type":       "object",
 				"properties": map[string]any{},
@@ -917,6 +958,7 @@ func (s *Server) handleToolsList(req *Request) *Response {
 		{
 			Name:        "analyze_search_patterns",
 			Description: "Analyze search query patterns to identify common searches, missed queries, and optimization opportunities.",
+			tier:        tierAdmin,
 			InputSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -928,6 +970,7 @@ func (s *Server) handleToolsList(req *Request) *Response {
 		{
 			Name:        "get_observation_relationships",
 			Description: "Get relationship graph for an observation. Shows how observations relate to each other (depends_on, extends, conflicts_with, supersedes). Useful for understanding dependencies and context.",
+			tier:        tierAdmin,
 			InputSchema: map[string]any{
 				"type":     "object",
 				"required": []string{"id"},
@@ -940,6 +983,7 @@ func (s *Server) handleToolsList(req *Request) *Response {
 		{
 			Name:        "get_graph_neighbors",
 			Description: "Get graph neighbors of an observation via FalkorDB. Returns multi-hop neighbors with relationship types and hop distance. Requires FalkorDB graph backend to be configured.",
+			tier:        tierAdmin,
 			InputSchema: map[string]any{
 				"type":     "object",
 				"required": []string{"observation_id"},
@@ -953,6 +997,7 @@ func (s *Server) handleToolsList(req *Request) *Response {
 		{
 			Name:        "get_graph_stats",
 			Description: "Get graph backend statistics. Returns provider, connection status, node count, and edge count.",
+			tier:        tierAdmin,
 			InputSchema: map[string]any{
 				"type":       "object",
 				"properties": map[string]any{},
@@ -961,6 +1006,7 @@ func (s *Server) handleToolsList(req *Request) *Response {
 		{
 			Name:        "get_observation_scoring_breakdown",
 			Description: "Get detailed scoring breakdown for an observation. Shows how importance scores are calculated including type weight, recency decay, feedback contribution, concept boost, and retrieval frequency. Useful for understanding why observations are ranked the way they are.",
+			tier:        tierAdmin,
 			InputSchema: map[string]any{
 				"type":     "object",
 				"required": []string{"id"},
@@ -972,6 +1018,7 @@ func (s *Server) handleToolsList(req *Request) *Response {
 		{
 			Name:        "analyze_observation_importance",
 			Description: "Analyze observation importance patterns in a project. Returns statistics on feedback distribution, top-scoring observations, most-retrieved observations, and concept weights. Useful for understanding what makes observations valuable.",
+			tier:        tierAdmin,
 			InputSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -986,6 +1033,7 @@ func (s *Server) handleToolsList(req *Request) *Response {
 		{
 			Name:        "search_sessions",
 			Description: "Full-text search across indexed Claude Code sessions.",
+			tier:        tierAdmin,
 			InputSchema: map[string]any{
 				"type":     "object",
 				"required": []string{"query"},
@@ -998,6 +1046,7 @@ func (s *Server) handleToolsList(req *Request) *Response {
 		{
 			Name:        "list_sessions",
 			Description: "List indexed Claude Code sessions with optional workstation/project filters.",
+			tier:        tierAdmin,
 			InputSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -1011,6 +1060,7 @@ func (s *Server) handleToolsList(req *Request) *Response {
 		{
 			Name:        "run_consolidation",
 			Description: "Manually trigger the memory consolidation lifecycle. Runs decay (relevance recalculation), creative association discovery, and optionally forgetting. Use when you want to consolidate memories immediately rather than waiting for scheduled intervals.",
+			tier:        tierAdmin,
 			InputSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -1027,6 +1077,7 @@ func (s *Server) handleToolsList(req *Request) *Response {
 		{
 			Name:        "import_instincts",
 			Description: "Import ECC instinct files as guidance observations. Supports sending file content directly (preferred for remote servers) or reading from a local path (legacy). Idempotent — duplicates are skipped via vector similarity check.",
+			tier:        tierAdmin,
 			InputSchema: map[string]any{
 				"type": "object",
 				"anyOf": []map[string]any{
@@ -1057,6 +1108,7 @@ func (s *Server) handleToolsList(req *Request) *Response {
 		tools = append(tools, Tool{
 			Name:        "backfill_status",
 			Description: "Get status of backfill runs — total runs, per-run stored/skipped/error counts, and total observations imported from historical sessions.",
+			tier:        tierAdmin,
 			InputSchema: map[string]any{
 				"type":       "object",
 				"properties": map[string]any{},
@@ -1070,6 +1122,7 @@ func (s *Server) handleToolsList(req *Request) *Response {
 			Tool{
 				Name:        "store_memory",
 				Description: "Explicitly store a memory/observation. Use when you want to remember something specific across sessions.",
+				tier:        tierCore,
 				InputSchema: map[string]any{
 					"type":     "object",
 					"required": []string{"content"},
@@ -1087,6 +1140,7 @@ func (s *Server) handleToolsList(req *Request) *Response {
 			Tool{
 				Name:        "recall_memory",
 				Description: "Recall memories/observations by semantic search. Use to retrieve previously stored knowledge.",
+				tier:        tierCore,
 				InputSchema: map[string]any{
 					"type":     "object",
 					"required": []string{"query"},
@@ -1109,6 +1163,7 @@ func (s *Server) handleToolsList(req *Request) *Response {
 			Tool{
 				Name:        "store_credential",
 				Description: "Securely store an encrypted credential (API key, password, token). Value is encrypted with AES-256-GCM.",
+				tier:        tierUseful,
 				InputSchema: map[string]any{
 					"type":     "object",
 					"required": []string{"name", "value"},
@@ -1123,6 +1178,7 @@ func (s *Server) handleToolsList(req *Request) *Response {
 			Tool{
 				Name:        "get_credential",
 				Description: "Retrieve and decrypt a stored credential by name. Returns the decrypted value.",
+				tier:        tierUseful,
 				InputSchema: map[string]any{
 					"type":     "object",
 					"required": []string{"name"},
@@ -1134,6 +1190,7 @@ func (s *Server) handleToolsList(req *Request) *Response {
 			Tool{
 				Name:        "list_credentials",
 				Description: "List all stored credentials (names and metadata only, no values).",
+				tier:        tierAdmin,
 				InputSchema: map[string]any{
 					"type":       "object",
 					"properties": map[string]any{},
@@ -1142,6 +1199,7 @@ func (s *Server) handleToolsList(req *Request) *Response {
 			Tool{
 				Name:        "delete_credential",
 				Description: "Delete a stored credential by name.",
+				tier:        tierAdmin,
 				InputSchema: map[string]any{
 					"type":     "object",
 					"required": []string{"name"},
@@ -1153,6 +1211,7 @@ func (s *Server) handleToolsList(req *Request) *Response {
 			Tool{
 				Name:        "vault_status",
 				Description: "Check vault encryption status: key configured, fingerprint, credential count.",
+				tier:        tierAdmin,
 				InputSchema: map[string]any{
 					"type":       "object",
 					"properties": map[string]any{},
@@ -1167,6 +1226,7 @@ func (s *Server) handleToolsList(req *Request) *Response {
 			Tool{
 				Name:        "list_collections",
 				Description: "List all configured document collections with active document counts.",
+				tier:        tierAdmin,
 				InputSchema: map[string]any{
 					"type":       "object",
 					"properties": map[string]any{},
@@ -1175,6 +1235,7 @@ func (s *Server) handleToolsList(req *Request) *Response {
 			Tool{
 				Name:        "list_documents",
 				Description: "List documents in a collection with metadata (path, title, hash, timestamps).",
+				tier:        tierAdmin,
 				InputSchema: map[string]any{
 					"type":     "object",
 					"required": []string{"collection"},
@@ -1186,6 +1247,7 @@ func (s *Server) handleToolsList(req *Request) *Response {
 			Tool{
 				Name:        "get_document",
 				Description: "Retrieve full document content by collection and path.",
+				tier:        tierAdmin,
 				InputSchema: map[string]any{
 					"type":     "object",
 					"required": []string{"collection", "path"},
@@ -1198,6 +1260,7 @@ func (s *Server) handleToolsList(req *Request) *Response {
 			Tool{
 				Name:        "remove_document",
 				Description: "Deactivate (soft delete) a document from a collection. The document and its chunks remain in storage but are excluded from search.",
+				tier:        tierAdmin,
 				InputSchema: map[string]any{
 					"type":     "object",
 					"required": []string{"collection", "path"},
@@ -1216,6 +1279,7 @@ func (s *Server) handleToolsList(req *Request) *Response {
 			Tool{
 				Name:        "ingest_document",
 				Description: "Ingest a document into a collection. Chunks the content, generates embeddings, and stores for semantic search. Skips re-embedding if content hash unchanged.",
+				tier:        tierAdmin,
 				InputSchema: map[string]any{
 					"type":     "object",
 					"required": []string{"collection", "path", "content"},
@@ -1230,6 +1294,7 @@ func (s *Server) handleToolsList(req *Request) *Response {
 			Tool{
 				Name:        "search_collection",
 				Description: "Semantic search across document chunks in a collection. Returns ranked results with chunk text.",
+				tier:        tierAdmin,
 				InputSchema: map[string]any{
 					"type":     "object",
 					"required": []string{"query"},
@@ -1241,6 +1306,34 @@ func (s *Server) handleToolsList(req *Request) *Response {
 				},
 			},
 		)
+	}
+
+	// Tool tiering: parse optional cursor from request params.
+	// No cursor / empty → return T1+T2 tools only + nextCursor: "all"
+	// cursor: "all" → return ALL tools
+	var listParams struct {
+		Cursor string `json:"cursor"`
+	}
+	if req.Params != nil {
+		_ = json.Unmarshal(req.Params, &listParams)
+	}
+
+	if listParams.Cursor != "all" {
+		// Filter to primary tools (T1 + T2)
+		primary := make([]Tool, 0, len(tools))
+		for _, t := range tools {
+			if t.tier <= tierUseful {
+				primary = append(primary, t)
+			}
+		}
+		return &Response{
+			JSONRPC: "2.0",
+			ID:      req.ID,
+			Result: map[string]any{
+				"tools":      primary,
+				"nextCursor": "all",
+			},
+		}
 	}
 
 	return &Response{

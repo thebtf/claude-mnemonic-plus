@@ -405,21 +405,63 @@ func TestHandleToolsList(t *testing.T) {
 	require.True(t, ok)
 	assert.NotEmpty(t, tools)
 
-	// Verify expected tools are present
+	// Default response (no cursor) should return only T1+T2 tools
 	toolNames := make(map[string]bool)
 	for _, tool := range tools {
 		toolNames[tool.Name] = true
 	}
 
-	expectedTools := []string{
-		"search", "timeline", "decisions", "changes",
-		"how_it_works", "find_by_concept", "find_by_file",
-		"find_by_type", "get_recent_context", "get_context_timeline",
-		"get_timeline_by_query",
+	// T1 (core) tools must be present
+	t1Tools := []string{
+		"search", "decisions", "find_by_file",
+		"how_it_works", "check_system_health",
+	}
+	for _, name := range t1Tools {
+		assert.True(t, toolNames[name], "expected T1 tool %s to be present", name)
 	}
 
-	for _, name := range expectedTools {
-		assert.True(t, toolNames[name], "expected tool %s to be present", name)
+	// T2 (useful) tools must be present
+	t2Tools := []string{
+		"changes", "find_by_type", "find_by_concept",
+		"find_similar_observations", "get_recent_context", "timeline",
+	}
+	for _, name := range t2Tools {
+		assert.True(t, toolNames[name], "expected T2 tool %s to be present", name)
+	}
+
+	// T3 (admin) tools must NOT be present in default listing
+	t3Tools := []string{
+		"get_context_timeline", "get_timeline_by_query",
+		"bulk_delete_observations", "trigger_maintenance",
+	}
+	for _, name := range t3Tools {
+		assert.False(t, toolNames[name], "T3 tool %s should not be in default listing", name)
+	}
+
+	// Verify nextCursor is returned
+	nextCursor, ok := result["nextCursor"].(string)
+	assert.True(t, ok, "nextCursor should be present")
+	assert.Equal(t, "all", nextCursor)
+
+	// Verify cursor: "all" returns ALL tools
+	reqAll := &Request{
+		JSONRPC: "2.0",
+		ID:      2,
+		Method:  "tools/list",
+		Params:  json.RawMessage(`{"cursor":"all"}`),
+	}
+	respAll := server.handleToolsList(reqAll)
+	resultAll, _ := respAll.Result.(map[string]any)
+	allTools, _ := resultAll["tools"].([]Tool)
+	assert.Greater(t, len(allTools), len(tools), "cursor=all should return more tools than default")
+
+	// T3 tools should now be present
+	allToolNames := make(map[string]bool)
+	for _, tool := range allTools {
+		allToolNames[tool.Name] = true
+	}
+	for _, name := range t3Tools {
+		assert.True(t, allToolNames[name], "T3 tool %s should be present with cursor=all", name)
 	}
 }
 
@@ -1636,10 +1678,12 @@ func TestCallTool_ToolNameRecognition(t *testing.T) {
 
 	server := NewServer(nil, "1.0.0", nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 
+	// Use cursor: "all" to get complete tool list
 	req := &Request{
 		JSONRPC: "2.0",
 		ID:      1,
 		Method:  "tools/list",
+		Params:  json.RawMessage(`{"cursor":"all"}`),
 	}
 
 	resp := server.handleToolsList(req)
