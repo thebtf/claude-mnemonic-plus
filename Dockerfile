@@ -34,7 +34,6 @@ RUN bash scripts/download-onnx-libs.sh linux-amd64
 
 # Inject version from git tags
 ARG VERSION=dev
-ENV VERSION=${VERSION}
 
 # Build server binary (worker with integrated MCP SSE)
 RUN CGO_ENABLED=1 go build -tags fts5 -ldflags "-X main.Version=${VERSION} -s -w" -o /out/engram-server ./cmd/worker
