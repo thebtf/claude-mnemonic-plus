@@ -1028,6 +1028,10 @@ func (s *Server) handleToolsList(req *Request) *Response {
 			Description: "Import ECC instinct files as guidance observations. Supports sending file content directly (preferred for remote servers) or reading from a local path (legacy). Idempotent — duplicates are skipped via vector similarity check.",
 			InputSchema: map[string]any{
 				"type": "object",
+				"anyOf": []map[string]any{
+					{"required": []string{"files"}},
+					{"required": []string{"path"}},
+				},
 				"properties": map[string]any{
 					"files": map[string]any{
 						"type":        "array",

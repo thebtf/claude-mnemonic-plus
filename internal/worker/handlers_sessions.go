@@ -521,7 +521,9 @@ func (s *Service) handleIndexSession(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		defer func() { _ = gz.Close() }()
-		reader = gz
+		// Limit the decompressed stream to prevent gzip bomb attacks;
+		// the compressed-stream limit above only applies to the wire bytes.
+		reader = io.LimitReader(gz, maxSessionIndexBody)
 	}
 
 	meta, err := sessions.ParseSessionReader(reader)

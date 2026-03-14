@@ -1006,7 +1006,7 @@ func captureFileMtimesParallel(paths map[string]struct{}, cwd string) map[string
 // Returns empty map when local verification is disabled (Docker/remote mode).
 func GetFileMtimes(paths []string, cwd string) map[string]int64 {
 	if !config.Get().LocalVerificationEnabled {
-		return nil
+		return map[string]int64{}
 	}
 	return captureFileMtimes(paths, nil, cwd)
 }

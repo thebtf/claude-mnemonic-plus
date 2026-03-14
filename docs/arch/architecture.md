@@ -10,13 +10,13 @@ graph TB
     subgraph "Claude Code Workstation"
         CC["Claude Code<br/>(AI Agent)"]
 
-        subgraph "Hooks (Go binaries)"
-            H1["session-start"]
-            H2["post-tool-use"]
-            H3["stop"]
-            H4["user-prompt"]
-            H5["statusline"]
-            H6["subagent-stop"]
+        subgraph "Hooks (JS — plugin/engram/hooks)"
+            H1["session-start.js"]
+            H2["post-tool-use.js"]
+            H3["stop.js"]
+            H4["user-prompt.js"]
+            H5["statusline.js"]
+            H6["subagent-stop.js"]
         end
 
         CC -->|lifecycle events| H1
@@ -122,7 +122,6 @@ graph TB
             SESS_IDX["Session Indexer"]
             PRIV["Privacy<br/>• Secret stripping<br/>• PII redaction"]
             MAINT["Maintenance"]
-            WATCH["DB Watcher"]
             UPD["Auto-Updater"]
         end
     end

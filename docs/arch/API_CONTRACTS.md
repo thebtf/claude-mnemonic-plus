@@ -169,8 +169,26 @@ The `bin/mcp-stdio-proxy` bridges this to the MCP stdio protocol expected by Cla
 ## Hook Interfaces
 
 All hooks are JavaScript files in `plugin/engram/hooks/`, executed via `node` by the Claude Code plugin system.
-Each hook reads JSON from stdin, processes it, and writes a result string to stdout.
+Each hook reads JSON from stdin, processes it, and writes a JSON response object to stdout.
 Hooks communicate with the remote worker via HTTP using the shared `lib.js` module.
+
+### Hook Output Contract (stdout)
+
+All hooks (except the statusline hook) must write a JSON object to stdout via `lib.js`'s `writeResponse()`:
+
+```json
+{
+    "continue": true,
+    "hookSpecificOutput": {
+        "hookEventName": "string",
+        "additionalContext": "string"
+    }
+}
+```
+
+The `hookSpecificOutput` field is only included when the hook returns a non-empty string (e.g., `session-start` returns an XML context block). For fire-and-forget hooks, only `{ "continue": true }` is written.
+
+The **statusline hook** is the exception: it writes plain text to stdout (not JSON).
 
 ### Hook Input (all hooks receive via stdin)
 
@@ -182,8 +200,10 @@ Hooks communicate with the remote worker via HTTP using the shared `lib.js` modu
 ```
 
 The `lib.js` module derives:
-- Worker URL from `ENGRAM_URL` environment variable
-- Project identifier from CWD path hash
+- Worker URL from `ENGRAM_URL` environment variable (origin only; path stripped)
+- Project identifier using `ProjectIDWithName(cwd)`:
+  1. **Primary:** git remote origin URL + relative repo path → SHA-256 hash prefix (cross-workstation stable)
+  2. **Fallback:** CWD path hash (for directories without a git remote)
 
 ### session-start Hook
 
@@ -194,8 +214,8 @@ The `lib.js` module derives:
     "cwd": "string",
     "source": "startup|resume|clear|compact"
 }
-// Return value (stdout): XML context block string OR empty string
-// "<engram-context>\n# Project Memory (N observations)\n...\n</engram-context>\n"
+// Return value (stdout JSON): { "continue": true, "hookSpecificOutput": { "hookEventName": "session-start", "additionalContext": "<engram-context>...</engram-context>" } }
+// On error or empty context: { "continue": true }
 ```
 
 **Behavior:**
@@ -208,19 +228,19 @@ The `lib.js` module derives:
 ### user-prompt Hook
 
 **Input:** BaseInput + prompt text fields
-**Return value:** empty string (fire-and-forget)
+**Return value (stdout JSON):** `{ "continue": true }` (fire-and-forget, no additionalContext)
 **Effect:** Records user prompt in `user_prompts` table via worker POST
 
 ### post-tool-use Hook
 
 **Input:** BaseInput + tool name + tool input/output fields
-**Return value:** empty string
+**Return value (stdout JSON):** `{ "continue": true }`
 **Effect:** Records tool invocation event via worker POST
 
 ### subagent-stop Hook
 
 **Input:** BaseInput + subagent fields
-**Return value:** empty string
+**Return value (stdout JSON):** `{ "continue": true }`
 **Effect:** Records subagent completion event via worker POST
 
 ### stop Hook
@@ -232,7 +252,7 @@ type Input struct {
     TranscriptPath string `json:"transcript_path"` // path to session JSONL transcript
     StopHookActive bool   `json:"stop_hook_active"`
 }
-// Return value: empty string
+// Return value (stdout JSON): { "continue": true }
 ```
 
 **Behavior:**

@@ -240,14 +240,29 @@ async function RunStatuslineHook(handler, offlineRenderer) {
 }
 
 /**
- * WorkstationID returns a deterministic 8-char hex ID from hostname + username.
- * Matches the server-side sessions.WorkstationID() logic.
+ * WorkstationID returns a deterministic 8-char hex ID from hostname + machine_id.
+ * Matches the server-side sessions.WorkstationID() logic:
+ *   - On Linux: reads /etc/machine-id; falls back to hostname if unavailable.
+ *   - On other platforms: uses hostname as both components (machine_id = hostname).
  */
 function WorkstationID() {
   const os = require('os');
+  const fs = require('fs');
   const hostname = os.hostname();
-  const username = os.userInfo().username;
-  const input = hostname + username;
+
+  let machineID = '';
+  if (os.platform() === 'linux') {
+    try {
+      machineID = fs.readFileSync('/etc/machine-id', 'utf8').trim();
+    } catch {
+      // /etc/machine-id not available; fall back to hostname.
+    }
+  }
+  if (!machineID) {
+    machineID = hostname;
+  }
+
+  const input = hostname + machineID;
   const hash = crypto.createHash('sha256').update(input).digest('hex');
   return hash.slice(0, 8);
 }

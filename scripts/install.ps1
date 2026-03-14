@@ -78,9 +78,9 @@ function Install-Release {
         Copy-Item "$TempDir\engram-server.exe" "$InstallDir\" -Force -ErrorAction SilentlyContinue
         Copy-Item "$TempDir\engram-mcp.exe" "$InstallDir\" -Force -ErrorAction SilentlyContinue
         Copy-Item "$TempDir\engram-mcp-stdio-proxy.exe" "$InstallDir\" -Force -ErrorAction SilentlyContinue
-        # Copy JS hooks
-        Copy-Item "$TempDir\hooks\*.js" "$InstallDir\hooks\" -Force -ErrorAction SilentlyContinue
-        Copy-Item "$TempDir\hooks\hooks.json" "$InstallDir\hooks\" -Force -ErrorAction SilentlyContinue
+        # Copy JS hooks (required for plugin — stop on error)
+        Copy-Item "$TempDir\hooks\*.js" "$InstallDir\hooks\" -Force -ErrorAction Stop
+        Copy-Item "$TempDir\hooks\hooks.json" "$InstallDir\hooks\" -Force -ErrorAction Stop
 
         # Copy plugin configuration
         Copy-Item "$TempDir\.claude-plugin\*" "$InstallDir\.claude-plugin\" -Force
@@ -170,7 +170,7 @@ function Register-Plugin {
         $Settings.enabledPlugins | Add-Member -NotePropertyName $PluginKey -NotePropertyValue $true -Force
 
         # Configure statusline
-        $StatuslineCmd = "node $InstallDir\hooks\statusline.js"
+        $StatuslineCmd = "node `"$InstallDir\hooks\statusline.js`""
         $StatuslineEntry = @{
             type = "command"
             command = $StatuslineCmd

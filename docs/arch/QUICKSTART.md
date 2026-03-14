@@ -119,7 +119,7 @@ make install
 This does the following:
 1. Stops any running worker
 2. Copies binaries and JS hooks to `~/.claude/plugins/marketplaces/engram/`
-3. Updates `~/.claude/installed_plugins.json` and `~/.claude/known_marketplaces.json`
+3. Updates `~/.claude/plugins/installed_plugins.json` and `~/.claude/plugins/known_marketplaces.json`
 4. Registers the MCP server in `~/.claude/settings.json`
 5. Writes hook configuration to `~/.claude/plugins/.../hooks/hooks.json`
 6. Starts the worker

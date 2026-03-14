@@ -35,9 +35,7 @@ func (s *Server) handleImportInstincts(ctx context.Context, args json.RawMessage
 		result, err = instincts.ImportFromContent(ctx, params.Files, s.vectorClient, s.observationStore)
 	} else {
 		// Legacy mode: read from local filesystem (deprecated)
-		if params.Path != "" {
-			log.Warn().Str("path", params.Path).Msg("import_instincts: 'path' parameter is deprecated, use 'files' with content instead")
-		}
+		log.Warn().Str("path", params.Path).Msg("import_instincts: using deprecated path-based import; 'path' parameter will be removed. Use 'files' with content instead.")
 
 		dir, resolveErr := instincts.ResolveDir(params.Path)
 		if resolveErr != nil {

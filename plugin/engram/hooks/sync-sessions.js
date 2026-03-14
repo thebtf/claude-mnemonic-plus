@@ -26,7 +26,12 @@ const BATCH_SIZE = 100; // Check this many session IDs per request
 
 function findSessionFiles() {
   const home = os.homedir();
-  const projectsDir = path.join(home, '.claude', 'projects');
+  // Allow override via ENGRAM_SESSIONS_DIR for non-standard Claude Code installations.
+  const configuredDir = process.env.ENGRAM_SESSIONS_DIR;
+  const projectsDir =
+    configuredDir && configuredDir.trim() !== ''
+      ? path.resolve(configuredDir.replace(/^~(?=$|[/\\])/, home))
+      : path.join(home, '.claude', 'projects');
 
   if (!fs.existsSync(projectsDir)) {
     console.error(`Projects directory not found: ${projectsDir}`);
@@ -39,7 +44,8 @@ function findSessionFiles() {
     let entries;
     try {
       entries = fs.readdirSync(dir, { withFileTypes: true });
-    } catch {
+    } catch (err) {
+      console.error(`Error reading directory ${dir}: ${err.message}`);
       return;
     }
     for (const entry of entries) {
@@ -51,7 +57,8 @@ function findSessionFiles() {
         let stat;
         try {
           stat = fs.statSync(fullPath);
-        } catch {
+        } catch (err) {
+          console.error(`Error stating file ${fullPath}: ${err.message}`);
           continue;
         }
         if (stat.size > 0) {

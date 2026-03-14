@@ -169,9 +169,13 @@ download_release() {
     cp "$tmp_dir/engram-mcp" "$INSTALL_DIR/" 2>/dev/null || true
     cp "$tmp_dir/engram-mcp-stdio-proxy" "$INSTALL_DIR/" 2>/dev/null || true
 
-    # Copy JS hooks
-    cp "$tmp_dir/hooks/"*.js "$INSTALL_DIR/hooks/" 2>/dev/null || true
-    cp "$tmp_dir/hooks/hooks.json" "$INSTALL_DIR/hooks/" 2>/dev/null || true
+    # Copy JS hooks (required for plugin — fail loudly if missing)
+    if ! cp "$tmp_dir/hooks/"*.js "$INSTALL_DIR/hooks/" 2>/dev/null; then
+        error "Failed to copy JS hooks from $tmp_dir/hooks/ to $INSTALL_DIR/hooks/"
+    fi
+    if ! cp "$tmp_dir/hooks/hooks.json" "$INSTALL_DIR/hooks/" 2>/dev/null; then
+        error "Failed to copy hooks.json from $tmp_dir/hooks/ to $INSTALL_DIR/hooks/"
+    fi
 
     # Copy plugin configuration
     cp "$tmp_dir/.claude-plugin/"* "$INSTALL_DIR/.claude-plugin/"
@@ -261,7 +265,7 @@ EOF
     success "Plugin registered in installed_plugins.json"
 
     # Enable in settings.json and configure statusline
-    local statusline_cmd="node $INSTALL_DIR/hooks/statusline.js"
+    local statusline_cmd="node \"$INSTALL_DIR/hooks/statusline.js\""
     local statusline_entry
     statusline_entry=$(cat <<EOF
 {
