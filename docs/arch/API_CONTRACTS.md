@@ -168,32 +168,33 @@ The `bin/mcp-stdio-proxy` bridges this to the MCP stdio protocol expected by Cla
 
 ## Hook Interfaces
 
-All hooks use the `pkg/hooks.RunHook` framework. Each hook reads JSON from stdin, processes it, and writes a result string to stdout.
+All hooks are JavaScript files in `plugin/engram/hooks/`, executed via `node` by the Claude Code plugin system.
+Each hook reads JSON from stdin, processes it, and writes a result string to stdout.
+Hooks communicate with the remote worker via HTTP using the shared `lib.js` module.
 
-### pkg/hooks.BaseInput (all hooks inherit)
+### Hook Input (all hooks receive via stdin)
 
-```go
-type BaseInput struct {
-    SessionID string `json:"session_id"`
-    CWD       string `json:"cwd"`
+```json
+{
+    "session_id": "string",
+    "cwd": "string"
 }
 ```
 
-Hooks also use a `HookContext` with:
-- `Port`: worker port (from `ENGRAM_WORKER_PORT` or default 37777)
-- `Project`: project identifier (derived from CWD)
-- `SessionID`, `CWD`: from BaseInput
+The `lib.js` module derives:
+- Worker URL from `ENGRAM_URL` environment variable
+- Project identifier from CWD path hash
 
 ### session-start Hook
 
-```go
-// Input
-type Input struct {
-    hooks.BaseInput
-    Source string `json:"source"` // "startup"|"resume"|"clear"|"compact"
+```json
+// Input (stdin JSON)
+{
+    "session_id": "string",
+    "cwd": "string",
+    "source": "startup|resume|clear|compact"
 }
-
-// Return value: XML context block string OR empty string
+// Return value (stdout): XML context block string OR empty string
 // "<engram-context>\n# Project Memory (N observations)\n...\n</engram-context>\n"
 ```
 
