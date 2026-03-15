@@ -94,15 +94,16 @@ export class EngramRestClient {
 
   /**
    * Fetch session context for injection (static session-level context).
-   * GET /api/context/inject?agent_id={id}&cwd={cwd}
+   * POST /api/context/inject
    */
   async getContextInject(
     agentId: string,
     cwd?: string,
   ): Promise<ContextInjectResponse | null> {
-    const params = new URLSearchParams({ agent_id: agentId });
-    if (cwd) params.set('cwd', cwd);
-    return this.get<ContextInjectResponse>(`/api/context/inject?${params.toString()}`);
+    return this.post<ContextInjectResponse>('/api/context/inject', {
+      agent_id: agentId,
+      ...(cwd ? { cwd } : {}),
+    });
   }
 
   /**

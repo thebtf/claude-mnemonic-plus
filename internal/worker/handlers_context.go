@@ -720,8 +720,37 @@ func splitCamelCase(s string) string {
 //   - recent: last 5 observations by created_at
 //   - relevant: top 10 semantic search results (if vector store is connected)
 func (s *Service) handleContextInject(w http.ResponseWriter, r *http.Request) {
-	project := r.URL.Query().Get("project")
-	agentID := r.URL.Query().Get("agent_id")
+	var project, agentID, cwd, legacyProject, gitRemote, relativePath string
+
+	if r.Method == http.MethodPost {
+		var req struct {
+			Project      string `json:"project"`
+			AgentID      string `json:"agent_id"`
+			Cwd          string `json:"cwd"`
+			LegacyProject string `json:"legacy_project"`
+			GitRemote    string `json:"git_remote"`
+			RelativePath string `json:"relative_path"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "Invalid JSON: "+err.Error(), http.StatusBadRequest)
+			return
+		}
+		project = req.Project
+		agentID = req.AgentID
+		cwd = req.Cwd
+		legacyProject = req.LegacyProject
+		gitRemote = req.GitRemote
+		relativePath = req.RelativePath
+	} else {
+		// GET (deprecated — use POST)
+		project = r.URL.Query().Get("project")
+		agentID = r.URL.Query().Get("agent_id")
+		cwd = r.URL.Query().Get("cwd")
+		legacyProject = r.URL.Query().Get("legacy_project")
+		gitRemote = r.URL.Query().Get("git_remote")
+		relativePath = r.URL.Query().Get("relative_path")
+	}
+
 	// agent_id acts as project scope for OpenClaw agents without filesystem context
 	if project == "" && agentID != "" {
 		project = agentID
@@ -737,14 +766,9 @@ func (s *Service) handleContextInject(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	cwd := r.URL.Query().Get("cwd")
 	if cwd == "" {
 		cwd = "/"
 	}
-
-	legacyProject := r.URL.Query().Get("legacy_project")
-	gitRemote := r.URL.Query().Get("git_remote")
-	relativePath := r.URL.Query().Get("relative_path")
 
 	if legacyProject != "" && legacyProject != project {
 		displayName := project

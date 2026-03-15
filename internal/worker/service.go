@@ -1653,7 +1653,8 @@ func (s *Service) setupRoutes() {
 
 		// Context injection
 		r.Get("/api/context/count", s.handleContextCount)
-		r.Get("/api/context/inject", s.handleContextInject)
+		r.Post("/api/context/inject", s.handleContextInject)
+		r.Get("/api/context/inject", s.handleContextInject) // deprecated — use POST
 		r.Get("/api/context/search", s.handleSearchByPrompt)
 		r.Post("/api/context/search", s.handleSearchByPrompt)
 		r.Get("/api/context/files", s.handleFileContext)
