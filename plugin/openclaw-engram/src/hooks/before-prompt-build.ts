@@ -41,8 +41,8 @@ export async function handleBeforePromptBuild(
     if (!client.isAvailable()) return;
     if (!event.prompt || event.prompt.trim() === '') return;
 
-    const tier: TierResult = turnTracker.classify(event.prompt ?? '');
-    logger?.debug(`[engram] before-prompt-build: tier=${tier.tier} reason=${tier.reason}`);
+    const tier: TierResult = turnTracker.classify(event.prompt ?? '', event.messages);
+    logger?.debug(`[engram] before-prompt-build: tier=${tier.tier} budget=${tier.tokenBudget} reason=${tier.reason}`);
 
     if (tier.tier === 'NONE') return;
 

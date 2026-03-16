@@ -174,6 +174,8 @@ export interface BeforeAgentStartResult {
 export interface BeforePromptBuildEvent extends BaseHookEvent {
   prompt?: string;
   turnIndex?: number;
+  /** Session messages prepared for this run (from OpenClaw). */
+  messages?: unknown[];
 }
 
 export interface AfterToolCallEvent extends BaseHookEvent {
