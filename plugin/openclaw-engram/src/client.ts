@@ -120,6 +120,18 @@ export class EngramRestClient {
   }
 
   /**
+   * Search for relevant decisions.
+   * POST /api/decisions/search
+   */
+  async searchDecisions(body: {
+    query: string;
+    project: string;
+    limit?: number;
+  }): Promise<{ observations: Array<{ title?: string; narrative?: string; concepts?: string[] }> } | null> {
+    return this.post('/api/decisions/search', body);
+  }
+
+  /**
    * Ingest a tool event for self-learning.
    * POST /api/events/ingest (fire-and-forget — returns void)
    */
