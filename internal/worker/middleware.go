@@ -12,6 +12,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/rs/zerolog/log"
 )
 
 // requestIDKey is the context key for request IDs.
@@ -112,6 +114,10 @@ func NewTokenAuth(token string) (*TokenAuth, error) {
 		},
 	}
 
+	if token == "" {
+		log.Warn().Msg("auth: ENGRAM_API_TOKEN not set — all endpoints are unauthenticated")
+	}
+
 	return ta, nil
 }
 
@@ -156,6 +162,7 @@ func (ta *TokenAuth) Middleware(next http.Handler) http.Handler {
 		}
 
 		if subtle.ConstantTimeCompare([]byte(providedToken), []byte(token)) != 1 {
+			log.Warn().Str("path", r.URL.Path).Str("remote_addr", r.RemoteAddr).Msg("auth: rejected request with invalid token")
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}

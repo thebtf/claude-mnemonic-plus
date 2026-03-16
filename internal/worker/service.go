@@ -17,6 +17,7 @@ import (
 	mdchunking "github.com/thebtf/engram/internal/chunking/markdown"
 	"github.com/thebtf/engram/internal/collections"
 	"github.com/thebtf/engram/internal/config"
+	"github.com/thebtf/engram/internal/crypto"
 	graphpkg "github.com/thebtf/engram/internal/graph"
 	"github.com/thebtf/engram/internal/graph/falkordb"
 	"github.com/thebtf/engram/internal/consolidation"
@@ -180,12 +181,24 @@ type Service struct {
 	staleQueueOnce         sync.Once
 	ready                  atomic.Bool
 	vectorSyncDropped      atomic.Int64
+	vault                  *crypto.Vault
+	vaultOnce              sync.Once
+	vaultErr               error
 }
 
 // cachedCount stores a cached count value with expiration.
 type cachedCount struct {
 	timestamp time.Time
 	count     int
+}
+
+// getVault returns the shared Vault singleton, initializing it once on first call.
+// All errors are cached — a misconfigured vault fails permanently (no retry).
+func (s *Service) getVault() (*crypto.Vault, error) {
+	s.vaultOnce.Do(func() {
+		s.vault, s.vaultErr = crypto.NewVault(s.config)
+	})
+	return s.vault, s.vaultErr
 }
 
 // RebuildStatus tracks the progress of vector rebuild operations.
@@ -1549,43 +1562,48 @@ func (s *Service) setupRoutes() {
 	// Version endpoint for hooks to check if worker needs restart
 	s.router.Get("/api/version", s.handleVersion)
 
-	// Rebuild status endpoint for visibility into vector rebuild progress
-	s.router.Get("/api/rebuild-status", s.handleRebuildStatus)
-
-	// Vector management endpoints
-	s.router.Post("/api/vectors/rebuild", s.handleTriggerVectorRebuild)
-	s.router.Get("/api/vectors/health", s.handleVectorHealth)
-	s.router.Get("/api/vector/metrics", s.handleVectorMetrics)
-	s.router.Get("/api/graph/stats", s.handleGraphStats)
-
 	// Readiness check - returns 200 only when fully initialized
 	s.router.Get("/api/ready", s.handleReady)
 
-	// Update endpoints (work before DB is ready)
-	s.router.Get("/api/update/check", s.handleUpdateCheck)
-	s.router.Post("/api/update/apply", s.handleUpdateApply)
-	s.router.Get("/api/update/status", s.handleUpdateStatus)
-	s.router.Post("/api/update/restart", s.handleUpdateRestart)
+	// Admin/management routes — require authentication, work before DB is ready
+	s.router.Group(func(r chi.Router) {
+		r.Use(s.tokenAuth.Middleware)
 
-	// General restart endpoint (works before DB is ready)
-	s.router.Post("/api/restart", s.handleRestart)
+		// Rebuild status endpoint for visibility into vector rebuild progress
+		r.Get("/api/rebuild-status", s.handleRebuildStatus)
 
-	// Selfcheck endpoint (works before DB is ready - checks all components)
-	s.router.Get("/api/selfcheck", s.handleSelfCheck)
+		// Vector management endpoints
+		r.Post("/api/vectors/rebuild", s.handleTriggerVectorRebuild)
+		r.Get("/api/vectors/health", s.handleVectorHealth)
+		r.Get("/api/vector/metrics", s.handleVectorMetrics)
+		r.Get("/api/graph/stats", s.handleGraphStats)
 
-	// Dashboard SSE endpoint (works before DB is ready)
-	s.router.Get("/api/events", s.sseBroadcaster.HandleSSE)
+		// Update endpoints (work before DB is ready)
+		r.Get("/api/update/check", s.handleUpdateCheck)
+		r.Post("/api/update/apply", s.handleUpdateApply)
+		r.Get("/api/update/status", s.handleUpdateStatus)
+		r.Post("/api/update/restart", s.handleUpdateRestart)
 
-	// Log viewer endpoint (works before DB is ready, supports SSE follow mode)
-	s.router.Get("/api/logs", s.handleGetLogs)
+		// General restart endpoint (works before DB is ready)
+		r.Post("/api/restart", s.handleRestart)
 
-	// Instinct import endpoint
-	s.router.Post("/api/instincts/import", s.handleInstinctsImport)
+		// Selfcheck endpoint (works before DB is ready - checks all components)
+		r.Get("/api/selfcheck", s.handleSelfCheck)
 
-	// Backfill endpoints
-	s.router.Post("/api/backfill", s.handleBackfillIngest)
-	s.router.Post("/api/backfill/session", s.handleBackfillSession)
-	s.router.Get("/api/backfill/status", s.handleBackfillStatus)
+		// Dashboard SSE endpoint (works before DB is ready)
+		r.Get("/api/events", s.sseBroadcaster.HandleSSE)
+
+		// Log viewer endpoint (works before DB is ready, supports SSE follow mode)
+		r.Get("/api/logs", s.handleGetLogs)
+
+		// Instinct import endpoint
+		r.Post("/api/instincts/import", s.handleInstinctsImport)
+
+		// Backfill endpoints
+		r.Post("/api/backfill", s.handleBackfillIngest)
+		r.Post("/api/backfill/session", s.handleBackfillSession)
+		r.Get("/api/backfill/status", s.handleBackfillStatus)
+	})
 
 	// MCP routes (require DB ready, no timeout — long-lived SSE connections)
 	s.router.Group(func(r chi.Router) {
@@ -1985,6 +2003,11 @@ func (s *Service) Start() error {
 		Int("pid", getPID()).
 		Bool("restart_mode", isRestart).
 		Msg("Worker HTTP server started (initialization in progress)")
+
+	// Warn if auth is disabled and server is reachable beyond loopback
+	if !s.tokenAuth.IsEnabled() && host != "127.0.0.1" && host != "localhost" {
+		log.Warn().Str("bind", fmt.Sprintf("%s:%d", host, port)).Msg("auth: server listening without authentication on non-loopback address — set ENGRAM_API_TOKEN to secure")
+	}
 
 	return nil
 }

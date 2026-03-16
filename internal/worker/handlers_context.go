@@ -69,6 +69,11 @@ func (s *Service) handleSearchByPrompt(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Server-side: ignore client-provided cwd to prevent filesystem probing (S9-003).
+	// File mtime staleness checks are only meaningful on the client; the server has no
+	// access to client filesystems.
+	cwd = ""
+
 	// Validate project name to prevent path traversal
 	if err := ValidateProjectName(project); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
@@ -772,9 +777,10 @@ func (s *Service) handleContextInject(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if cwd == "" {
-		cwd = "/"
-	}
+	// Server-side: ignore client-provided cwd to prevent filesystem probing (S9-003).
+	// File mtime staleness checks are only meaningful on the client; the server has no
+	// access to client filesystems.
+	cwd = ""
 
 	if legacyProject != "" && legacyProject != project {
 		displayName := project

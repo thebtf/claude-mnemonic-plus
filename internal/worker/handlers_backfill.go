@@ -11,8 +11,6 @@ import (
 	"github.com/rs/zerolog/log"
 	"github.com/thebtf/engram/internal/backfill"
 	"github.com/thebtf/engram/internal/backfill/extract"
-	"github.com/thebtf/engram/internal/config"
-	"github.com/thebtf/engram/internal/crypto"
 	"github.com/thebtf/engram/internal/learning"
 	"github.com/thebtf/engram/internal/privacy"
 	"github.com/thebtf/engram/internal/sessions"
@@ -371,8 +369,7 @@ func vaultStoreDetectedSecrets(ctx context.Context, s *Service, text, project st
 		return
 	}
 
-	cfg := config.Get()
-	vault, err := crypto.NewVault(cfg)
+	vault, err := s.getVault()
 	if err != nil {
 		log.Warn().Err(err).Msg("backfill: vault not available, skipping secret storage")
 		return
