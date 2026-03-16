@@ -64,6 +64,10 @@ export async function handleBeforePromptBuild(
     }
 
     if (!response || !Array.isArray(response.observations) || response.observations.length === 0) {
+      // Track search miss for self-tuning analytics (fire-and-forget)
+      if (event.prompt && event.prompt.length > 10) {
+        void client.trackSearchMiss({ project, query: event.prompt }).catch(() => {});
+      }
       return;
     }
 

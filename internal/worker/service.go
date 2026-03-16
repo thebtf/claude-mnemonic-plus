@@ -1689,6 +1689,7 @@ func (s *Service) setupRoutes() {
 		// Search analytics
 		r.Get("/api/search/recent", s.handleGetRecentQueries)
 		r.Get("/api/search/analytics", s.handleGetSearchAnalytics)
+		r.Post("/api/analytics/search-misses", s.handleSearchMissAnalytics)
 
 		// Duplicate detection
 		r.Get("/api/observations/duplicates", s.handleFindDuplicates)

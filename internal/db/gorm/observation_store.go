@@ -1418,3 +1418,35 @@ func (s *ObservationStore) CountCredentials(ctx context.Context) (int64, error) 
 	}
 	return count, nil
 }
+
+// SearchMissStat holds aggregated analytics for a search query that returned zero results.
+type SearchMissStat struct {
+	Query     string    `json:"query"`
+	MissCount int       `json:"miss_count"`
+	LastSeen  time.Time `json:"last_seen"`
+}
+
+// RecordSearchMiss stores a search query that returned 0 results.
+func (s *ObservationStore) RecordSearchMiss(ctx context.Context, project, query string) error {
+	return s.db.WithContext(ctx).Exec(
+		`INSERT INTO search_misses (project, query, created_at) VALUES (?, ?, NOW())`,
+		project, query,
+	).Error
+}
+
+// GetSearchMissStats returns analytics about search misses grouped by query.
+func (s *ObservationStore) GetSearchMissStats(ctx context.Context, project string, limit int) ([]SearchMissStat, error) {
+	if limit <= 0 {
+		limit = 20
+	}
+	var stats []SearchMissStat
+	err := s.db.WithContext(ctx).Raw(`
+		SELECT query, COUNT(*) as miss_count, MAX(created_at) as last_seen
+		FROM search_misses
+		WHERE project = ?
+		GROUP BY query
+		ORDER BY miss_count DESC
+		LIMIT ?
+	`, project, limit).Scan(&stats).Error
+	return stats, err
+}

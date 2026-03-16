@@ -341,6 +341,11 @@ func (s *Service) handleSearchByPrompt(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Track search misses for self-tuning analytics
+	if len(clusteredObservations) == 0 && query != "" {
+		go s.trackSearchMiss(project, query)
+	}
+
 	// Track this search for analytics
 	s.trackSearchQuery(query, project, "observations", len(clusteredObservations), usedVector)
 
@@ -1114,5 +1119,53 @@ func (s *Service) handleContextCount(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, map[string]any{
 		"project": project,
 		"count":   count,
+	})
+}
+
+// trackSearchMiss records a search query that returned zero results for analytics.
+func (s *Service) trackSearchMiss(project, query string) {
+	if s.observationStore == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := s.observationStore.RecordSearchMiss(ctx, project, query); err != nil {
+		log.Warn().Err(err).Str("project", project).Msg("failed to record search miss")
+	}
+}
+
+// handleSearchMissAnalytics returns aggregated analytics for search queries that returned zero results.
+func (s *Service) handleSearchMissAnalytics(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Project string `json:"project"`
+		Limit   int    `json:"limit"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, "Invalid JSON: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+	if body.Project == "" {
+		http.Error(w, "project required", http.StatusBadRequest)
+		return
+	}
+
+	s.initMu.RLock()
+	obsStore := s.observationStore
+	s.initMu.RUnlock()
+	if obsStore == nil {
+		http.Error(w, "store not available", http.StatusServiceUnavailable)
+		return
+	}
+
+	stats, err := obsStore.GetSearchMissStats(r.Context(), body.Project, body.Limit)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	writeJSON(w, map[string]any{
+		"project":      body.Project,
+		"miss_stats":   stats,
+		"total_misses": len(stats),
 	})
 }

@@ -1143,6 +1143,30 @@ func runMigrations(db *gorm.DB, embeddingDims int) error {
 			return nil
 		},
 	},
+	{
+		ID: "033_create_search_misses",
+		Migrate: func(tx *gorm.DB) error {
+			sqls := []string{
+				`CREATE TABLE IF NOT EXISTS search_misses (
+					id BIGSERIAL PRIMARY KEY,
+					project TEXT NOT NULL,
+					query TEXT NOT NULL,
+					created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+				)`,
+				`CREATE INDEX IF NOT EXISTS idx_search_misses_project ON search_misses (project)`,
+				`CREATE INDEX IF NOT EXISTS idx_search_misses_created ON search_misses (created_at)`,
+			}
+			for _, s := range sqls {
+				if err := tx.Exec(s).Error; err != nil {
+					return fmt.Errorf("migration 033: %w", err)
+				}
+			}
+			return nil
+		},
+		Rollback: func(tx *gorm.DB) error {
+			return tx.Exec(`DROP TABLE IF EXISTS search_misses`).Error
+		},
+	},
 	})
 	if err := m.Migrate(); err != nil {
 		return fmt.Errorf("run gormigrate migrations: %w", err)

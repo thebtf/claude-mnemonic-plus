@@ -132,6 +132,17 @@ export class EngramRestClient {
   }
 
   /**
+   * Track a search miss for self-tuning analytics.
+   * POST /api/analytics/search-misses (fire-and-forget)
+   */
+  async trackSearchMiss(body: {
+    project: string;
+    query: string;
+  }): Promise<void> {
+    void this.post('/api/analytics/search-misses', body, 3000);
+  }
+
+  /**
    * Ingest a tool event for self-learning.
    * POST /api/events/ingest (fire-and-forget — returns void)
    */
