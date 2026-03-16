@@ -1658,6 +1658,7 @@ func (s *Service) setupRoutes() {
 		r.Get("/api/context/search", s.handleSearchByPrompt)
 		r.Post("/api/context/search", s.handleSearchByPrompt)
 		r.Get("/api/context/files", s.handleFileContext)
+		r.Post("/api/decisions/search", s.handleSearchDecisions)
 
 		// Pattern routes
 		r.Get("/api/patterns", s.handleGetPatterns)

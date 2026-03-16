@@ -13,6 +13,7 @@ import (
 
 	"github.com/thebtf/engram/internal/db/gorm"
 	"github.com/thebtf/engram/internal/reranking"
+	"github.com/thebtf/engram/internal/search"
 	"github.com/thebtf/engram/internal/search/expansion"
 	"github.com/thebtf/engram/internal/vector"
 	"github.com/thebtf/engram/internal/worker/sdk"
@@ -1051,6 +1052,49 @@ func (s *Service) handleContextInject(w http.ResponseWriter, r *http.Request) {
 			"budget_trimmed":     budgetTrimmed,
 		})
 	}
+}
+
+// handleSearchDecisions searches observations using decision-optimized semantic search.
+// It is a thin REST wrapper over searchMgr.Decisions().
+func (s *Service) handleSearchDecisions(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Query   string `json:"query"`
+		Project string `json:"project"`
+		Limit   int    `json:"limit"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, "Invalid JSON: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	if body.Query == "" || body.Project == "" {
+		http.Error(w, "query and project required", http.StatusBadRequest)
+		return
+	}
+
+	limit := body.Limit
+	if limit <= 0 {
+		limit = 10
+	}
+
+	params := search.SearchParams{
+		Query:   body.Query,
+		Project: body.Project,
+		Limit:   limit,
+	}
+
+	result, err := s.searchMgr.Decisions(r.Context(), params)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	writeJSON(w, map[string]any{
+		"project":      body.Project,
+		"query":        body.Query,
+		"observations": result.Results,
+		"total_count":  result.TotalCount,
+	})
 }
 
 // handleContextCount returns the count of observations for a project.
