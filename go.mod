@@ -10,10 +10,10 @@ require (
 	github.com/goccy/go-json v0.10.5
 	github.com/gomodule/redigo v1.9.3
 	github.com/google/uuid v1.6.0
+	github.com/jackc/pgx/v5 v5.7.2
 	github.com/lib/pq v1.10.9
 	github.com/pgvector/pgvector-go v0.3.0
 	github.com/rs/zerolog v1.34.0
-	github.com/smacker/go-tree-sitter v0.0.0-20240827094217-dd81d9e9be82
 	github.com/stretchr/testify v1.11.1
 	github.com/swaggo/http-swagger v1.3.4
 	github.com/swaggo/swag v1.16.6
@@ -34,7 +34,6 @@ require (
 	github.com/go-openapi/swag v0.19.15 // indirect
 	github.com/jackc/pgpassfile v1.0.0 // indirect
 	github.com/jackc/pgservicefile v0.0.0-20240606120523-5a60cdf6a761 // indirect
-	github.com/jackc/pgx/v5 v5.7.2 // indirect
 	github.com/jackc/puddle/v2 v2.2.2 // indirect
 	github.com/jinzhu/inflection v1.0.0 // indirect
 	github.com/jinzhu/now v1.1.5 // indirect

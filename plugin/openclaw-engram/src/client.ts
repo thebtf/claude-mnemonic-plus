@@ -70,6 +70,19 @@ export interface BulkDeleteResponse {
   deleted: number;
 }
 
+/** A single observation returned by the decisions search endpoint. */
+export interface DecisionSearchObservation {
+  title?: string;
+  narrative?: string;
+  concepts?: string[];
+  rejected?: string[];
+}
+
+/** Response from POST /api/decisions/search. */
+export interface DecisionSearchResponse {
+  observations: DecisionSearchObservation[];
+}
+
 // ---------------------------------------------------------------------------
 // Client
 // ---------------------------------------------------------------------------
@@ -127,7 +140,7 @@ export class EngramRestClient {
     query: string;
     project: string;
     limit?: number;
-  }): Promise<{ observations: Array<{ title?: string; narrative?: string; concepts?: string[] }> } | null> {
+  }): Promise<DecisionSearchResponse | null> {
     return this.post('/api/decisions/search', body);
   }
 
