@@ -1167,6 +1167,38 @@ func runMigrations(db *gorm.DB, embeddingDims int) error {
 			return tx.Exec(`DROP TABLE IF EXISTS search_misses`).Error
 		},
 	},
+	{
+		ID: "034_credential_uniqueness_and_search_miss_index",
+		Migrate: func(tx *gorm.DB) error {
+			sqls := []string{
+				// Partial unique index on (project, title) for credential observations.
+				// Prevents duplicate credential entries from concurrent backfill operations.
+				`CREATE UNIQUE INDEX IF NOT EXISTS idx_observations_credential_unique
+					ON observations (project, title) WHERE type = 'credential'`,
+				// Composite index for efficient GROUP BY analytics on search_misses.
+				`CREATE INDEX IF NOT EXISTS idx_search_misses_project_query_created
+					ON search_misses (project, query, created_at DESC)`,
+			}
+			for _, s := range sqls {
+				if err := tx.Exec(s).Error; err != nil {
+					return fmt.Errorf("migration 034: %w", err)
+				}
+			}
+			return nil
+		},
+		Rollback: func(tx *gorm.DB) error {
+			sqls := []string{
+				`DROP INDEX IF EXISTS idx_observations_credential_unique`,
+				`DROP INDEX IF EXISTS idx_search_misses_project_query_created`,
+			}
+			for _, s := range sqls {
+				if err := tx.Exec(s).Error; err != nil {
+					log.Warn().Err(err).Str("sql", s).Msg("migration 034 rollback step failed")
+				}
+			}
+			return nil
+		},
+	},
 	})
 	if err := m.Migrate(); err != nil {
 		return fmt.Errorf("run gormigrate migrations: %w", err)
