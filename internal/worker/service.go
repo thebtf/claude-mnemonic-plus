@@ -511,6 +511,17 @@ func NewService(version string, logBuffer *logbuf.RingBuffer) (*Service, error) 
 	svc.setupMiddleware()
 	svc.setupRoutes()
 
+	// Auth startup gate (ADR-0001): validate before starting heavy initialization.
+	// Fail fast here so initializeAsync never runs without a token unless explicitly disabled.
+	{
+		token := config.GetWorkerToken()
+		authDisabled := strings.EqualFold(strings.TrimSpace(os.Getenv("ENGRAM_AUTH_DISABLED")), "true")
+		if token == "" && !authDisabled {
+			cancel()
+			return nil, fmt.Errorf("ENGRAM_API_TOKEN is not set — set it to secure your engram instance, or set ENGRAM_AUTH_DISABLED=true to explicitly run without authentication (NOT recommended for production)")
+		}
+	}
+
 	// Start async initialization
 	go svc.initializeAsync()
 
@@ -1965,8 +1976,10 @@ func (s *Service) Start() error {
 
 	if authDisabled {
 		log.Warn().Msg("auth: authentication is explicitly disabled via ENGRAM_AUTH_DISABLED=true — all endpoints are unauthenticated")
-		// Start periodic warning goroutine
+		// Start periodic warning goroutine tracked by WaitGroup for graceful shutdown.
+		s.wg.Add(1)
 		go func() {
+			defer s.wg.Done()
 			ticker := time.NewTicker(60 * time.Second)
 			defer ticker.Stop()
 			for {

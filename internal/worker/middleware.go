@@ -109,7 +109,7 @@ func NewTokenAuth(token string) (*TokenAuth, error) {
 	authDisabled := strings.EqualFold(strings.TrimSpace(os.Getenv("ENGRAM_AUTH_DISABLED")), "true")
 
 	ta := &TokenAuth{
-		enabled: token != "",
+		enabled: token != "" && !authDisabled,
 		token:   token,
 		ExemptPaths: map[string]bool{
 			"/health":      true,
