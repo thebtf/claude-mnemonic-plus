@@ -873,6 +873,7 @@ func (s *Service) handleVectorMetrics(w http.ResponseWriter, r *http.Request) {
 // @Router /api/graph/sync [post]
 func (s *Service) handleGraphSync(w http.ResponseWriter, r *http.Request) {
 	if s.graphStore == nil {
+		w.WriteHeader(http.StatusServiceUnavailable)
 		writeJSON(w, map[string]any{"error": "graph backend not configured"})
 		return
 	}

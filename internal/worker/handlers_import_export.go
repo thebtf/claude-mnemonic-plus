@@ -422,7 +422,7 @@ func (s *Service) handleGetArchivalStats(w http.ResponseWriter, r *http.Request)
 // @Summary Export observations
 // @Description Exports observations in JSON or CSV format. Supports filtering by project, scope, and type. Returns file as download attachment.
 // @Tags Import/Export
-// @Produce json
+// @Produce json text/csv
 // @Security ApiKeyAuth
 // @Param project query string false "Filter by project"
 // @Param format query string false "Export format: json or csv (default json)"

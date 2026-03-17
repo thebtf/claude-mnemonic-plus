@@ -33,10 +33,12 @@ import (
 // @Param cwd query string false "Working directory (ignored server-side)"
 // @Param agent_id query string false "Agent ID (acts as project scope if project empty)"
 // @Param limit query int false "Number of results (default 50, max 200)"
+// @Param body body object false "POST body: {project, query, agent_id, cwd, limit}"
 // @Success 200 {object} map[string]interface{}
 // @Failure 400 {string} string "project and query required"
 // @Failure 500 {string} string "internal error"
 // @Router /api/context/search [get]
+// @Router /api/context/search [post]
 func (s *Service) handleSearchByPrompt(w http.ResponseWriter, r *http.Request) {
 	project := r.URL.Query().Get("project")
 	query := r.URL.Query().Get("query")
@@ -756,10 +758,12 @@ func splitCamelCase(s string) string {
 // @Param project query string false "Project name (required)"
 // @Param agent_id query string false "Agent ID (acts as project scope if project empty)"
 // @Param format query string false "Response format: 'compact' for minimal payload"
+// @Param body body object false "POST body: {project, agent_id, cwd, legacy_project, git_remote, relative_path}"
 // @Success 200 {object} map[string]interface{}
 // @Failure 400 {string} string "project required"
 // @Failure 500 {string} string "internal error"
 // @Router /api/context/inject [post]
+// @Router /api/context/inject [get]
 func (s *Service) handleContextInject(w http.ResponseWriter, r *http.Request) {
 	var project, agentID, cwd, legacyProject, gitRemote, relativePath string
 

@@ -10,6 +10,11 @@ import (
 	"github.com/thebtf/engram/internal/instincts"
 )
 
+// InstinctsImportRequest is the request body for instincts import.
+type InstinctsImportRequest struct {
+	Path string `json:"path"`
+}
+
 // handleInstinctsImport godoc
 // @Summary Import instincts
 // @Description Imports instinct files from a directory on the server. Validates path against allowed base directory.
@@ -17,7 +22,7 @@ import (
 // @Accept json
 // @Produce json
 // @Security ApiKeyAuth
-// @Param body body object false "Optional: {path: '/path/to/instincts'}"
+// @Param body body InstinctsImportRequest false "Optional: {path: '/path/to/instincts'}"
 // @Success 200 {object} map[string]interface{}
 // @Failure 400 {string} string "invalid path"
 // @Failure 404 {string} string "directory not found"
@@ -25,14 +30,7 @@ import (
 // @Failure 503 {string} string "observation store not initialized"
 // @Router /api/instincts/import [post]
 func (s *Service) handleInstinctsImport(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
-	var params struct {
-		Path string `json:"path"`
-	}
+	var params InstinctsImportRequest
 	if r.Body != nil {
 		defer r.Body.Close()
 		if err := json.NewDecoder(r.Body).Decode(&params); err != nil && err != io.EOF {
