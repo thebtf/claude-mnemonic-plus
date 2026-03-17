@@ -157,7 +157,11 @@ func TestRedactSecretsHashMatchesExtract(t *testing.T) {
 	}
 
 	for _, input := range inputs {
-		t.Run(input[:20], func(t *testing.T) {
+		name := input
+		if len(name) > 20 {
+			name = name[:20]
+		}
+		t.Run(name, func(t *testing.T) {
 			extracted := ExtractSecrets(input)
 			if len(extracted) == 0 {
 				t.Fatalf("ExtractSecrets(%q) returned no secrets", input)
