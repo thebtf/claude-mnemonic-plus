@@ -34,8 +34,11 @@ var secretPatterns = []*regexp.Regexp{
 	regexp.MustCompile(`AKIA[0-9A-Z]{16}`),
 	regexp.MustCompile(`(?i)aws[_-]?secret[_-]?access[_-]?key\s*[:=]\s*['"]?[a-zA-Z0-9/+=]{40}['"]?`),
 
-	// Private keys (PEM format indicators)
+	// Private keys — header-only pattern for detection (a BEGIN line alone signals a secret).
 	regexp.MustCompile(`-----BEGIN (RSA |EC |DSA |OPENSSH )?PRIVATE KEY-----`),
+	// Private keys — full PEM block (BEGIN...END) to capture the entire key material when
+	// both delimiters are present. (?s) enables DOTALL so '.' matches newlines.
+	regexp.MustCompile(`(?s)-----BEGIN (RSA |EC |DSA |OPENSSH )?PRIVATE KEY-----.+?-----END (RSA |EC |DSA |OPENSSH )?PRIVATE KEY-----`),
 
 	// JWT tokens (base64.base64.base64 format)
 	regexp.MustCompile(`eyJ[a-zA-Z0-9_-]+\.eyJ[a-zA-Z0-9_-]+\.[a-zA-Z0-9_-]+`),
@@ -45,9 +48,10 @@ var secretPatterns = []*regexp.Regexp{
 }
 
 // DetectedSecret represents a secret value found in text, with a deterministic name
-// derived from a SHA-256 hash prefix of the value.
+// derived from the full SHA-256 hex of the value (64 hex chars) to avoid collisions
+// when used as a vault deduplication key.
 type DetectedSecret struct {
-	Name  string // deterministic: "auto:{hash[:8]}"
+	Name  string // deterministic: "auto:{sha256hex}" (64 hex chars)
 	Value string // the raw secret value
 }
 

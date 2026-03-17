@@ -99,7 +99,12 @@ export function estimateContextFill(messages?: unknown[]): ContextFill {
       if (typeof obj.content === 'string') {
         totalChars += obj.content.length;
       } else {
-        totalChars += JSON.stringify(m).length;
+        try {
+          totalChars += JSON.stringify(m).length;
+        } catch {
+          // Cyclic structures or BigInt values throw — skip silently rather than crashing.
+          totalChars += 0;
+        }
       }
     }
   }

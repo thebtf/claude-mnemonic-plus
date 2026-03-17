@@ -215,7 +215,7 @@ func TestExtractSecrets(t *testing.T) {
 		},
 		{
 			name:          "API key with prefix",
-			input:         "api_key=abc123def456ghi789jkl012mno345pqr678",
+			input:         "api_key=" + strings.Repeat("a", 36), // generated to avoid secret scanner false positives
 			expectedCount: 1,
 		},
 	}
