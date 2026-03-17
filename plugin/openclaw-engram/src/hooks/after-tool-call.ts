@@ -100,13 +100,24 @@ async function checkContradictions(
 
   const contentLower = content.toLowerCase();
 
+  // Stop-words that are common noise tokens — skip them even if they appear
+  // in rejected[] or are extracted from narrative patterns.
+  const stopWords = new Set(['not', 'instead', 'rather', 'avoid', 'use', 'the', 'and', 'for', 'with', 'but']);
+
+  /** Returns true if `term` appears as a whole word in `text`. */
+  function containsWholeWord(text: string, term: string): boolean {
+    const escaped = term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    return new RegExp(`\\b${escaped}\\b`).test(text);
+  }
+
   for (const obs of response.observations) {
     // Prefer structured rejected[] field for reliable contradiction detection
     const rejectedItems = obs.rejected ?? [];
     for (const rejectedTerm of rejectedItems) {
       const term = rejectedTerm.toLowerCase().trim();
       if (term.length < 3) continue;
-      if (contentLower.includes(term)) {
+      if (stopWords.has(term)) continue;
+      if (containsWholeWord(contentLower, term)) {
         (logger ?? console).warn(
           `[engram] CONTRADICTION: written code contains "${rejectedTerm}" which was rejected in decision: "${obs.title ?? ''}"`,
         );
@@ -134,8 +145,9 @@ async function checkContradictions(
         const afterPattern = narrative.slice(idx + pattern.length, idx + pattern.length + 50).trim();
         const rejectedWord = afterPattern.split(/[\s,.;:!?]+/)[0]?.toLowerCase();
         if (!rejectedWord || rejectedWord.length < 3) continue;
+        if (stopWords.has(rejectedWord)) continue;
 
-        if (contentLower.includes(rejectedWord)) {
+        if (containsWholeWord(contentLower, rejectedWord)) {
           (logger ?? console).warn(
             `[engram] CONTRADICTION: written code contains "${rejectedWord}" which was rejected in decision: "${obs.title ?? narrative.slice(0, 80)}"`,
           );

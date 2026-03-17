@@ -1173,7 +1173,7 @@ func runMigrations(db *gorm.DB, embeddingDims int) error {
 	{
 		ID: "034_decision_rejected_field",
 		Migrate: func(tx *gorm.DB) error {
-			return tx.Exec(`ALTER TABLE observations ADD COLUMN IF NOT EXISTS rejected JSONB DEFAULT '[]'`).Error
+			return tx.Exec(`ALTER TABLE observations ADD COLUMN IF NOT EXISTS rejected JSONB NOT NULL DEFAULT '[]'::jsonb`).Error
 		},
 		Rollback: func(tx *gorm.DB) error {
 			return tx.Exec(`ALTER TABLE observations DROP COLUMN IF EXISTS rejected`).Error
