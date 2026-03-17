@@ -116,8 +116,10 @@ func ContainsSecrets(text string) bool {
 	return false
 }
 
-// RedactSecrets replaces detected secrets with a redaction marker.
-// This allows the text to be stored while protecting sensitive data.
+// RedactSecrets replaces detected secrets with a redaction marker that includes
+// a SHA-256 hash prefix for cross-referencing with ExtractSecrets output.
+// The hash allows correlating redacted values with their vault entries without
+// exposing the secret itself.
 func RedactSecrets(text string) string {
 	if text == "" {
 		return text
@@ -126,18 +128,26 @@ func RedactSecrets(text string) string {
 	result := text
 	for _, pattern := range secretPatterns {
 		result = pattern.ReplaceAllStringFunc(result, func(match string) string {
-			// Preserve the key name, redact only the value
+			// Extract the secret value for hashing
+			value := extractSecretValue(match)
+			if value == "" {
+				value = match
+			}
+			hash := sha256.Sum256([]byte(value))
+			hashPrefix := hex.EncodeToString(hash[:])[:8]
+
+			// Preserve the key name, redact only the value with hash
 			if idx := strings.Index(match, "="); idx != -1 {
-				return match[:idx+1] + "[REDACTED]"
+				return match[:idx+1] + "[REDACTED:" + hashPrefix + "]"
 			}
 			if idx := strings.Index(match, ":"); idx != -1 {
-				return match[:idx+1] + "[REDACTED]"
+				return match[:idx+1] + "[REDACTED:" + hashPrefix + "]"
 			}
-			// For standalone secrets, show just the prefix
+			// For standalone secrets (like sk-xxx, ghp_xxx), show prefix + hash
 			if len(match) > 8 {
-				return match[:4] + "...[REDACTED]"
+				return match[:4] + "...[REDACTED:" + hashPrefix + "]"
 			}
-			return "[REDACTED]"
+			return "[REDACTED:" + hashPrefix + "]"
 		})
 	}
 	return result
