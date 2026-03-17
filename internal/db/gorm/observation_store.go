@@ -1125,10 +1125,11 @@ func (s *ObservationStore) CleanupOldObservations(ctx context.Context, project s
 	var idsToDelete []int64
 
 	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		// Find IDs to keep (most recent MaxObservationsPerProject)
+		// Find IDs to keep (most recent MaxObservationsPerProject, excluding credentials
+		// which must never be evicted by the rotation policy).
 		var idsToKeep []int64
 		err := tx.Model(&Observation{}).
-			Where("project = ?", project).
+			Where("project = ? AND type != 'credential'", project).
 			Order("created_at_epoch DESC").
 			Limit(MaxObservationsPerProject).
 			Pluck("id", &idsToKeep).Error
@@ -1141,10 +1142,10 @@ func (s *ObservationStore) CleanupOldObservations(ctx context.Context, project s
 			return nil
 		}
 
-		// Find IDs to delete (all IDs not in the keep list)
-		// This happens in the same transaction to prevent race conditions
+		// Find IDs to delete (all non-credential IDs not in the keep list).
+		// Runs in the same transaction to prevent TOCTOU races.
 		err = tx.Model(&Observation{}).
-			Where("project = ? AND id NOT IN ?", project, idsToKeep).
+			Where("project = ? AND type != 'credential' AND id NOT IN ?", project, idsToKeep).
 			Pluck("id", &idsToDelete).Error
 
 		if err != nil {
@@ -1429,8 +1430,13 @@ type SearchMissStat struct {
 }
 
 // RecordSearchMiss stores a search query that returned 0 results.
-// Query is capped at 500 chars to prevent storage flooding.
+// Query is trimmed, validated (non-empty), and capped at 500 chars to prevent
+// storage flooding and PII retention from arbitrarily long inputs.
 func (s *ObservationStore) RecordSearchMiss(ctx context.Context, project, query string) error {
+	query = strings.TrimSpace(query)
+	if query == "" {
+		return nil // nothing meaningful to record
+	}
 	if len(query) > 500 {
 		query = query[:500]
 	}

@@ -1167,13 +1167,42 @@ func runMigrations(db *gorm.DB, embeddingDims int) error {
 			return tx.Exec(`DROP TABLE IF EXISTS search_misses`).Error
 		},
 	},
-	// Migration 034: Add rejected[] JSONB column to observations for structured decision schema.
+	{
+		ID: "034_credential_uniqueness_and_search_miss_index",
+		Migrate: func(tx *gorm.DB) error {
+			sqls := []string{
+				`CREATE UNIQUE INDEX IF NOT EXISTS idx_observations_credential_unique
+					ON observations (project, title) WHERE type = 'credential'`,
+				`CREATE INDEX IF NOT EXISTS idx_search_misses_project_query_created
+					ON search_misses (project, query, created_at DESC)`,
+			}
+			for _, s := range sqls {
+				if err := tx.Exec(s).Error; err != nil {
+					return fmt.Errorf("migration 034: %w", err)
+				}
+			}
+			return nil
+		},
+		Rollback: func(tx *gorm.DB) error {
+			sqls := []string{
+				`DROP INDEX IF EXISTS idx_observations_credential_unique`,
+				`DROP INDEX IF EXISTS idx_search_misses_project_query_created`,
+			}
+			for _, s := range sqls {
+				if err := tx.Exec(s).Error; err != nil {
+					log.Warn().Err(err).Str("sql", s).Msg("migration 034 rollback step failed")
+				}
+			}
+			return nil
+		},
+	},
+	// Migration 035: Add rejected[] JSONB column to observations for structured decision schema.
 	// Stores alternatives that were considered and dismissed, enabling reliable contradiction detection
 	// without fragile narrative-text parsing.
 	{
-		ID: "034_decision_rejected_field",
+		ID: "035_decision_rejected_field",
 		Migrate: func(tx *gorm.DB) error {
-			return tx.Exec(`ALTER TABLE observations ADD COLUMN IF NOT EXISTS rejected JSONB NOT NULL DEFAULT '[]'::jsonb`).Error
+			return tx.Exec(`ALTER TABLE observations ADD COLUMN IF NOT EXISTS rejected JSONB DEFAULT '[]'`).Error
 		},
 		Rollback: func(tx *gorm.DB) error {
 			return tx.Exec(`ALTER TABLE observations DROP COLUMN IF EXISTS rejected`).Error

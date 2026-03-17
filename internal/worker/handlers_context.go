@@ -346,9 +346,9 @@ func (s *Service) handleSearchByPrompt(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Track search misses for self-tuning analytics
+	// Track search misses for self-tuning analytics (inline — avoids unbounded goroutine spawn)
 	if len(clusteredObservations) == 0 && query != "" {
-		go s.trackSearchMiss(project, query)
+		s.trackSearchMiss(project, query)
 	}
 
 	// Track this search for analytics
@@ -1082,10 +1082,18 @@ func (s *Service) handleSearchDecisions(w http.ResponseWriter, r *http.Request) 
 		http.Error(w, "query and project required", http.StatusBadRequest)
 		return
 	}
+	if err := ValidateProjectName(body.Project); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
 
+	const maxDecisionSearchLimit = 100
 	limit := body.Limit
 	if limit <= 0 {
 		limit = 10
+	}
+	if limit > maxDecisionSearchLimit {
+		limit = maxDecisionSearchLimit
 	}
 
 	params := search.SearchParams{
@@ -1130,12 +1138,15 @@ func (s *Service) handleContextCount(w http.ResponseWriter, r *http.Request) {
 
 // trackSearchMiss records a search query that returned zero results for analytics.
 func (s *Service) trackSearchMiss(project, query string) {
-	if s.observationStore == nil {
+	s.initMu.RLock()
+	obsStore := s.observationStore
+	s.initMu.RUnlock()
+	if obsStore == nil {
 		return
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(s.ctx, 5*time.Second)
 	defer cancel()
-	if err := s.observationStore.RecordSearchMiss(ctx, project, query); err != nil {
+	if err := obsStore.RecordSearchMiss(ctx, project, query); err != nil {
 		log.Warn().Err(err).Str("project", project).Msg("failed to record search miss")
 	}
 }
@@ -1153,6 +1164,18 @@ func (s *Service) handleSearchMissAnalytics(w http.ResponseWriter, r *http.Reque
 	if body.Project == "" {
 		http.Error(w, "project required", http.StatusBadRequest)
 		return
+	}
+	if err := ValidateProjectName(body.Project); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	const maxSearchMissStatsLimit = 200
+	if body.Limit <= 0 {
+		body.Limit = 50
+	}
+	if body.Limit > maxSearchMissStatsLimit {
+		body.Limit = maxSearchMissStatsLimit
 	}
 
 	s.initMu.RLock()

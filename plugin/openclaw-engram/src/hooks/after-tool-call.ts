@@ -27,6 +27,7 @@ export function handleAfterToolCall(
   ctx: PluginHookContext,
   client: EngramRestClient,
   config: PluginConfig,
+  logger?: PluginLogger,
 ): void {
   if (!client.isAvailable()) return;
   if (!config.autoExtract) return;
@@ -58,7 +59,7 @@ export function handleAfterToolCall(
 
   // Contradiction detection: check Write/Edit results against stored decisions
   if (isWriteOrEdit(event.toolName)) {
-    void checkContradictions(client, project, event.toolResult, undefined).catch(() => {});
+    void checkContradictions(client, project, event.toolResult, logger).catch(() => {});
   }
 }
 
