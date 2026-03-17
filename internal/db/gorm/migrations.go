@@ -1171,11 +1171,8 @@ func runMigrations(db *gorm.DB, embeddingDims int) error {
 		ID: "034_credential_uniqueness_and_search_miss_index",
 		Migrate: func(tx *gorm.DB) error {
 			sqls := []string{
-				// Partial unique index on (project, title) for credential observations.
-				// Prevents duplicate credential entries from concurrent backfill operations.
 				`CREATE UNIQUE INDEX IF NOT EXISTS idx_observations_credential_unique
 					ON observations (project, title) WHERE type = 'credential'`,
-				// Composite index for efficient GROUP BY analytics on search_misses.
 				`CREATE INDEX IF NOT EXISTS idx_search_misses_project_query_created
 					ON search_misses (project, query, created_at DESC)`,
 			}
@@ -1197,6 +1194,18 @@ func runMigrations(db *gorm.DB, embeddingDims int) error {
 				}
 			}
 			return nil
+		},
+	},
+	// Migration 035: Add rejected[] JSONB column to observations for structured decision schema.
+	// Stores alternatives that were considered and dismissed, enabling reliable contradiction detection
+	// without fragile narrative-text parsing.
+	{
+		ID: "035_decision_rejected_field",
+		Migrate: func(tx *gorm.DB) error {
+			return tx.Exec(`ALTER TABLE observations ADD COLUMN IF NOT EXISTS rejected JSONB DEFAULT '[]'`).Error
+		},
+		Rollback: func(tx *gorm.DB) error {
+			return tx.Exec(`ALTER TABLE observations DROP COLUMN IF EXISTS rejected`).Error
 		},
 	},
 	})
