@@ -29,9 +29,6 @@ COPY . .
 # Copy built dashboard into static directory for go:embed
 COPY --from=dashboard /ui/dist/ internal/worker/static/
 
-# Download ONNX Runtime libraries for linux-amd64 (required for go:embed)
-RUN bash scripts/download-onnx-libs.sh linux-amd64
-
 # Inject version from git tags
 ARG VERSION=dev
 
