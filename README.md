@@ -69,10 +69,10 @@ graph TB
 | **Memory Consolidation** | Daily decay, daily associations, quarterly forgetting |
 | **17 Relation Types** | Knowledge graph: causes, fixes, supersedes, contradicts, explains, shares_theme... |
 | **Session Indexing** | JSONL parser with workstation isolation, incremental indexing |
-| **Collections** | YAML-configurable knowledge bases with smart chunking (Markdown, Go, Python, TypeScript via tree-sitter) |
+| **Collections** | YAML-configurable knowledge bases with smart chunking (Markdown, Go) |
 | **MCP Transports** | SSE + Streamable HTTP (`POST /mcp`) on single port |
-| **Embeddings** | Local ONNX BGE (384D) or OpenAI-compatible REST API |
-| **Cross-encoder Reranking** | ONNX reranker for search result quality |
+| **Embeddings** | OpenAI-compatible REST API |
+| **Cross-encoder Reranking** | API-based reranker for search result quality |
 | **Token Auth** | Bearer authentication for all endpoints |
 | **Instinct Import** | Import ECC instincts as guidance observations with semantic dedup |
 | **Self-Learning** | Per-session utility signal detection for adaptive memory |
@@ -234,7 +234,7 @@ Hooks are JavaScript and come pre-configured with the plugin. No build needed.
 | `WORKER_PORT` | `37777` | Worker port |
 | `WORKER_HOST` | `0.0.0.0` | Worker bind address |
 | `API_TOKEN` | — | Bearer token (recommended for remote) |
-| `EMBEDDING_PROVIDER` | `onnx` | `onnx` (local BGE) or `openai` (REST API) |
+| `EMBEDDING_PROVIDER` | `openai` | `openai` (OpenAI-compatible REST API) |
 | `EMBEDDING_BASE_URL` | — | OpenAI-compatible endpoint URL |
 | `EMBEDDING_API_KEY` | — | API key for OpenAI provider |
 | `EMBEDDING_MODEL_NAME` | — | Model name for OpenAI provider |
@@ -454,16 +454,16 @@ cmd/
   worker/             HTTP API + MCP SSE + MCP Streamable HTTP + dashboard
   engram-cli/         CLI client for engram operations
 internal/
-  chunking/           AST-aware document chunking (md, Go, Python, TS)
+  chunking/           AST-aware document chunking (Markdown, Go)
   collections/        YAML collection config + context routing
   instincts/          Instinct parser and import
   config/             Configuration management
   consolidation/      Decay, associations, forgetting
   db/gorm/            PostgreSQL stores + auto-migrations
-  embedding/          ONNX BGE + OpenAI REST providers
+  embedding/          OpenAI-compatible REST embedding provider
   graph/              In-memory CSR graph traversal
   mcp/                MCP protocol (server, SSE, Streamable HTTP)
-  reranking/          ONNX cross-encoder reranker
+  reranking/          API-based cross-encoder reranker
   scoring/            Importance + relevance scoring
   search/             Hybrid retrieval + RRF fusion
   sessions/           JSONL parser + indexer
