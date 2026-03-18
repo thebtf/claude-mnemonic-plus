@@ -154,6 +154,7 @@ type Service struct {
 	retrievalStats         map[string]*RetrievalStats
 	sessionStore           *gorm.SessionStore
 	rawEventStore          *gorm.RawEventStore
+	tokenStore             *gorm.TokenStore
 	ingestDedup            *deduplicationCache
 	cancel                 context.CancelFunc
 	cachedObsCounts        map[string]cachedCount
