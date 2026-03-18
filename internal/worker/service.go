@@ -721,6 +721,9 @@ func (s *Service) initializeAsync() {
 		log.Info().Msg("SDK processor initialized")
 	}
 
+	// Create token store and wire into auth middleware
+	tokenStore := gorm.NewTokenStore(store)
+
 	// Create raw event store and ingest deduplication cache
 	rawEventStore := gorm.NewRawEventStore(store)
 
@@ -729,6 +732,7 @@ func (s *Service) initializeAsync() {
 	s.store = store
 	s.sessionStore = sessionStore
 	s.rawEventStore = rawEventStore
+	s.tokenStore = tokenStore
 	s.observationStore = observationStore
 	s.summaryStore = summaryStore
 	s.promptStore = promptStore
@@ -747,6 +751,11 @@ func (s *Service) initializeAsync() {
 	s.vectorSync = vectorSync
 	s.reranker = reranker
 	s.initMu.Unlock()
+
+	// Wire token store into auth middleware for client token lookups
+	if s.tokenAuth != nil {
+		s.tokenAuth.SetTokenStore(tokenStore)
+	}
 
 	// Initialize similarity telemetry (optional — requires vector client)
 	if vectorClient != nil && store != nil && observationStore != nil {
@@ -1567,6 +1576,10 @@ func (s *Service) setupRoutes() {
 	s.router.Get("/", serveIndex)
 	s.router.Get("/assets/*", serveAssets)
 
+	// Auth routes (public — login/logout do not require auth)
+	s.router.Post("/api/auth/login", s.handleAuthLogin)
+	s.router.Post("/api/auth/logout", s.handleAuthLogout)
+
 	// Health check (both root and API-prefixed for compatibility)
 	// Returns 200 immediately so hooks can connect quickly during init
 	// Also returns version for stale worker detection
@@ -1734,6 +1747,12 @@ func (s *Service) setupRoutes() {
 
 		// Telemetry
 		r.Get("/api/telemetry/similarity", s.handleGetSimilarityTelemetry)
+
+		// Auth routes (require auth — admin only)
+		r.Get("/api/auth/me", s.handleAuthMe)
+		r.Get("/api/auth/tokens", s.handleListTokens)
+		r.Post("/api/auth/tokens", s.handleCreateToken)
+		r.Delete("/api/auth/tokens/{id}", s.handleRevokeToken)
 	})
 }
 
