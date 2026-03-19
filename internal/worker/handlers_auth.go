@@ -375,7 +375,7 @@ func getAuthRole(r *http.Request) string {
 	if role, ok := r.Context().Value(authRoleKey{}).(string); ok {
 		return role
 	}
-	return "admin" // default if middleware didn't set it (backward compat)
+	return "" // no role = not authenticated (middleware didn't set context)
 }
 
 // computeHMAC computes an HMAC-SHA256 signature.
