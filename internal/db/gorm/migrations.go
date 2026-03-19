@@ -1208,6 +1208,38 @@ func runMigrations(db *gorm.DB, embeddingDims int) error {
 			return tx.Exec(`ALTER TABLE observations DROP COLUMN IF EXISTS rejected`).Error
 		},
 	},
+	// Migration 036: API tokens table for client token authentication.
+	// Stores bcrypt-hashed client tokens with prefix-based lookup for the auth middleware.
+	{
+		ID: "036_api_tokens",
+		Migrate: func(tx *gorm.DB) error {
+			sqls := []string{
+				`CREATE TABLE IF NOT EXISTS api_tokens (
+					id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+					name TEXT NOT NULL UNIQUE,
+					token_hash TEXT NOT NULL,
+					token_prefix TEXT NOT NULL,
+					scope TEXT NOT NULL DEFAULT 'read-write',
+					created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+					last_used_at TIMESTAMPTZ,
+					request_count BIGINT NOT NULL DEFAULT 0,
+					error_count BIGINT NOT NULL DEFAULT 0,
+					revoked BOOLEAN NOT NULL DEFAULT false,
+					revoked_at TIMESTAMPTZ
+				)`,
+				`CREATE INDEX IF NOT EXISTS idx_api_tokens_prefix ON api_tokens (token_prefix) WHERE NOT revoked`,
+			}
+			for _, s := range sqls {
+				if err := tx.Exec(s).Error; err != nil {
+					return fmt.Errorf("migration 036: %w", err)
+				}
+			}
+			return nil
+		},
+		Rollback: func(tx *gorm.DB) error {
+			return tx.Exec("DROP TABLE IF EXISTS api_tokens").Error
+		},
+	},
 	})
 	if err := m.Migrate(); err != nil {
 		return fmt.Errorf("run gormigrate migrations: %w", err)
