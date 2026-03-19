@@ -5,7 +5,7 @@
 set -e
 
 # Source and destination directories
-SOURCE_DIR="plugin/.claude-plugin"
+SOURCE_DIR="plugin/engram/.claude-plugin"
 OUTPUT_DIR=".claude-plugin"
 
 # Create output directory
