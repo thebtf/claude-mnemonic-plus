@@ -8,10 +8,8 @@ import {
   triggerMaintenance,
   checkForUpdate,
   type SystemHealth,
-  type VectorMetrics,
-  type GraphStats,
 } from '@/utils/api'
-import { formatUptime } from '@/utils/formatters'
+import type { VectorMetrics, GraphStats } from '@/types'
 
 const health = ref<SystemHealth | null>(null)
 const vectorMetrics = ref<VectorMetrics | null>(null)

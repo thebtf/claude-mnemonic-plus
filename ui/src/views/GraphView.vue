@@ -4,7 +4,6 @@ import { useRouter } from 'vue-router'
 import { Network } from 'vis-network'
 import { DataSet } from 'vis-data'
 import { TYPE_CONFIG } from '@/types/observation'
-import type { ObservationType } from '@/types'
 import { fetchObservationGraph, fetchGraphStats, fetchProjects } from '@/utils/api'
 import type { GraphStats, RelationGraph } from '@/types'
 import EmptyState from '@/components/layout/EmptyState.vue'
@@ -135,7 +134,7 @@ function renderGraph(graph: RelationGraph, centerId: number) {
       shape: 'dot',
     },
     edges: {
-      smooth: { type: 'continuous' },
+      smooth: { enabled: true, type: 'curvedCW', roundness: 0.2 },
     },
   })
 
@@ -227,7 +226,7 @@ onUnmounted(() => {
     <!-- Type Legend -->
     <div class="flex items-center gap-3 mb-4 flex-wrap">
       <span class="text-[10px] text-slate-600 uppercase">Legend:</span>
-      <div v-for="(config, type) in TYPE_CONFIG" :key="type" class="flex items-center gap-1">
+      <div v-for="(_config, type) in TYPE_CONFIG" :key="type" class="flex items-center gap-1">
         <span class="w-2.5 h-2.5 rounded-full" :style="{ backgroundColor: TYPE_COLORS[type]?.background || '#64748b' }" />
         <span class="text-[10px] text-slate-500">{{ type }}</span>
       </div>
