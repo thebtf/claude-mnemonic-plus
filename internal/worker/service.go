@@ -666,8 +666,8 @@ func (s *Service) initializeAsync() {
 		}
 	}
 
-	// Create observation store with conflict and relation stores for automatic detection
-	observationStore := gorm.NewObservationStore(store, nil, conflictStore, relationStore)
+	// Create observation store
+	observationStore := gorm.NewObservationStore(store, nil)
 
 	// Create session manager
 	sessionManager := session.NewManager(sessionStore)
@@ -1068,8 +1068,8 @@ func (s *Service) reinitializeDatabase() {
 		relationStore.SetCallback(s.graphWriter.Enqueue)
 	}
 
-	// Create observation store with conflict and relation stores for automatic detection
-	observationStore := gorm.NewObservationStore(store, nil, conflictStore, relationStore)
+	// Create observation store
+	observationStore := gorm.NewObservationStore(store, nil)
 
 	// Create new session manager
 	sessionManager := session.NewManager(sessionStore)
