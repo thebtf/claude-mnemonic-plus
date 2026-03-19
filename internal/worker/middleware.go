@@ -141,12 +141,14 @@ func NewTokenAuth(token string) (*TokenAuth, error) {
 		cookieKey: cookieKey,
 		statsCh:   make(chan string, 256),
 		ExemptPaths: map[string]bool{
+			"/":                true, // SPA index.html (dashboard handles auth client-side)
 			"/health":          true,
 			"/api/health":      true,
 			"/api/ready":       true,
 			"/api/version":     true,
 			"/api/auth/login":  true,
 			"/api/auth/logout": true,
+			"/api/auth/me":     true, // Must be accessible to check auth status (returns 401 if not authed)
 		},
 	}
 

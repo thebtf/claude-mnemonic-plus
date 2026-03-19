@@ -143,12 +143,44 @@ func (s *Service) handleAuthLogout(w http.ResponseWriter, r *http.Request) {
 // @Failure 401 {string} string "unauthorized"
 // @Router /api/auth/me [get]
 func (s *Service) handleAuthMe(w http.ResponseWriter, r *http.Request) {
-	// The request has already passed auth middleware, so we know it's authenticated.
-	// Determine role from context — cookie/master = admin, client token = scoped.
+	// This endpoint is exempt from auth middleware so the SPA can check auth status.
+	// We manually verify auth here and return the result.
 	role := getAuthRole(r)
+	if role != "" {
+		writeJSON(w, map[string]any{
+			"authenticated": true,
+			"role":          role,
+		})
+		return
+	}
+
+	// Check cookie manually (since middleware was bypassed)
+	if s.tokenAuth != nil {
+		s.tokenAuth.mu.RLock()
+		cookieKey := s.tokenAuth.cookieKey
+		s.tokenAuth.mu.RUnlock()
+
+		if cookie, err := r.Cookie("engram_session"); err == nil && len(cookieKey) > 0 {
+			parts := strings.SplitN(cookie.Value, ".", 2)
+			if len(parts) == 2 {
+				payload, _ := base64.RawURLEncoding.DecodeString(parts[0])
+				sig, _ := base64.RawURLEncoding.DecodeString(parts[1])
+				expectedSig := computeHMAC(payload, cookieKey)
+				if hmac.Equal(sig, expectedSig) {
+					writeJSON(w, map[string]any{
+						"authenticated": true,
+						"role":          "admin",
+					})
+					return
+				}
+			}
+		}
+	}
+
+	// Not authenticated
+	w.WriteHeader(http.StatusUnauthorized)
 	writeJSON(w, map[string]any{
-		"authenticated": true,
-		"role":          role,
+		"authenticated": false,
 	})
 }
 
