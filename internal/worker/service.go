@@ -28,6 +28,7 @@ import (
 	"github.com/thebtf/engram/internal/maintenance"
 	"github.com/thebtf/engram/internal/mcp"
 	"github.com/thebtf/engram/internal/pattern"
+	"github.com/thebtf/engram/internal/relation"
 	"github.com/thebtf/engram/internal/reranking"
 	"github.com/thebtf/engram/internal/scoring"
 	"github.com/thebtf/engram/internal/search"
@@ -771,6 +772,18 @@ func (s *Service) initializeAsync() {
 	// Background sync: populate FalkorDB from existing PostgreSQL relations.
 	if _, ok := gs.(*graphpkg.NoopGraphStore); !ok && gs != nil {
 		go s.syncGraphFromRelations()
+	}
+
+	// Initialize async relation detector (requires embedding + vector search)
+	if embedSvc != nil && vectorClient != nil {
+		detector := relation.NewDetector(embedSvc, vectorClient, relationStore, conflictStore, observationStore)
+		observationStore.SetRelationDetector(detector)
+		s.wg.Add(1)
+		go func() {
+			defer s.wg.Done()
+			detector.Start(s.ctx)
+		}()
+		log.Info().Msg("Async relation detector enabled")
 	}
 
 	// Initialize pattern detector
