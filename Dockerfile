@@ -5,7 +5,7 @@ FROM node:22-bookworm-slim AS dashboard
 
 WORKDIR /ui
 COPY ui/package.json ui/package-lock.json ./
-RUN npm ci --silent
+RUN npm ci
 COPY ui/ .
 RUN npm run build
 
