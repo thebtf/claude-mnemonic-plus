@@ -117,6 +117,70 @@ func (d *Detector) processRequest(req detectRequest) {
 	}
 }
 
+// BackfillRelations processes existing observations to detect relations.
+// Processes in batches, calling Detect() for each observation.
+// Returns the number of observations processed and relations created.
+func (d *Detector) BackfillRelations(ctx context.Context, project string, batchSize int, onProgress func(processed, total int)) (int, int, error) {
+	if batchSize <= 0 {
+		batchSize = 50
+	}
+
+	var totalProcessed, totalRelations int
+	offset := 0
+
+	for {
+		// Check context cancellation between batches
+		select {
+		case <-ctx.Done():
+			return totalProcessed, totalRelations, ctx.Err()
+		default:
+		}
+
+		var observations []*models.Observation
+		var total int64
+		var err error
+
+		if project != "" {
+			observations, total, err = d.observationStore.GetObservationsByProjectStrictPaginated(ctx, project, batchSize, offset)
+		} else {
+			observations, total, err = d.observationStore.GetAllRecentObservationsPaginated(ctx, batchSize, offset)
+		}
+		if err != nil {
+			return totalProcessed, totalRelations, fmt.Errorf("fetch observations batch at offset %d: %w", offset, err)
+		}
+
+		if len(observations) == 0 {
+			break
+		}
+
+		for _, obs := range observations {
+			detectCtx, cancel := context.WithTimeout(ctx, detectionTimeout)
+			if err := d.Detect(detectCtx, obs.ID, obs.Project); err != nil {
+				log.Warn().Err(err).Int64("obs_id", obs.ID).Msg("Backfill relation detection failed for observation")
+			} else {
+				totalRelations++ // approximate: counts observations where Detect ran successfully
+			}
+			cancel()
+			totalProcessed++
+		}
+
+		if onProgress != nil {
+			onProgress(totalProcessed, int(total))
+		}
+
+		offset += batchSize
+
+		// Sleep between batches to avoid overwhelming DB
+		select {
+		case <-ctx.Done():
+			return totalProcessed, totalRelations, ctx.Err()
+		case <-time.After(100 * time.Millisecond):
+		}
+	}
+
+	return totalProcessed, totalRelations, nil
+}
+
 // Detect runs relation and conflict detection for a single observation.
 func (d *Detector) Detect(ctx context.Context, obsID int64, project string) error {
 	// 1. Load the new observation

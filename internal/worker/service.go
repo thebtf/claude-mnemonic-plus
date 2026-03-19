@@ -133,6 +133,7 @@ type Service struct {
 	graphStore             graphpkg.GraphStore
 	graphWriter            *graphpkg.AsyncGraphWriter
 	patternDetector        *pattern.Detector
+	relationDetector       *relation.Detector
 	sessionManager         *session.Manager
 	sseBroadcaster         *sse.Broadcaster
 	processor              *sdk.Processor
@@ -778,6 +779,7 @@ func (s *Service) initializeAsync() {
 	if embedSvc != nil && vectorClient != nil {
 		detector := relation.NewDetector(vectorClient, relationStore, conflictStore, observationStore)
 		observationStore.SetRelationDetector(detector)
+		s.relationDetector = detector
 		s.wg.Add(1)
 		go func() {
 			defer s.wg.Done()
@@ -1789,6 +1791,7 @@ func (s *Service) setupRoutes() {
 		r.Post("/api/maintenance/consolidation", s.handleTriggerConsolidation)
 		r.Post("/api/maintenance/run", s.handleRunMaintenance)
 		r.Get("/api/maintenance/stats", s.handleGetMaintenanceStats)
+		r.Post("/api/maintenance/backfill-relations", s.handleBackfillRelations)
 
 		// Analytics routes
 		r.Get("/api/analytics/trends", s.handleGetTrends)
