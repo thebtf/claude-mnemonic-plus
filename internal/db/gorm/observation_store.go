@@ -935,7 +935,15 @@ func (s *ObservationStore) DeleteObservations(ctx context.Context, ids []int64) 
 	}
 
 	result := s.db.WithContext(ctx).Delete(&Observation{}, ids)
-	return result.RowsAffected, result.Error
+	if result.Error != nil {
+		return result.RowsAffected, result.Error
+	}
+
+	// Sync deletes to vector store (cleanup orphaned embeddings).
+	if result.RowsAffected > 0 && s.cleanupFunc != nil {
+		s.cleanupFunc(ctx, ids)
+	}
+	return result.RowsAffected, nil
 }
 
 // DeleteObservation deletes a single observation by ID.
@@ -946,6 +954,11 @@ func (s *ObservationStore) DeleteObservation(ctx context.Context, id int64) erro
 	}
 	if result.RowsAffected == 0 {
 		return fmt.Errorf("observation %d not found", id)
+	}
+
+	// Sync delete to vector store (cleanup orphaned embedding).
+	if s.cleanupFunc != nil {
+		s.cleanupFunc(ctx, []int64{id})
 	}
 	return nil
 }
