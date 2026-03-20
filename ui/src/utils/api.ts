@@ -595,9 +595,11 @@ export interface Pattern {
   id: number
   name: string
   type: string
-  occurrences: number
+  frequency: number
   confidence: number
   created_at: string
+  last_seen_at: string
+  last_seen_at_epoch: number
 }
 
 export interface PatternInsight {

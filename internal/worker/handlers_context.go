@@ -1212,9 +1212,9 @@ func (s *Service) trackSearchMiss(project, query string) {
 // @Accept json
 // @Produce json
 // @Security ApiKeyAuth
-// @Param body body object true "Params: project (required), limit (optional)"
+// @Param body body object true "Params: project (optional — omit to aggregate across all projects), limit (optional)"
 // @Success 200 {object} map[string]interface{}
-// @Failure 400 {string} string "project required"
+// @Failure 400 {string} string "invalid project name"
 // @Failure 500 {string} string "internal error"
 // @Failure 503 {string} string "store not available"
 // @Router /api/analytics/search-misses [post]
@@ -1227,13 +1227,11 @@ func (s *Service) handleSearchMissAnalytics(w http.ResponseWriter, r *http.Reque
 		http.Error(w, "Invalid JSON: "+err.Error(), http.StatusBadRequest)
 		return
 	}
-	if body.Project == "" {
-		http.Error(w, "project required", http.StatusBadRequest)
-		return
-	}
-	if err := ValidateProjectName(body.Project); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
+	if body.Project != "" {
+		if err := ValidateProjectName(body.Project); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
 	}
 
 	const maxSearchMissStatsLimit = 200

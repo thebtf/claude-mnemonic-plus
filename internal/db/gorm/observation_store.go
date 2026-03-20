@@ -1473,18 +1473,21 @@ func (s *ObservationStore) RecordSearchMiss(ctx context.Context, project, query 
 }
 
 // GetSearchMissStats returns analytics about search misses grouped by query.
+// When project is empty, results are aggregated across all projects.
 func (s *ObservationStore) GetSearchMissStats(ctx context.Context, project string, limit int) ([]SearchMissStat, error) {
 	if limit <= 0 {
 		limit = 20
 	}
 	var stats []SearchMissStat
-	err := s.db.WithContext(ctx).Raw(`
-		SELECT query, COUNT(*) as miss_count, MAX(created_at) as last_seen
-		FROM search_misses
-		WHERE project = ?
-		GROUP BY query
-		ORDER BY miss_count DESC
-		LIMIT ?
-	`, project, limit).Scan(&stats).Error
+	q := s.db.WithContext(ctx).
+		Table("search_misses").
+		Select("query, COUNT(*) as miss_count, MAX(created_at) as last_seen").
+		Group("query").
+		Order("miss_count DESC").
+		Limit(limit)
+	if project != "" {
+		q = q.Where("project = ?", project)
+	}
+	err := q.Scan(&stats).Error
 	return stats, err
 }
