@@ -146,6 +146,10 @@ async function handleUserPrompt(ctx, input) {
         }
       }
 
+      // observationCount tracks injected (post-trim) count for deciding whether
+      // to return context. matchedCount is the raw search result count (pre-trim)
+      // sent to the DB so the badge shows how many memories matched the query.
+      const matchedCount = safeObservations.length;
       observationCount = budgetObs.length;
       let contextBuilder = '<relevant-memory>\n';
       contextBuilder += '# Relevant Knowledge From Previous Sessions\n';
@@ -211,7 +215,7 @@ async function handleUserPrompt(ctx, input) {
       claudeSessionId: ctx.SessionID,
       project: ctx.Project,
       prompt,
-      matchedObservations: observationCount,
+      matchedObservations: matchedCount,
     });
   } catch (error) {
     console.error(`[user-prompt] Failed to initialize session: ${error.message}`);
