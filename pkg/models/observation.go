@@ -216,6 +216,9 @@ type Observation struct {
 	EnrichmentLevel int              `db:"enrichment_level" json:"enrichment_level"`
 	SourceEventIDs  JSONInt64Array   `db:"source_event_ids" json:"source_event_ids,omitempty"`
 	RawContent      sql.NullString   `db:"raw_content" json:"raw_content,omitempty"`
+	ExpiresAt       sql.NullTime     `db:"expires_at" json:"expires_at,omitempty"`
+	TtlDays         sql.NullInt32    `db:"ttl_days" json:"ttl_days,omitempty"`
+	IsExpired       bool             `db:"-" json:"is_expired,omitempty"`
 }
 
 // ParsedObservation represents an observation parsed from SDK response XML.
