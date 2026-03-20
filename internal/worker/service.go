@@ -172,6 +172,7 @@ type Service struct {
 	expensiveOpLimiter     *ExpensiveOperationLimiter
 	logBuffer              *logbuf.RingBuffer
 	backfillTracker        *backfillTracker
+	searchQueryLogStore    *gorm.SearchQueryLogStore
 	version                string
 	recentQueriesBuf       [maxRecentQueries]RecentSearchQuery
 	wg                     sync.WaitGroup
@@ -892,6 +893,9 @@ func (s *Service) initializeAsync() {
 	// Initialize session index store (clients push transcripts via REST API)
 	sessionIdxStore := sessions.NewStore(store)
 
+	// Initialize search query log store for persistent analytics
+	searchQueryLogStore := gorm.NewSearchQueryLogStore(store.GetDB())
+
 	// Initialize search manager for MCP tools
 	searchMgr := search.NewManager(observationStore, summaryStore, promptStore, vectorClient)
 
@@ -943,6 +947,7 @@ func (s *Service) initializeAsync() {
 	s.searchMgr = searchMgr
 	s.collectionRegistry = collectionRegistry
 	s.sessionIdxStore = sessionIdxStore
+	s.searchQueryLogStore = searchQueryLogStore
 	s.mcpSSEHandler = mcpSSEHandler
 	s.mcpStreamableHandler = mcpStreamableHandler
 	s.initMu.Unlock()
@@ -1910,9 +1915,19 @@ func (s *Service) GetRetrievalStats(project string) RetrievalStats {
 	return result
 }
 
-// trackSearchQuery records a search query for analytics using a circular buffer.
-// O(1) insertion - no memory allocation or copying on each insert.
+// trackSearchQuery records a search query for analytics.
+// Writes to the persistent DB store (fire-and-forget) and the in-memory ring buffer.
+// O(1) insertion for the ring buffer - no memory allocation or copying on each insert.
 func (s *Service) trackSearchQuery(query, project, queryType string, results int, usedVector bool) {
+	// Persist to DB asynchronously (fire-and-forget, never blocks caller).
+	s.initMu.RLock()
+	sqlStore := s.searchQueryLogStore
+	s.initMu.RUnlock()
+	if sqlStore != nil {
+		sqlStore.LogQuery(project, query, queryType, results, usedVector, 0)
+	}
+
+	// Also maintain the in-memory ring buffer for low-latency in-process access.
 	s.recentQueriesMu.Lock()
 	defer s.recentQueriesMu.Unlock()
 
