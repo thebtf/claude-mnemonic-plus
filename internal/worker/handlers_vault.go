@@ -296,11 +296,12 @@ func (s *Service) handleVaultStatus(w http.ResponseWriter, r *http.Request) {
 	fingerprint := ""
 	keySource := ""
 
-	if keyConfigured {
-		if v, err := s.getVault(); err == nil && v != nil {
-			fingerprint = v.Fingerprint()
-			keySource = v.KeySource()
-		}
+	// Read vault metadata only if already initialized.
+	// Do NOT call getVault() — it auto-generates a key if none is configured,
+	// which is a side effect a read-only status endpoint must never cause.
+	if keyConfigured && s.vault != nil {
+		fingerprint = s.vault.Fingerprint()
+		keySource = s.vault.KeySource()
 	}
 
 	count := 0

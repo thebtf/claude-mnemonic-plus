@@ -516,7 +516,10 @@ func Load() (*Config, error) {
 	if v := strings.TrimSpace(os.Getenv("ENGRAM_ENCRYPTION_KEY_FILE")); v != "" {
 		cfg.EncryptionKeyFile = v
 	}
-	if v := strings.TrimSpace(os.Getenv("ENGRAM_ENCRYPTION_KEY")); v != "" {
+	// ENGRAM_VAULT_KEY is the primary name; ENGRAM_ENCRYPTION_KEY is accepted as alias.
+	if v := strings.TrimSpace(os.Getenv("ENGRAM_VAULT_KEY")); v != "" {
+		cfg.EncryptionKey = v
+	} else if v := strings.TrimSpace(os.Getenv("ENGRAM_ENCRYPTION_KEY")); v != "" {
 		cfg.EncryptionKey = v
 	}
 	return cfg, nil
