@@ -1325,6 +1325,80 @@ func runMigrations(db *gorm.DB, embeddingDims int) error {
 			return nil
 		},
 	},
+	// Migration 040: One-time cleanup of garbage observations created by SDK tool output extraction.
+	// Deletes observations with titles matching known garbage patterns (PowerShell errors, auth failures,
+	// stdin terminal checks, etc.) and orphan vectors not matching any observation.
+	{
+		ID: "040_cleanup_garbage_observations",
+		Migrate: func(tx *gorm.DB) error {
+			// Delete garbage observations by title pattern
+			garbagePatterns := []string{
+				"PowerShell%Error%",
+				"PowerShell%Anomaly%",
+				"PowerShell Dot-Source%",
+				"Stdin Terminal%",
+				"Authorization Header Missing%",
+				"FINDSTR%Cannot%",
+				"Missing Authentication%",
+				"JavaScript Property Setting%",
+				"Incorrect FINDSTR%",
+				"Invalid Argument in Child%",
+				"bufio Over-read%",
+				"Stdin Terminal Check%",
+				"File Lock Handling%",
+				"Upstream Connection%",
+				"TRACE Logging Removal%",
+				"npm install completion%",
+				"Stderr Input Handling%",
+				"Status Discrepancy Detection%",
+				"Job-Session ID Synchronization%",
+				"Incorrect Redirection Syntax%",
+				"Rename node_modules%",
+				"Case Sensitivity in Format%",
+				"Cleanup Function%Parameter%",
+				"Cleanup by startedAt%",
+				"Null%Numeric Properties%",
+				"User Cancellation Handling%",
+			}
+			var totalDeleted int64
+			for _, pattern := range garbagePatterns {
+				result := tx.Exec(`DELETE FROM observations WHERE title LIKE ?`, pattern)
+				if result.Error != nil {
+					log.Warn().Err(result.Error).Str("pattern", pattern).Msg("migration 040: delete pattern failed")
+					continue
+				}
+				totalDeleted += result.RowsAffected
+			}
+
+			// Delete orphan vectors: observation_vectors entries whose sqlite_id
+			// (stored in metadata) doesn't match any existing observation.
+			orphanResult := tx.Exec(`
+				DELETE FROM observation_vectors
+				WHERE id IN (
+					SELECT ov.id FROM observation_vectors ov
+					LEFT JOIN observations o ON ov.metadata->>'sqlite_id' = o.id::text
+					WHERE o.id IS NULL
+				)
+			`)
+			orphanCount := int64(0)
+			if orphanResult.Error != nil {
+				// observation_vectors table might not exist or have different schema — not fatal
+				log.Warn().Err(orphanResult.Error).Msg("migration 040: orphan vector cleanup failed (non-fatal)")
+			} else {
+				orphanCount = orphanResult.RowsAffected
+			}
+
+			log.Info().
+				Int64("garbage_deleted", totalDeleted).
+				Int64("orphan_vectors_deleted", orphanCount).
+				Msg("migration 040: garbage cleanup complete")
+			return nil
+		},
+		Rollback: func(tx *gorm.DB) error {
+			// One-time cleanup — no rollback possible
+			return nil
+		},
+	},
 	})
 	if err := m.Migrate(); err != nil {
 		return fmt.Errorf("run gormigrate migrations: %w", err)
