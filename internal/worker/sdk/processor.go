@@ -738,10 +738,20 @@ func shouldSkipTrivialOperation(toolName, inputStr, outputStr string) bool {
 	case "Bash":
 		// Only process build/test results — they reveal project state
 		interestingCommands := []string{
-			"go build", "go test", "npm run build", "npm test",
-			"make ", "cargo build", "cargo test",
-			"docker build", "docker compose",
-			"pytest", "jest", "vitest",
+			// Go
+			"go build", "go test", "go vet",
+			// Node/JS
+			"npm run build", "npm test", "npx tsc",
+			// Rust
+			"cargo build", "cargo test", "cargo clippy",
+			// .NET
+			"dotnet build", "dotnet test", "dotnet publish",
+			// Make/Docker
+			"make ", "docker build", "docker compose",
+			// Python
+			"pytest", "python -m pytest",
+			// JS test runners
+			"jest", "vitest",
 		}
 		for _, cmd := range interestingCommands {
 			if strings.Contains(lowerInput, cmd) {
