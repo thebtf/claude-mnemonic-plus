@@ -1399,6 +1399,22 @@ func runMigrations(db *gorm.DB, embeddingDims int) error {
 			return nil
 		},
 	},
+	// Migration 041: Purge orphan vectors — correct table name (vectors, not observation_vectors).
+	{
+		ID: "041_purge_orphan_vectors",
+		Migrate: func(tx *gorm.DB) error {
+			result := tx.Exec(`DELETE FROM vectors WHERE sqlite_id NOT IN (SELECT id FROM observations)`)
+			if result.Error != nil {
+				log.Warn().Err(result.Error).Msg("migration 041: orphan vector purge failed (non-fatal)")
+				return nil
+			}
+			log.Info().Int64("orphan_vectors_deleted", result.RowsAffected).Msg("migration 041: orphan vector purge complete")
+			return nil
+		},
+		Rollback: func(tx *gorm.DB) error {
+			return nil
+		},
+	},
 	})
 	if err := m.Migrate(); err != nil {
 		return fmt.Errorf("run gormigrate migrations: %w", err)
