@@ -1525,6 +1525,26 @@ func runMigrations(db *gorm.DB, embeddingDims int) error {
 			return nil
 		},
 	},
+	// Migration 044: Add user_feedback column to observations.
+	{
+		ID: "044_observation_user_feedback",
+		Migrate: func(tx *gorm.DB) error {
+			return tx.Exec(`ALTER TABLE observations ADD COLUMN IF NOT EXISTS user_feedback INT NOT NULL DEFAULT 0`).Error
+		},
+		Rollback: func(tx *gorm.DB) error {
+			return tx.Exec(`ALTER TABLE observations DROP COLUMN IF EXISTS user_feedback`).Error
+		},
+	},
+	// Migration 045: Add is_suppressed column to observations.
+	{
+		ID: "045_observation_is_suppressed",
+		Migrate: func(tx *gorm.DB) error {
+			return tx.Exec(`ALTER TABLE observations ADD COLUMN IF NOT EXISTS is_suppressed BOOLEAN NOT NULL DEFAULT FALSE`).Error
+		},
+		Rollback: func(tx *gorm.DB) error {
+			return tx.Exec(`ALTER TABLE observations DROP COLUMN IF EXISTS is_suppressed`).Error
+		},
+	},
 	})
 	if err := m.Migrate(); err != nil {
 		return fmt.Errorf("run gormigrate migrations: %w", err)
