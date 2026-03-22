@@ -38,6 +38,7 @@ export interface Stats {
   connectedClients: number
   sessionsToday: number
   retrieval: RetrievalStats
+  observationCount?: number
 }
 
 export interface SSEEvent {

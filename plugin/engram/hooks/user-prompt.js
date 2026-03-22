@@ -35,6 +35,15 @@ async function handleUserPrompt(ctx, input) {
       ? searchResult.observations
       : [];
 
+    // total_results reflects how many observations matched before the server-side
+    // max_results cap was applied. When present and larger than the returned array,
+    // it means the server truncated the results. Fall back to the array length only
+    // when total_results is absent (older server versions).
+    const totalResults =
+      typeof searchResult.total_results === 'number'
+        ? searchResult.total_results
+        : observations.length;
+
     // Filter out credentials from context injection (leak prevention).
     // Credentials are only accessible via the dedicated get_credential MCP tool.
     const safeObservations = observations.filter(obs => {
@@ -148,9 +157,9 @@ async function handleUserPrompt(ctx, input) {
       }
 
       // observationCount tracks injected (post-trim) count for deciding whether
-      // to return context. matchedCount is the raw search result count (pre-trim)
-      // sent to the DB so the badge shows how many memories matched the query.
-      matchedCount = safeObservations.length;
+      // to return context. matchedCount is the true total matched count from the
+      // server (pre-max_results-cap), so the badge shows meaningful signal.
+      matchedCount = totalResults - (observations.length - safeObservations.length);
       observationCount = budgetObs.length;
       let contextBuilder = '<relevant-memory>\n';
       contextBuilder += '# Relevant Knowledge From Previous Sessions\n';

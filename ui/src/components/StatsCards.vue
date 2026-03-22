@@ -13,6 +13,13 @@ const uptime = computed(() => {
   return formatUptime(props.stats.uptime)
 })
 
+// Use the total count from the stats API when available (reflects actual DB total,
+// not the page size fetched by the timeline). Fall back to the timeline prop when
+// the stats endpoint hasn't returned yet.
+const displayObservationCount = computed(() =>
+  props.stats?.observationCount ?? props.observationCount
+)
+
 const status = computed(() => {
   if (!props.stats) return 'Loading'
   if (props.stats.isProcessing) return 'Processing'
@@ -60,7 +67,7 @@ const statusColor = computed(() => {
       <div class="flex items-center justify-between">
         <div>
           <p class="text-xs text-slate-400 uppercase tracking-wide">Observations</p>
-          <p class="text-2xl font-bold text-purple-400">{{ observationCount }}</p>
+          <p class="text-2xl font-bold text-purple-400">{{ displayObservationCount }}</p>
         </div>
         <div class="w-10 h-10 rounded-full bg-purple-500/20 flex items-center justify-center">
           <i class="fas fa-database text-purple-400" />

@@ -367,6 +367,14 @@ func (s *Service) handleGetStats(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Include total observation count (active, non-archived, non-superseded)
+	if s.observationStore != nil {
+		obsCount, err := s.observationStore.GetTotalObservationCount(r.Context(), project)
+		if err == nil {
+			response["observationCount"] = obsCount
+		}
+	}
+
 	// Include project-specific observation count if project is specified
 	if project != "" {
 		count, err := s.getCachedObservationCount(r.Context(), project)

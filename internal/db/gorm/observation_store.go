@@ -514,6 +514,22 @@ func (s *ObservationStore) GetObservationCount(ctx context.Context, project stri
 	return int(count), err
 }
 
+// GetTotalObservationCount returns the count of active (non-archived, non-superseded) observations.
+// If project is empty, counts across all projects.
+func (s *ObservationStore) GetTotalObservationCount(ctx context.Context, project string) (int, error) {
+	var count int64
+	q := s.db.WithContext(ctx).
+		Model(&Observation{}).
+		Where("COALESCE(is_superseded, 0) = 0 AND COALESCE(is_archived, 0) = 0")
+	if project != "" {
+		q = q.Where("project = ?", project)
+	}
+	if err := q.Count(&count).Error; err != nil {
+		return 0, err
+	}
+	return int(count), nil
+}
+
 // GetAllRecentObservations retrieves recent observations across all projects.
 func (s *ObservationStore) GetAllRecentObservations(ctx context.Context, limit int) ([]*models.Observation, error) {
 	var dbObservations []Observation

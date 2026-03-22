@@ -328,6 +328,9 @@ func (s *Service) handleSearchByPrompt(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
+	// Capture total before applying max results cap so callers can tell whether results were truncated.
+	totalResults := len(clusteredObservations)
+
 	// Apply max results cap if configured
 	if maxResults > 0 && len(clusteredObservations) > maxResults {
 		clusteredObservations = clusteredObservations[:maxResults]
@@ -430,13 +433,14 @@ func (s *Service) handleSearchByPrompt(w http.ResponseWriter, r *http.Request) {
 	s.trackSearchQuery(query, project, "observations", len(clusteredObservations), usedVector, float32(time.Since(searchStart).Milliseconds()))
 
 	writeJSON(w, map[string]any{
-		"project":      project,
-		"query":        query,
-		"intent":       detectedIntent,
-		"expansions":   expansionInfo,
-		"observations": obsWithScores,
-		"threshold":    threshold,
-		"max_results":  maxResults,
+		"project":       project,
+		"query":         query,
+		"intent":        detectedIntent,
+		"expansions":    expansionInfo,
+		"observations":  obsWithScores,
+		"threshold":     threshold,
+		"max_results":   maxResults,
+		"total_results": totalResults,
 	})
 }
 
