@@ -1173,6 +1173,31 @@ func (s *Server) handleToolsList(req *Request) *Response {
 					},
 				},
 			},
+			Tool{
+				Name:        "rate_memory",
+				Description: "Rate a memory as useful or not useful. Affects future ranking in search results.",
+				tier:        tierCore,
+				InputSchema: map[string]any{
+					"type":     "object",
+					"required": []string{"id", "rating"},
+					"properties": map[string]any{
+						"id":     map[string]any{"type": "integer", "description": "Observation ID to rate"},
+						"rating": map[string]any{"type": "string", "enum": []string{"useful", "not_useful"}, "description": "Rating: useful or not_useful"},
+					},
+				},
+			},
+			Tool{
+				Name:        "suppress_memory",
+				Description: "Suppress an observation so it is excluded from future search results. The observation remains in the database but is hidden.",
+				tier:        tierCore,
+				InputSchema: map[string]any{
+					"type":     "object",
+					"required": []string{"id"},
+					"properties": map[string]any{
+						"id": map[string]any{"type": "integer", "description": "Observation ID to suppress"},
+					},
+				},
+			},
 		)
 	}
 
@@ -1519,6 +1544,10 @@ func (s *Server) callTool(ctx context.Context, name string, args json.RawMessage
 		return s.handleStoreMemory(ctx, args)
 	case "recall_memory":
 		return s.handleRecallMemory(ctx, args)
+	case "rate_memory":
+		return s.handleRateMemory(ctx, args)
+	case "suppress_memory":
+		return s.handleSuppressMemory(ctx, args)
 	}
 
 	// Search-based tools: use parseArgs + coercion instead of direct unmarshal

@@ -74,7 +74,8 @@ type Observation struct {
 	ID              int64         `gorm:"primaryKey;autoIncrement"`
 	ImportanceScore float64       `gorm:"type:real;default:1.0;index:idx_observations_importance,priority:1,sort:desc"`
 	UtilityScore    float64       `gorm:"type:real;default:0.5"`
-	UserFeedback    int           `gorm:"default:0"`
+	UserFeedback    int           `gorm:"not null;default:0"`
+	IsSuppressed    bool          `gorm:"not null;default:false"`
 	RetrievalCount  int           `gorm:"default:0"`
 	InjectionCount  int           `gorm:"default:0"`
 	CreatedAtEpoch  int64         `gorm:"index:idx_observations_created,sort:desc;index:idx_observations_project_created,priority:2,sort:desc;not null"`

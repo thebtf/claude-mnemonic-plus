@@ -73,6 +73,11 @@ func NewObservationStore(store *Store, cleanupFunc CleanupFunc) *ObservationStor
 	return s
 }
 
+// GetDB returns the underlying GORM DB instance for direct queries.
+func (s *ObservationStore) GetDB() *gorm.DB {
+	return s.db
+}
+
 // startCleanupWorker starts the background cleanup worker.
 func (s *ObservationStore) startCleanupWorker() {
 	s.cleanupOnce.Do(func() {
@@ -682,6 +687,7 @@ func (s *ObservationStore) SearchObservationsFTS(ctx context.Context, query, pro
 		FROM observations o
 		WHERE o.search_vector @@ websearch_to_tsquery('english', $1)
 		  AND (o.project = $2 OR o.scope = 'global')
+		  AND COALESCE(o.is_suppressed, FALSE) = FALSE
 		ORDER BY ts_rank(o.search_vector, websearch_to_tsquery('english', $1)) DESC,
 		         COALESCE(o.importance_score, 1.0) DESC
 		LIMIT $3
@@ -737,6 +743,7 @@ func (s *ObservationStore) SearchObservationsFTSFiltered(ctx context.Context, qu
 		FROM observations o
 		WHERE o.search_vector @@ websearch_to_tsquery('english', $1)
 		  AND (o.scope = 'global' OR (o.scope = 'project' AND o.project = $2) OR (o.scope = 'agent' AND o.agent_id = $3))
+		  AND COALESCE(o.is_suppressed, FALSE) = FALSE
 		ORDER BY ts_rank(o.search_vector, websearch_to_tsquery('english', $1)) DESC,
 		         COALESCE(o.importance_score, 1.0) DESC
 		LIMIT $4
@@ -789,6 +796,7 @@ func (s *ObservationStore) SearchObservationsFTSScored(ctx context.Context, quer
 		FROM observations o
 		WHERE o.search_vector @@ websearch_to_tsquery('english', $1)
 		  AND (o.project = $2 OR o.scope = 'global')
+		  AND COALESCE(o.is_suppressed, FALSE) = FALSE
 		ORDER BY rank_score DESC
 		LIMIT $3
 	`
@@ -872,7 +880,7 @@ func (s *ObservationStore) searchObservationsLike(ctx context.Context, keywords 
 
 	// Build WHERE clause
 	whereClause := strings.Join(conditions, " OR ")
-	fullWhere := "(" + whereClause + ") AND (project = ? OR scope = 'global')"
+	fullWhere := "(" + whereClause + ") AND (project = ? OR scope = 'global') AND COALESCE(is_suppressed, FALSE) = FALSE"
 	args = append(args, project)
 
 	var dbObservations []Observation
@@ -911,7 +919,7 @@ func (s *ObservationStore) searchObservationsLikeFiltered(ctx context.Context, k
 	}
 
 	whereClause := strings.Join(conditions, " OR ")
-	fullWhere := "(" + whereClause + ") AND (scope = 'global' OR (scope = 'project' AND project = ?) OR (scope = 'agent' AND agent_id = ?))"
+	fullWhere := "(" + whereClause + ") AND (scope = 'global' OR (scope = 'project' AND project = ?) OR (scope = 'agent' AND agent_id = ?)) AND COALESCE(is_suppressed, FALSE) = FALSE"
 	args = append(args, f.Project, f.AgentID)
 
 	var dbObservations []Observation
