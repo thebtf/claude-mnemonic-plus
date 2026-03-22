@@ -322,6 +322,51 @@ func (s *Service) handleSearchByPrompt(w http.ResponseWriter, r *http.Request) {
 		clusteredObservations = clusteredObservations[:maxResults]
 	}
 
+	// Apply LLM behavioral relevance filter if enabled
+	if s.llmFilter != nil && s.config.LLMFilterEnabled && len(clusteredObservations) > 0 {
+		llmFilter := s.llmFilter
+		// Take top candidates for LLM evaluation (avoid sending too many)
+		candidates := clusteredObservations
+		if s.config.LLMFilterCandidates > 0 && len(candidates) > s.config.LLMFilterCandidates {
+			candidates = candidates[:s.config.LLMFilterCandidates]
+		}
+		relevantIDs := llmFilter.FilterByRelevance(r.Context(), candidates, project, query)
+		if len(relevantIDs) > 0 && len(relevantIDs) < len(candidates) {
+			// Build a fast lookup set
+			idSet := make(map[int64]struct{}, len(relevantIDs))
+			for _, id := range relevantIDs {
+				idSet[id] = struct{}{}
+			}
+			filtered := make([]*models.Observation, 0, len(relevantIDs))
+			for _, obs := range clusteredObservations {
+				if _, ok := idSet[obs.ID]; ok {
+					filtered = append(filtered, obs)
+				}
+			}
+			log.Info().
+				Str("project", project).
+				Int("before", len(clusteredObservations)).
+				Int("after", len(filtered)).
+				Msg("LLM filter applied")
+			clusteredObservations = filtered
+		}
+	}
+
+	// Async: log which observations were injected into this context
+	if s.observationStore != nil && len(clusteredObservations) > 0 {
+		resultIDs := make([]int64, len(clusteredObservations))
+		for i, obs := range clusteredObservations {
+			resultIDs[i] = obs.ID
+		}
+		go func() {
+			logCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+			defer cancel()
+			if err := s.observationStore.LogInjections(logCtx, resultIDs, project, query, ""); err != nil {
+				log.Debug().Err(err).Msg("Failed to log injections")
+			}
+		}()
+	}
+
 	// Record retrieval stats with staleness metrics
 	s.recordRetrievalStatsExtended(project, int64(len(clusteredObservations)), 0, 0,
 		int64(staleCount), int64(len(freshObservations)), int64(duplicatesRemoved), true)
