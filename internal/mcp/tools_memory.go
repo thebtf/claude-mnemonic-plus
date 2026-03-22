@@ -393,3 +393,63 @@ func (s *Server) handleRecallMemory(ctx context.Context, args json.RawMessage) (
 		return sb.String(), nil
 	}
 }
+
+// handleRateMemory allows agents to rate observation usefulness.
+// A "useful" rating increments user_feedback by 1; "not_useful" decrements by 1.
+func (s *Server) handleRateMemory(ctx context.Context, args json.RawMessage) (string, error) {
+	if s.observationStore == nil {
+		return "", fmt.Errorf("observation store not available")
+	}
+
+	m, err := parseArgs(args)
+	if err != nil {
+		return "", err
+	}
+
+	id := coerceInt64(m["id"], 0)
+	rating := coerceString(m["rating"], "")
+
+	if id == 0 {
+		return "", fmt.Errorf("id required")
+	}
+	if rating != "useful" && rating != "not_useful" {
+		return "", fmt.Errorf("rating must be 'useful' or 'not_useful'")
+	}
+
+	delta := 1
+	if rating == "not_useful" {
+		delta = -1
+	}
+
+	if err := s.observationStore.GetDB().WithContext(ctx).
+		Exec("UPDATE observations SET user_feedback = COALESCE(user_feedback, 0) + ? WHERE id = ?", delta, id).Error; err != nil {
+		return "", fmt.Errorf("update feedback: %w", err)
+	}
+
+	return fmt.Sprintf("Rated observation %d as %s", id, rating), nil
+}
+
+// handleSuppressMemory marks an observation as suppressed, excluding it from future search results.
+// The observation remains in the database but is hidden from all FTS and LIKE search queries.
+func (s *Server) handleSuppressMemory(ctx context.Context, args json.RawMessage) (string, error) {
+	if s.observationStore == nil {
+		return "", fmt.Errorf("observation store not available")
+	}
+
+	m, err := parseArgs(args)
+	if err != nil {
+		return "", err
+	}
+
+	id := coerceInt64(m["id"], 0)
+	if id == 0 {
+		return "", fmt.Errorf("id required")
+	}
+
+	if err := s.observationStore.GetDB().WithContext(ctx).
+		Exec("UPDATE observations SET is_suppressed = TRUE WHERE id = ?", id).Error; err != nil {
+		return "", fmt.Errorf("suppress: %w", err)
+	}
+
+	return fmt.Sprintf("Observation %d suppressed", id), nil
+}
