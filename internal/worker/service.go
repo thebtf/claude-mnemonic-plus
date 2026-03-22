@@ -874,7 +874,7 @@ func (s *Service) initializeAsync() {
 	}
 	maintenanceSvc := maintenance.NewService(
 		store, observationStore, summaryStore, promptStore,
-		vectorCleanupFn, cfg, s.similarityTelemetry, smartGC, patternStore, log.Logger,
+		vectorCleanupFn, cfg, s.similarityTelemetry, smartGC, patternStore, vectorClient, log.Logger,
 	)
 	s.initMu.Lock()
 	s.maintenanceService = maintenanceSvc
