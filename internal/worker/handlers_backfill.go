@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/rs/zerolog/log"
 	"github.com/thebtf/engram/internal/backfill"
@@ -476,4 +477,116 @@ func vaultStoreDetectedSecrets(ctx context.Context, s *Service, text, project st
 	if stored > 0 {
 		log.Info().Int("count", stored).Int("detected", len(secrets)).Msg("backfill: auto-detected secrets stored in vault")
 	}
+}
+
+// handleImportFeedback godoc
+// @Summary Import a feedback rule via LLM
+// @Description Accepts raw feedback_*.md content, processes it through the server-side LLM
+// to extract a structured TRIGGER→RULE→REASON observation, deduplicates, and stores as type=guidance.
+// @Tags Import
+// @Accept json
+// @Produce json
+// @Security ApiKeyAuth
+// @Param body body object true "Feedback content: {content: string, source_file: string}"
+// @Success 200 {object} map[string]interface{}
+// @Failure 400 {string} string "bad request"
+// @Failure 503 {string} string "LLM not configured"
+// @Router /api/import/feedback [post]
+func (s *Service) handleImportFeedback(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Content    string `json:"content"`
+		SourceFile string `json:"source_file"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid JSON: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+	if strings.TrimSpace(req.Content) == "" {
+		http.Error(w, "content is required", http.StatusBadRequest)
+		return
+	}
+
+	// Initialize LLM client from server env vars.
+	llmCfg := learning.DefaultOpenAIConfig()
+	llmClient := learning.NewOpenAIClient(llmCfg)
+	if !llmClient.IsConfigured() {
+		http.Error(w, "LLM not configured on server (set ENGRAM_LLM_URL + ENGRAM_LLM_API_KEY)", http.StatusServiceUnavailable)
+		return
+	}
+
+	// Call LLM with feedback import prompt.
+	callCtx, cancel := context.WithTimeout(r.Context(), 60*time.Second)
+	defer cancel()
+	response, err := llmClient.Complete(callCtx, extract.FeedbackImportSystemPrompt, req.Content)
+	if err != nil {
+		log.Warn().Err(err).Str("source", req.SourceFile).Msg("feedback import: LLM call failed")
+		http.Error(w, "LLM extraction failed: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	// Parse single observation from LLM XML output.
+	obs := extract.ParseSingleObservation(response)
+	if obs == nil {
+		writeJSON(w, map[string]any{
+			"status": "skipped",
+			"reason": "LLM returned no parseable observation",
+		})
+		return
+	}
+
+	s.initMu.RLock()
+	obsStore := s.observationStore
+	vectorClient := s.vectorClient
+	s.initMu.RUnlock()
+
+	if obsStore == nil {
+		http.Error(w, "observation store not ready", http.StatusServiceUnavailable)
+		return
+	}
+
+	// Semantic dedup: skip if very similar rule already exists.
+	if vectorClient != nil && vectorClient.IsConnected() {
+		searchText := obs.Title + " " + obs.Narrative
+		results, qErr := vectorClient.Query(r.Context(), searchText, 1, vector.WhereFilter{})
+		if qErr == nil && len(results) > 0 && results[0].Similarity > 0.90 {
+			writeJSON(w, map[string]any{
+				"status":     "duplicate",
+				"similarity": results[0].Similarity,
+				"title":      obs.Title,
+			})
+			return
+		}
+	}
+
+	// Build and store as guidance observation.
+	parsed := &models.ParsedObservation{
+		Type:       models.ObsTypeGuidance,
+		SourceType: models.SourceManual,
+		Title:      obs.Title,
+		Narrative:  obs.Narrative,
+		Concepts:   obs.Concepts.Concepts,
+		Scope:      models.ScopeGlobal,
+	}
+
+	sessionID := fmt.Sprintf("feedback-import:%s", req.SourceFile)
+	id, _, storeErr := obsStore.StoreObservation(r.Context(), sessionID, "", parsed, 0, 0)
+	if storeErr != nil {
+		log.Error().Err(storeErr).Str("title", obs.Title).Msg("feedback import: failed to store")
+		http.Error(w, "failed to store observation: "+storeErr.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	// Set high importance for behavioral rules.
+	if err := obsStore.UpdateImportanceScore(r.Context(), id, 0.8); err != nil {
+		log.Warn().Err(err).Int64("id", id).Msg("feedback import: failed to set importance")
+	}
+
+	log.Info().Int64("id", id).Str("title", obs.Title).Str("source", req.SourceFile).Msg("feedback import: stored rule")
+
+	writeJSON(w, map[string]any{
+		"status":      "imported",
+		"id":          id,
+		"title":       obs.Title,
+		"source_file": req.SourceFile,
+	})
 }
