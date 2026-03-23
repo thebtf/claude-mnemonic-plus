@@ -28,6 +28,36 @@
 **Impact:** `vault_status` shows credentials exist but `get_credential` fails for old entries. Fixed in v1.4.0: auto-generate now writes to `/data/` (persistent volume).
 **Context:** `internal/crypto/vault.go`, migration history
 
+## 2026-03-23: Patterns System — 16k+ Low-Value Patterns
+**What:** Patterns page shows 16,264 patterns. Most are noise from pre-v1.3.4 SDK extraction (before whitelist mode). "Insight" button shows generic text ("I've encountered this pattern N times across M projects") with zero actionable information.
+**Root cause analysis:**
+1. **Confidence = 0.5 for 99% of patterns** — `NewPattern()` sets `Confidence: 0.5` (hardcoded initial). `updateConfidence()` only runs during `AddOccurrence()`, but most patterns were created during bulk backfill/extraction where AddOccurrence was never called. Formula: `freqConfidence = 0.3 + 0.5*(min(freq,10)/10)` + project bonus. But this runs per-occurrence, not on creation.
+2. **No confidence recalculation** — there is no batch recalculation path. Patterns created at 0.5 confidence stay at 0.5 forever unless new observations match them. Migration 042 purged `frequency < 5` but didn't recalculate confidence.
+3. **Description is generic** — `promoteCandidate()` sets description to "Automatically detected pattern from recurring observations" for all patterns. No LLM summarization, no source evidence.
+4. **Insight text is template** — Dashboard shows `{frequency} times across {projects} projects` — no examples, no observation links, no recommendations.
+5. **No purge for garbage patterns** — 16k patterns with frequency ≥ 5 but 0.5 confidence indicates they were mass-created from garbage observations (since cleaned up in migrations 040-043) but the patterns themselves were never cleaned.
+**Impact:** Patterns page unusable. 16k entries with no way to evaluate quality. Agents can't use patterns for decision-making.
+**Fix plan (future sprint):**
+1. Batch recalculate confidence for all patterns using `updateConfidence()` logic
+2. Purge patterns whose source observations no longer exist (orphan patterns)
+3. Add LLM-generated description when confidence > 0.7 (replace generic text)
+4. Show source observations in "Insight" view (links to observation detail)
+5. Add "archive all with confidence < 0.6" bulk action
+**Context:** `pkg/models/pattern.go:165` (hardcoded 0.5), `internal/pattern/detector.go:257` (generic description), `internal/pattern/quality.go` (scoring formula), `ui/src/views/PatternsView.vue`
+
+## 2026-03-23: ScoreBreakdown Modal — API Response Mismatch
+**What:** Clicking score badge (e.g., "1.31") in ObservationCard triggers ScoreBreakdown modal but shows blank/error. API returns `{id, components, config}` but Vue component expects `{observation: {title, type}, scoring: {final_score, type_weight, recency_decay, ...}, explanation: {...}}`.
+**Root cause:** `handleExplainScore` in `handlers_scoring.go` returns raw `scoreCalculator.CalculateComponents()` output. Frontend `ScoreBreakdown.vue` expects a different shape with nested `observation`, `scoring`, `explanation` objects.
+**Impact:** Score breakdown feature broken — modal shows loading then nothing.
+**Fix plan:** Either reshape API response to match frontend, or update frontend to match API.
+**Context:** `internal/worker/handlers_scoring.go:383`, `ui/src/components/ScoreBreakdown.vue:106-196`, `ui/src/utils/api.ts:205`
+
+## 2026-03-23: Observation Status Lifecycle (Future FR)
+**What:** Observations lack a `status` field (active/resolved/conditional). Temporary facts (e.g., "Codex account blocked") can only be suppressed (hidden forever) or downvoted (soft penalty). Neither supports "resolved but re-openable if condition recurs".
+**Impact:** Stale observations continue to inject into context. Users must manually suppress and re-create when conditions change.
+**Fix plan:** Add `status` column to observations (active/resolved), filter resolved from injection, allow reopen via MCP tool.
+**Context:** Discussed 2026-03-23 re: Codex Account Blocker observation (ID 56553)
+
 ## 2026-03-19: MCP Resources/Prompts Stubs
 What: MCP server returns empty lists for resources/list, prompts/list, completion/complete
 Why deferred: MCP spec allows graceful empty responses for unsupported capabilities
