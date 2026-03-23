@@ -1,42 +1,74 @@
 # Technical Debt
 
-## Privacy / Secret Detection (2026-03-12)
+## 2026-03-23: Sessions View Shows Indexed Transcripts, Not SDK Sessions
+**What:** Dashboard "Sessions" page queries `sessions-index` API (indexed transcripts via `POST /api/sessions/index`) but users expect to see their actual Claude Code sessions (stored in `sdk_sessions` table via session-start hook).
+**Why deferred:** Requires new REST endpoint to list SDK sessions with pagination/project filter, plus frontend refactor of SessionsView to use the new endpoint instead of `fetchIndexedSessions`. The `sync-sessions.js` hook (added in v1.5.0) indexes new sessions automatically, but historical sessions remain unindexed.
+**Impact:** "No sessions found" on Sessions page even when sessions exist. UX confusion — project filter dropdown works (populated from observations) but session list is empty.
+**Root cause:**
+- `GET /api/sessions` requires `claudeSessionId` param — lookup by ID, not listing
+- `GET /api/sessions-index` returns indexed transcripts (separate table), not SDK sessions
+- `ui/src/composables/useSessions.ts` calls `fetchIndexedSessions` → empty result
+- SDK sessions exist in `sdk_sessions` table but have no list endpoint
+**Fix plan:**
+1. Add `GET /api/sessions/list?project=X&limit=N&offset=M` endpoint in `handlers_sessions.go` querying `sdk_sessions` table
+2. Add `ListSDKSessions(ctx, project, limit, offset)` method to `SessionStore`
+3. Update `useSessions.ts` to call new endpoint
+4. Keep `sessions-index` as secondary "transcript search" feature
+**Context:** `internal/worker/handlers_sessions.go:416`, `ui/src/composables/useSessions.ts`, `internal/db/gorm/session_store.go`
 
-### ~~P1: privacy/secrets.go functions never called from production code~~ — RESOLVED 2026-03-12
-`ContainsSecrets()`, `RedactSecrets()`, and `SanitizeObservation()` in `internal/privacy/secrets.go`
-were fully implemented and tested but unreachable from any production path.
+## 2026-03-23: T027 Post-Deploy Verification Pending
+**What:** Retrospective eval skill (T027) needs manual execution after v1.5.1 deploy to verify >50% observation relevance.
+**Why deferred:** Requires server restart with v1.5.1 image (migration 046 fix), then manual `/retrospective-eval` run.
+**Impact:** No automated verification that composite scoring + diversity penalty actually improve relevance. Currently based on qualitative assessment only.
+**Context:** `.agent/specs/composite-relevance-scoring/tasks.md` T027
 
-**Resolution:**
-- `internal/mcp/tools_memory.go` `handleStoreMemory`: changed from hard-reject to warn-and-redact.
-  Content containing secrets is now logged at WARN level and redacted via `RedactSecrets()` before storage.
-- `internal/worker/handlers_ingest.go` `handleIngestEvent`: secret detection added on `toolInputStr` and
-  `toolResultStr` immediately after stringification, before any pipeline processing. Secrets are redacted
-  in-memory; the raw event stored in `raw_events` may still contain original data (source-of-truth store).
+## 2026-03-23: Vault Credentials Encrypted with Lost Key
+**What:** 15 credentials in DB encrypted with auto-generated AES-256-GCM key that was stored in Docker ephemeral filesystem (`~/.engram/vault.key`). Container was recreated, key lost.
+**Why deferred:** Credentials cannot be recovered — AES-256-GCM has no backdoor. Users need to re-create credentials with current key.
+**Impact:** `vault_status` shows credentials exist but `get_credential` fails for old entries. Fixed in v1.4.0: auto-generate now writes to `/data/` (persistent volume).
+**Context:** `internal/crypto/vault.go`, migration history
 
+## 2026-03-23: Patterns System — 16k+ Low-Value Patterns
+**What:** Patterns page shows 16,264 patterns. Most are noise from pre-v1.3.4 SDK extraction (before whitelist mode). "Insight" button shows generic text ("I've encountered this pattern N times across M projects") with zero actionable information.
+**Root cause analysis:**
+1. **Confidence = 0.5 for 99% of patterns** — `NewPattern()` sets `Confidence: 0.5` (hardcoded initial). `updateConfidence()` only runs during `AddOccurrence()`, but most patterns were created during bulk backfill/extraction where AddOccurrence was never called. Formula: `freqConfidence = 0.3 + 0.5*(min(freq,10)/10)` + project bonus. But this runs per-occurrence, not on creation.
+2. **No confidence recalculation** — there is no batch recalculation path. Patterns created at 0.5 confidence stay at 0.5 forever unless new observations match them. Migration 042 purged `frequency < 5` but didn't recalculate confidence.
+3. **Description is generic** — `promoteCandidate()` sets description to "Automatically detected pattern from recurring observations" for all patterns. No LLM summarization, no source evidence.
+4. **Insight text is template** — Dashboard shows `{frequency} times across {projects} projects` — no examples, no observation links, no recommendations.
+5. **No purge for garbage patterns** — 16k patterns with frequency ≥ 5 but 0.5 confidence indicates they were mass-created from garbage observations (since cleaned up in migrations 040-043) but the patterns themselves were never cleaned.
+**Impact:** Patterns page unusable. 16k entries with no way to evaluate quality. Agents can't use patterns for decision-making.
+**Fix plan (future sprint):**
+1. Batch recalculate confidence for all patterns using `updateConfidence()` logic
+2. Purge patterns whose source observations no longer exist (orphan patterns)
+3. Add LLM-generated description when confidence > 0.7 (replace generic text)
+4. Show source observations in "Insight" view (links to observation detail)
+5. Add "archive all with confidence < 0.6" bulk action
+**Context:** `pkg/models/pattern.go:165` (hardcoded 0.5), `internal/pattern/detector.go:257` (generic description), `internal/pattern/quality.go` (scoring formula), `ui/src/views/PatternsView.vue`
 
-## Credential Storage (2026-03-12)
+## 2026-03-23: ScoreBreakdown Modal — API Response Mismatch
+**What:** Clicking score badge (e.g., "1.31") in ObservationCard triggers ScoreBreakdown modal but shows blank/error. API returns `{id, components, config}` but Vue component expects `{observation: {title, type}, scoring: {final_score, type_weight, recency_decay, ...}, explanation: {...}}`.
+**Root cause:** `handleExplainScore` in `handlers_scoring.go` returns raw `scoreCalculator.CalculateComponents()` output. Frontend `ScoreBreakdown.vue` expects a different shape with nested `observation`, `scoring`, `explanation` objects.
+**Impact:** Score breakdown feature broken — modal shows loading then nothing.
+**Fix plan:** Either reshape API response to match frontend, or update frontend to match API.
+**Context:** `internal/worker/handlers_scoring.go:383`, `ui/src/components/ScoreBreakdown.vue:106-196`, `ui/src/utils/api.ts:205`
 
-### ~~S2: vault_status missing key_source field~~ — RESOLVED 2026-03-12
-Added `source` field to `Vault` struct, `KeySource()` method, exposed in `vault_status` as `key_source`.
+## 2026-03-23: Observation Status Lifecycle (Future FR)
+**What:** Observations lack a `status` field (active/resolved/conditional). Temporary facts (e.g., "Codex account blocked") can only be suppressed (hidden forever) or downvoted (soft penalty). Neither supports "resolved but re-openable if condition recurs".
+**Impact:** Stale observations continue to inject into context. Users must manually suppress and re-create when conditions change.
+**Fix plan:** Add `status` column to observations (active/resolved), filter resolved from injection, allow reopen via MCP tool.
+**Context:** Discussed 2026-03-23 re: Codex Account Blocker observation (ID 56553)
 
-### ~~S3: GetCredential searches by title OR narrative unnecessarily~~ — RESOLVED 2026-03-12
-Simplified to `WHERE title = ?` in both `GetCredential` and `DeleteCredential`.
+## 2026-03-19: MCP Resources/Prompts Stubs
+What: MCP server returns empty lists for resources/list, prompts/list, completion/complete
+Why deferred: MCP spec allows graceful empty responses for unsupported capabilities
+Impact: No functional impact — clients handle empty lists
 
-### ~~S7: Migration 031 rollback silently swallows errors~~ — RESOLVED 2026-03-12
-Replaced `_ = tx.Exec(s).Error` with `log.Warn().Err(err)` logging.
+## 2026-03-19: Memory Blocks Table Unpopulated
+What: migration 024 created memory_blocks table but no code populates it
+Why deferred: Consolidation-driven population requires redesign of consolidation scheduler
+Impact: Table exists but empty — no runtime impact
 
-### ~~S8: expandTagHierarchy duplicated~~ — RESOLVED 2026-03-12
-`tools_memory.go` now calls shared `expandTagHierarchy` from `tools_credential.go` (same package).
-Note: tags on credentials remain stored but undiscoverable (filtered from search). Low impact, no functional harm.
-
-### S9: EncryptionKey held as plain string in Config
-**What:** `cfg.EncryptionKey` holds the raw hex key as an immutable Go string that cannot be zeroed after use.
-**Why deferred:** Go language limitation — strings are immutable. The `Vault.key` `[]byte` field has the same concern. Clearing config after decode is partial mitigation only.
-**Impact:** Key material persists in heap until GC. Low practical risk for a server process.
-**Files:** `internal/config/config.go`, `internal/crypto/vault.go`
-
-### C2: Move vault state from package-level to Server struct
-**What:** `sync.Once` + `sharedVault` + `vaultInitErr` are package-level globals, preventing test isolation.
-**Why deferred:** Permanent init failure is correct behavior (requires human intervention). Comment documents the constraint. Moving to Server struct is moderate effort for test-isolation benefit only.
-**Impact:** Tests that trigger vault init failure will poison all subsequent tests in the same binary.
-**Files:** `internal/mcp/tools_credential.go`
+## 2026-03-19: Config Reload via os.Exit(0)
+What: reloadConfig calls os.Exit(0) instead of hot-reload
+Why deferred: Hot-reload requires significant refactoring of service initialization
+Impact: Docker restart policy handles the restart automatically

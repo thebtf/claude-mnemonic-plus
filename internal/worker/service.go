@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -17,15 +18,18 @@ import (
 	mdchunking "github.com/thebtf/engram/internal/chunking/markdown"
 	"github.com/thebtf/engram/internal/collections"
 	"github.com/thebtf/engram/internal/config"
+	"github.com/thebtf/engram/internal/crypto"
 	graphpkg "github.com/thebtf/engram/internal/graph"
 	"github.com/thebtf/engram/internal/graph/falkordb"
 	"github.com/thebtf/engram/internal/consolidation"
 	"github.com/thebtf/engram/internal/logbuf"
 	"github.com/thebtf/engram/internal/db/gorm"
 	"github.com/thebtf/engram/internal/embedding"
+	"github.com/thebtf/engram/internal/learning"
 	"github.com/thebtf/engram/internal/maintenance"
 	"github.com/thebtf/engram/internal/mcp"
 	"github.com/thebtf/engram/internal/pattern"
+	"github.com/thebtf/engram/internal/relation"
 	"github.com/thebtf/engram/internal/reranking"
 	"github.com/thebtf/engram/internal/scoring"
 	"github.com/thebtf/engram/internal/search"
@@ -41,6 +45,7 @@ import (
 	"github.com/thebtf/engram/internal/worker/sse"
 	"github.com/thebtf/engram/pkg/models"
 	"github.com/rs/zerolog/log"
+	httpSwagger "github.com/swaggo/http-swagger"
 )
 
 // Service configuration constants
@@ -92,16 +97,16 @@ func retryWithBackoff(ctx context.Context, maxRetries int, initialBackoff time.D
 
 // RetrievalStats tracks observation retrieval metrics.
 type RetrievalStats struct {
-	TotalRequests      int64 // Total retrieval requests (inject + search)
-	ObservationsServed int64 // Observations returned to clients
-	VerifiedStale      int64 // Stale observations that passed verification
-	DeletedInvalid     int64 // Invalid observations deleted
-	SearchRequests     int64 // Semantic search requests
-	ContextInjections  int64 // Session-start context injections
-	StaleExcluded      int64 // Observations excluded due to staleness check
-	FreshCount         int64 // Observations that passed staleness check
-	DuplicatesRemoved  int64 // Observations removed by clustering
-	LastUpdated        int64 // Unix timestamp of last update (atomic)
+	TotalRequests      int64 `json:"total_requests"`      // Total retrieval requests (inject + search)
+	ObservationsServed int64 `json:"observations_served"` // Observations returned to clients
+	VerifiedStale      int64 `json:"verified_stale"`      // Stale observations that passed verification
+	DeletedInvalid     int64 `json:"deleted_invalid"`     // Invalid observations deleted
+	SearchRequests     int64 `json:"search_requests"`     // Semantic search requests
+	ContextInjections  int64 `json:"context_injections"`  // Session-start context injections
+	StaleExcluded      int64 `json:"stale_excluded"`      // Observations excluded due to staleness check
+	FreshCount         int64 `json:"fresh_count"`         // Observations that passed staleness check
+	DuplicatesRemoved  int64 `json:"duplicates_removed"`  // Observations removed by clustering
+	LastUpdated        int64 `json:"last_updated"`        // Unix timestamp of last update (atomic)
 }
 
 // maxRetrievalStatsProjects limits the number of projects tracked to prevent unbounded memory growth.
@@ -129,6 +134,7 @@ type Service struct {
 	graphStore             graphpkg.GraphStore
 	graphWriter            *graphpkg.AsyncGraphWriter
 	patternDetector        *pattern.Detector
+	relationDetector       *relation.Detector
 	sessionManager         *session.Manager
 	sseBroadcaster         *sse.Broadcaster
 	processor              *sdk.Processor
@@ -151,6 +157,7 @@ type Service struct {
 	retrievalStats         map[string]*RetrievalStats
 	sessionStore           *gorm.SessionStore
 	rawEventStore          *gorm.RawEventStore
+	tokenStore             *gorm.TokenStore
 	ingestDedup            *deduplicationCache
 	cancel                 context.CancelFunc
 	cachedObsCounts        map[string]cachedCount
@@ -166,6 +173,9 @@ type Service struct {
 	expensiveOpLimiter     *ExpensiveOperationLimiter
 	logBuffer              *logbuf.RingBuffer
 	backfillTracker        *backfillTracker
+	searchQueryLogStore     *gorm.SearchQueryLogStore
+	retrievalStatsLogStore *gorm.RetrievalStatsLogStore
+	llmFilter              *search.LLMFilter
 	version                string
 	recentQueriesBuf       [maxRecentQueries]RecentSearchQuery
 	wg                     sync.WaitGroup
@@ -180,12 +190,24 @@ type Service struct {
 	staleQueueOnce         sync.Once
 	ready                  atomic.Bool
 	vectorSyncDropped      atomic.Int64
+	vault                  *crypto.Vault
+	vaultOnce              sync.Once
+	vaultErr               error
 }
 
 // cachedCount stores a cached count value with expiration.
 type cachedCount struct {
 	timestamp time.Time
 	count     int
+}
+
+// getVault returns the shared Vault singleton, initializing it once on first call.
+// All errors are cached — a misconfigured vault fails permanently (no retry).
+func (s *Service) getVault() (*crypto.Vault, error) {
+	s.vaultOnce.Do(func() {
+		s.vault, s.vaultErr = crypto.NewVault(s.config)
+	})
+	return s.vault, s.vaultErr
 }
 
 // RebuildStatus tracks the progress of vector rebuild operations.
@@ -497,6 +519,17 @@ func NewService(version string, logBuffer *logbuf.RingBuffer) (*Service, error) 
 	svc.setupMiddleware()
 	svc.setupRoutes()
 
+	// Auth startup gate (ADR-0001): validate before starting heavy initialization.
+	// Fail fast here so initializeAsync never runs without a token unless explicitly disabled.
+	{
+		token := config.GetWorkerToken()
+		authDisabled := strings.EqualFold(strings.TrimSpace(os.Getenv("ENGRAM_AUTH_DISABLED")), "true")
+		if token == "" && !authDisabled {
+			cancel()
+			return nil, fmt.Errorf("ENGRAM_AUTH_ADMIN_TOKEN (or ENGRAM_API_TOKEN) is not set — set it to secure your engram instance, or set ENGRAM_AUTH_DISABLED=true to explicitly run without authentication (NOT recommended for production)")
+		}
+	}
+
 	// Start async initialization
 	go svc.initializeAsync()
 
@@ -637,8 +670,8 @@ func (s *Service) initializeAsync() {
 		}
 	}
 
-	// Create observation store with conflict and relation stores for automatic detection
-	observationStore := gorm.NewObservationStore(store, nil, conflictStore, relationStore)
+	// Create observation store
+	observationStore := gorm.NewObservationStore(store, nil)
 
 	// Create session manager
 	sessionManager := session.NewManager(sessionStore)
@@ -694,6 +727,9 @@ func (s *Service) initializeAsync() {
 		log.Info().Msg("SDK processor initialized")
 	}
 
+	// Create token store and wire into auth middleware
+	tokenStore := gorm.NewTokenStore(store)
+
 	// Create raw event store and ingest deduplication cache
 	rawEventStore := gorm.NewRawEventStore(store)
 
@@ -702,6 +738,7 @@ func (s *Service) initializeAsync() {
 	s.store = store
 	s.sessionStore = sessionStore
 	s.rawEventStore = rawEventStore
+	s.tokenStore = tokenStore
 	s.observationStore = observationStore
 	s.summaryStore = summaryStore
 	s.promptStore = promptStore
@@ -721,6 +758,14 @@ func (s *Service) initializeAsync() {
 	s.reranker = reranker
 	s.initMu.Unlock()
 
+	// Wire token store into auth middleware for client token lookups
+	if s.tokenAuth != nil {
+		s.tokenAuth.SetTokenStore(tokenStore)
+	}
+
+	// Start buffered token stats flusher (batches DB writes every 5s)
+	s.startTokenStatsFlusher(s.ctx)
+
 	// Initialize similarity telemetry (optional — requires vector client)
 	if vectorClient != nil && store != nil && observationStore != nil {
 		simTelemetry := telemetry.NewSimilarityTelemetry(store, observationStore, vectorClient, log.Logger)
@@ -732,6 +777,19 @@ func (s *Service) initializeAsync() {
 	// Background sync: populate FalkorDB from existing PostgreSQL relations.
 	if _, ok := gs.(*graphpkg.NoopGraphStore); !ok && gs != nil {
 		go s.syncGraphFromRelations()
+	}
+
+	// Initialize async relation detector (requires embedding + vector search)
+	if embedSvc != nil && vectorClient != nil {
+		detector := relation.NewDetector(vectorClient, relationStore, conflictStore, observationStore)
+		observationStore.SetRelationDetector(detector)
+		s.relationDetector = detector
+		s.wg.Add(1)
+		go func() {
+			defer s.wg.Done()
+			detector.Start(s.ctx)
+		}()
+		log.Info().Msg("Async relation detector enabled")
 	}
 
 	// Initialize pattern detector
@@ -816,7 +874,7 @@ func (s *Service) initializeAsync() {
 	}
 	maintenanceSvc := maintenance.NewService(
 		store, observationStore, summaryStore, promptStore,
-		vectorCleanupFn, cfg, s.similarityTelemetry, smartGC, log.Logger,
+		vectorCleanupFn, cfg, s.similarityTelemetry, smartGC, patternStore, vectorClient, log.Logger,
 	)
 	s.initMu.Lock()
 	s.maintenanceService = maintenanceSvc
@@ -837,6 +895,34 @@ func (s *Service) initializeAsync() {
 
 	// Initialize session index store (clients push transcripts via REST API)
 	sessionIdxStore := sessions.NewStore(store)
+
+	// Initialize search query log store for persistent analytics
+	searchQueryLogStore := gorm.NewSearchQueryLogStore(store.GetDB())
+
+	// Initialize retrieval stats log store with batched flush
+	retrievalStatsLogStore := gorm.NewRetrievalStatsLogStore(store.GetDB())
+
+	// Initialize LLM filter if enabled
+	if cfg.LLMFilterEnabled {
+		llmCfg := learning.DefaultOpenAIConfig()
+		if cfg.LLMFilterModel != "" {
+			llmCfg.Model = cfg.LLMFilterModel
+		}
+		llmClient := learning.NewOpenAIClient(llmCfg)
+		if llmClient.IsConfigured() {
+			filterTimeout := time.Duration(cfg.LLMFilterTimeoutMS) * time.Millisecond
+			s.initMu.Lock()
+			s.llmFilter = search.NewLLMFilter(llmClient, filterTimeout)
+			s.initMu.Unlock()
+			log.Info().
+				Str("model", llmCfg.Model).
+				Int("timeout_ms", cfg.LLMFilterTimeoutMS).
+				Int("candidates", cfg.LLMFilterCandidates).
+				Msg("LLM behavioral relevance filter enabled")
+		} else {
+			log.Warn().Msg("LLM filter enabled but LLM not configured (set ENGRAM_LLM_URL + ENGRAM_LLM_API_KEY)")
+		}
+	}
 
 	// Initialize search manager for MCP tools
 	searchMgr := search.NewManager(observationStore, summaryStore, promptStore, vectorClient)
@@ -889,6 +975,8 @@ func (s *Service) initializeAsync() {
 	s.searchMgr = searchMgr
 	s.collectionRegistry = collectionRegistry
 	s.sessionIdxStore = sessionIdxStore
+	s.searchQueryLogStore = searchQueryLogStore
+	s.retrievalStatsLogStore = retrievalStatsLogStore
 	s.mcpSSEHandler = mcpSSEHandler
 	s.mcpStreamableHandler = mcpStreamableHandler
 	s.initMu.Unlock()
@@ -1014,8 +1102,8 @@ func (s *Service) reinitializeDatabase() {
 		relationStore.SetCallback(s.graphWriter.Enqueue)
 	}
 
-	// Create observation store with conflict and relation stores for automatic detection
-	observationStore := gorm.NewObservationStore(store, nil, conflictStore, relationStore)
+	// Create observation store
+	observationStore := gorm.NewObservationStore(store, nil)
 
 	// Create new session manager
 	sessionManager := session.NewManager(sessionStore)
@@ -1090,6 +1178,11 @@ func (s *Service) reinitializeDatabase() {
 	s.store = store
 	s.sessionStore = sessionStore
 	s.rawEventStore = rawEventStore
+	s.searchQueryLogStore = gorm.NewSearchQueryLogStore(store.GetDB())
+	if s.retrievalStatsLogStore != nil {
+		s.retrievalStatsLogStore.Close()
+	}
+	s.retrievalStatsLogStore = gorm.NewRetrievalStatsLogStore(store.GetDB())
 	s.observationStore = observationStore
 	s.summaryStore = summaryStore
 	s.promptStore = promptStore
@@ -1540,6 +1633,10 @@ func (s *Service) setupRoutes() {
 	s.router.Get("/", serveIndex)
 	s.router.Get("/assets/*", serveAssets)
 
+	// Auth routes (public — login/logout do not require auth)
+	s.router.Post("/api/auth/login", s.handleAuthLogin)
+	s.router.Post("/api/auth/logout", s.handleAuthLogout)
+
 	// Health check (both root and API-prefixed for compatibility)
 	// Returns 200 immediately so hooks can connect quickly during init
 	// Also returns version for stale worker detection
@@ -1549,43 +1646,51 @@ func (s *Service) setupRoutes() {
 	// Version endpoint for hooks to check if worker needs restart
 	s.router.Get("/api/version", s.handleVersion)
 
-	// Rebuild status endpoint for visibility into vector rebuild progress
-	s.router.Get("/api/rebuild-status", s.handleRebuildStatus)
-
-	// Vector management endpoints
-	s.router.Post("/api/vectors/rebuild", s.handleTriggerVectorRebuild)
-	s.router.Get("/api/vectors/health", s.handleVectorHealth)
-	s.router.Get("/api/vector/metrics", s.handleVectorMetrics)
-	s.router.Get("/api/graph/stats", s.handleGraphStats)
-
 	// Readiness check - returns 200 only when fully initialized
 	s.router.Get("/api/ready", s.handleReady)
 
-	// Update endpoints (work before DB is ready)
-	s.router.Get("/api/update/check", s.handleUpdateCheck)
-	s.router.Post("/api/update/apply", s.handleUpdateApply)
-	s.router.Get("/api/update/status", s.handleUpdateStatus)
-	s.router.Post("/api/update/restart", s.handleUpdateRestart)
+	// OpenAPI docs (read-only spec; protected by global auth middleware if ENGRAM_API_TOKEN is set)
+	s.router.Get("/api/docs", http.RedirectHandler("/api/docs/index.html", http.StatusMovedPermanently).ServeHTTP)
+	s.router.Get("/api/docs/*", httpSwagger.WrapHandler)
 
-	// General restart endpoint (works before DB is ready)
-	s.router.Post("/api/restart", s.handleRestart)
+	// Admin/management routes — authentication applied globally via setupMiddleware.
+	// Grouped for logical organization; no additional middleware needed.
+	s.router.Group(func(r chi.Router) {
+		// Rebuild status endpoint for visibility into vector rebuild progress
+		r.Get("/api/rebuild-status", s.handleRebuildStatus)
 
-	// Selfcheck endpoint (works before DB is ready - checks all components)
-	s.router.Get("/api/selfcheck", s.handleSelfCheck)
+		// Vector management endpoints
+		r.Post("/api/vectors/rebuild", s.handleTriggerVectorRebuild)
+		r.Get("/api/vectors/health", s.handleVectorHealth)
+		r.Get("/api/vector/metrics", s.handleVectorMetrics)
+		r.Get("/api/graph/stats", s.handleGraphStats)
 
-	// Dashboard SSE endpoint (works before DB is ready)
-	s.router.Get("/api/events", s.sseBroadcaster.HandleSSE)
+		// Update endpoints (work before DB is ready)
+		r.Get("/api/update/check", s.handleUpdateCheck)
+		r.Post("/api/update/apply", s.handleUpdateApply)
+		r.Get("/api/update/status", s.handleUpdateStatus)
+		r.Post("/api/update/restart", s.handleUpdateRestart)
 
-	// Log viewer endpoint (works before DB is ready, supports SSE follow mode)
-	s.router.Get("/api/logs", s.handleGetLogs)
+		// General restart endpoint (works before DB is ready)
+		r.Post("/api/restart", s.handleRestart)
 
-	// Instinct import endpoint
-	s.router.Post("/api/instincts/import", s.handleInstinctsImport)
+		// Selfcheck endpoint (works before DB is ready - checks all components)
+		r.Get("/api/selfcheck", s.handleSelfCheck)
 
-	// Backfill endpoints
-	s.router.Post("/api/backfill", s.handleBackfillIngest)
-	s.router.Post("/api/backfill/session", s.handleBackfillSession)
-	s.router.Get("/api/backfill/status", s.handleBackfillStatus)
+		// Dashboard SSE endpoint (works before DB is ready)
+		r.Get("/api/events", s.sseBroadcaster.HandleSSE)
+
+		// Log viewer endpoint (works before DB is ready, supports SSE follow mode)
+		r.Get("/api/logs", s.handleGetLogs)
+
+		// Instinct import endpoint
+		r.Post("/api/instincts/import", s.handleInstinctsImport)
+
+		// Backfill endpoints
+		r.Post("/api/backfill", s.handleBackfillIngest)
+		r.Post("/api/backfill/session", s.handleBackfillSession)
+		r.Get("/api/backfill/status", s.handleBackfillStatus)
+	})
 
 	// MCP routes (require DB ready, no timeout — long-lived SSE connections)
 	s.router.Group(func(r chi.Router) {
@@ -1607,11 +1712,12 @@ func (s *Service) setupRoutes() {
 
 		// Session routes
 		r.Post("/api/sessions/init", s.handleSessionInit)
+		r.Get("/api/sessions/list", s.handleListSessions)
 		r.Get("/api/sessions", s.handleGetSessionByClaudeID)
-		r.Post("/sessions/{id}/init", s.handleSessionStart)
+		r.Post("/api/sessions/{id}/init", s.handleSessionStart)
 		r.Post("/api/sessions/observations", s.handleObservation)
 		r.Post("/api/sessions/subagent-complete", s.handleSubagentComplete)
-		r.Post("/sessions/{id}/summarize", s.handleSummarize)
+		r.Post("/api/sessions/{id}/summarize", s.handleSummarize)
 		r.Post("/api/sessions/{id}/extract-learnings", s.handleExtractLearnings)
 		r.Post("/api/sessions/{sessionId}/mark-injected", s.handleSessionMarkInjected)
 		r.Get("/api/sessions/{sessionId}/injected-observations", s.handleGetSessionInjectedObservations)
@@ -1653,10 +1759,12 @@ func (s *Service) setupRoutes() {
 
 		// Context injection
 		r.Get("/api/context/count", s.handleContextCount)
-		r.Get("/api/context/inject", s.handleContextInject)
+		r.Post("/api/context/inject", s.handleContextInject)
+		r.Get("/api/context/inject", s.handleContextInject) // deprecated — use POST
 		r.Get("/api/context/search", s.handleSearchByPrompt)
 		r.Post("/api/context/search", s.handleSearchByPrompt)
 		r.Get("/api/context/files", s.handleFileContext)
+		r.Post("/api/decisions/search", s.handleSearchDecisions)
 
 		// Pattern routes
 		r.Get("/api/patterns", s.handleGetPatterns)
@@ -1687,6 +1795,7 @@ func (s *Service) setupRoutes() {
 		// Search analytics
 		r.Get("/api/search/recent", s.handleGetRecentQueries)
 		r.Get("/api/search/analytics", s.handleGetSearchAnalytics)
+		r.Post("/api/analytics/search-misses", s.handleSearchMissAnalytics)
 
 		// Duplicate detection
 		r.Get("/api/observations/duplicates", s.handleFindDuplicates)
@@ -1696,6 +1805,39 @@ func (s *Service) setupRoutes() {
 
 		// Telemetry
 		r.Get("/api/telemetry/similarity", s.handleGetSimilarityTelemetry)
+
+		// Auth routes (require auth — admin only)
+		r.Get("/api/auth/me", s.handleAuthMe)
+		r.Get("/api/auth/tokens", s.handleListTokens)
+		r.Post("/api/auth/tokens", s.handleCreateToken)
+		r.Delete("/api/auth/tokens/{id}", s.handleRevokeToken)
+
+		// Vault routes
+		r.Get("/api/vault/credentials", s.handleListCredentials)
+		r.Get("/api/vault/credentials/{name}", s.handleGetCredential)
+		r.Post("/api/vault/credentials", s.handleStoreCredential)
+		r.Delete("/api/vault/credentials/{name}", s.handleDeleteCredential)
+		r.Get("/api/vault/status", s.handleVaultStatus)
+		r.Delete("/api/vault/orphaned-credentials", s.handleDeleteOrphanedCredentials)
+
+		// Tag routes
+		r.Post("/api/observations/{id}/tags", s.handleTagObservation)
+		r.Get("/api/observations/by-tag/{tag}", s.handleGetObservationsByTag)
+
+		// Indexed session routes (separate from live session management)
+		r.Get("/api/sessions-index", s.handleListIndexedSessions)
+		r.Get("/api/sessions-index/search", s.handleSearchIndexedSessions)
+
+		// Maintenance routes
+		r.Post("/api/maintenance/consolidation", s.handleTriggerConsolidation)
+		r.Post("/api/maintenance/run", s.handleRunMaintenance)
+		r.Get("/api/maintenance/stats", s.handleGetMaintenanceStats)
+		r.Post("/api/maintenance/backfill-relations", s.handleBackfillRelations)
+		r.Post("/api/maintenance/purge-patterns", s.handlePurgePatterns)
+		r.Post("/api/maintenance/pattern-cleanup", s.handlePatternCleanup)
+
+		// Analytics routes
+		r.Get("/api/analytics/trends", s.handleGetTrends)
 	})
 }
 
@@ -1756,6 +1898,30 @@ func (s *Service) recordRetrievalStatsExtended(project string, served, verified,
 	} else {
 		atomic.AddInt64(&stats.ContextInjections, 1)
 	}
+
+	// Persist to DB via batched flusher (non-blocking).
+	s.initMu.RLock()
+	logStore := s.retrievalStatsLogStore
+	s.initMu.RUnlock()
+	if logStore != nil {
+		if isSearch {
+			logStore.LogEvent(project, "search_request", 1)
+		} else {
+			logStore.LogEvent(project, "context_injection", 1)
+		}
+		if served > 0 {
+			logStore.LogEvent(project, "observations_served", int(served))
+		}
+		if staleExcluded > 0 {
+			logStore.LogEvent(project, "stale_excluded", int(staleExcluded))
+		}
+		if freshCount > 0 {
+			logStore.LogEvent(project, "fresh_count", int(freshCount))
+		}
+		if duplicatesRemoved > 0 {
+			logStore.LogEvent(project, "duplicates_removed", int(duplicatesRemoved))
+		}
+	}
 }
 
 // cleanupRetrievalStatsLocked removes stale entries from retrievalStats.
@@ -1810,9 +1976,19 @@ func (s *Service) GetRetrievalStats(project string) RetrievalStats {
 	return result
 }
 
-// trackSearchQuery records a search query for analytics using a circular buffer.
-// O(1) insertion - no memory allocation or copying on each insert.
-func (s *Service) trackSearchQuery(query, project, queryType string, results int, usedVector bool) {
+// trackSearchQuery records a search query for analytics.
+// Writes to the persistent DB store (fire-and-forget) and the in-memory ring buffer.
+// O(1) insertion for the ring buffer - no memory allocation or copying on each insert.
+func (s *Service) trackSearchQuery(query, project, queryType string, results int, usedVector bool, latencyMs float32) {
+	// Persist to DB asynchronously (fire-and-forget, never blocks caller).
+	s.initMu.RLock()
+	sqlStore := s.searchQueryLogStore
+	s.initMu.RUnlock()
+	if sqlStore != nil {
+		sqlStore.LogQuery(project, query, queryType, results, usedVector, latencyMs)
+	}
+
+	// Also maintain the in-memory ring buffer for low-latency in-process access.
 	s.recentQueriesMu.Lock()
 	defer s.recentQueriesMu.Unlock()
 
@@ -1933,6 +2109,38 @@ func (s *Service) invalidateAllObsCountCache() {
 // The HTTP server starts immediately; database initialization happens async.
 func (s *Service) Start() error {
 	port := config.GetWorkerPort()
+
+	// Auth startup gate (ADR-0001): refuse to start without token unless explicitly disabled
+	token := config.GetWorkerToken()
+	authDisabled := strings.EqualFold(strings.TrimSpace(os.Getenv("ENGRAM_AUTH_DISABLED")), "true")
+
+	if token == "" && !authDisabled {
+		log.Fatal().Msg("ENGRAM_AUTH_ADMIN_TOKEN (or ENGRAM_API_TOKEN) is not set. Set it to secure your engram instance, or set ENGRAM_AUTH_DISABLED=true to explicitly run without authentication (NOT recommended for production).")
+	}
+
+	// Deprecation warning for old env var name
+	if os.Getenv("ENGRAM_API_TOKEN") != "" && os.Getenv("ENGRAM_AUTH_ADMIN_TOKEN") == "" {
+		log.Warn().Msg("auth: ENGRAM_API_TOKEN is deprecated — rename to ENGRAM_AUTH_ADMIN_TOKEN (old name will be removed in v1.3)")
+	}
+
+	if authDisabled {
+		log.Warn().Msg("auth: authentication is explicitly disabled via ENGRAM_AUTH_DISABLED=true — all endpoints are unauthenticated")
+		// Start periodic warning goroutine tracked by WaitGroup for graceful shutdown.
+		s.wg.Add(1)
+		go func() {
+			defer s.wg.Done()
+			ticker := time.NewTicker(60 * time.Second)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-s.ctx.Done():
+					return
+				case <-ticker.C:
+					log.Warn().Msg("auth: reminder — authentication is disabled, all endpoints are unauthenticated")
+				}
+			}
+		}()
+	}
 
 	host := config.GetWorkerHost()
 	s.server = &http.Server{

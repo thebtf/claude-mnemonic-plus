@@ -1147,10 +1147,12 @@ func (s *Server) handleToolsList(req *Request) *Response {
 						"content":    map[string]any{"type": "string", "description": "The content/knowledge to remember"},
 						"title":      map[string]any{"type": "string", "description": "Short title for the memory"},
 						"tags":       map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "Concept tags (supports hierarchical: lang:go:concurrency)"},
+						"rejected":  map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "Alternatives considered and dismissed (for decision observations)"},
 						"type":       map[string]any{"type": "string", "description": "Memory type: decision, bugfix, feature, discovery, refactor"},
 						"importance": map[string]any{"type": "number", "minimum": 0, "maximum": 1, "description": "Importance score (0-1)"},
 						"scope":      map[string]any{"type": "string", "enum": []string{"project", "global"}, "description": "Visibility scope"},
 						"project":    map[string]any{"type": "string", "description": "Project ID (defaults to current)"},
+						"ttl_days":   map[string]any{"type": "integer", "minimum": 1, "description": "TTL in days for verified facts. Auto-computed from tags if not provided. Only applies to observations with 'verified' tag."},
 					},
 				},
 			},
@@ -1168,6 +1170,31 @@ func (s *Server) handleToolsList(req *Request) *Response {
 						"limit":  map[string]any{"type": "number", "default": 10, "minimum": 1, "maximum": 50},
 						"format":  map[string]any{"type": "string", "enum": []string{"text", "items", "detailed"}, "default": "text"},
 						"project": map[string]any{"type": "string", "description": "Project ID to scope results (includes project-scoped and global observations)"},
+					},
+				},
+			},
+			Tool{
+				Name:        "rate_memory",
+				Description: "Rate a memory as useful or not useful. Affects future ranking in search results.",
+				tier:        tierCore,
+				InputSchema: map[string]any{
+					"type":     "object",
+					"required": []string{"id", "rating"},
+					"properties": map[string]any{
+						"id":     map[string]any{"type": "integer", "description": "Observation ID to rate"},
+						"rating": map[string]any{"type": "string", "enum": []string{"useful", "not_useful"}, "description": "Rating: useful or not_useful"},
+					},
+				},
+			},
+			Tool{
+				Name:        "suppress_memory",
+				Description: "Suppress an observation so it is excluded from future search results. The observation remains in the database but is hidden.",
+				tier:        tierCore,
+				InputSchema: map[string]any{
+					"type":     "object",
+					"required": []string{"id"},
+					"properties": map[string]any{
+						"id": map[string]any{"type": "integer", "description": "Observation ID to suppress"},
 					},
 				},
 			},
@@ -1517,6 +1544,10 @@ func (s *Server) callTool(ctx context.Context, name string, args json.RawMessage
 		return s.handleStoreMemory(ctx, args)
 	case "recall_memory":
 		return s.handleRecallMemory(ctx, args)
+	case "rate_memory":
+		return s.handleRateMemory(ctx, args)
+	case "suppress_memory":
+		return s.handleSuppressMemory(ctx, args)
 	}
 
 	// Search-based tools: use parseArgs + coercion instead of direct unmarshal
@@ -1927,7 +1958,7 @@ func (s *Server) handleGetPatterns(ctx context.Context, args json.RawMessage) (s
 		patterns, err = s.patternStore.GetPatternsByProject(ctx, params.Project, params.Limit)
 	} else {
 		// Get all active patterns
-		patterns, err = s.patternStore.GetActivePatterns(ctx, params.Limit)
+		patterns, err = s.patternStore.GetActivePatterns(ctx, params.Limit, 0, "")
 	}
 
 	if err != nil {
@@ -3646,7 +3677,7 @@ func (s *Server) handleCheckSystemHealth(ctx context.Context) (string, error) {
 		Metrics: make(map[string]any),
 	}
 	if s.patternStore != nil {
-		patterns, err := s.patternStore.GetActivePatterns(ctx, 100)
+		patterns, err := s.patternStore.GetActivePatterns(ctx, 100, 0, "")
 		if err != nil {
 			patternHealth.Status = "degraded"
 			patternHealth.Message = "Could not query patterns: " + err.Error()

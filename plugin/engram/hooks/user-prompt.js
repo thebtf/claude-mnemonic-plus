@@ -19,8 +19,14 @@ async function handleUserPrompt(ctx, input) {
   const project = typeof ctx.Project === 'string' ? ctx.Project : '';
   const cwd = typeof ctx.CWD === 'string' ? ctx.CWD : '';
 
+  // Skip system-generated task notifications — they are not user prompts
+  if (prompt && (prompt.includes('<task-notification>') || prompt.includes('<command-name>'))) {
+    return '';
+  }
+
   let contextToInject = '';
   let observationCount = 0;
+  let matchedCount = 0;
   const searchIds = [];
 
   try {
@@ -33,6 +39,15 @@ async function handleUserPrompt(ctx, input) {
     const observations = Array.isArray(searchResult.observations)
       ? searchResult.observations
       : [];
+
+    // total_results reflects how many observations matched before the server-side
+    // max_results cap was applied. When present and larger than the returned array,
+    // it means the server truncated the results. Fall back to the array length only
+    // when total_results is absent (older server versions).
+    const totalResults =
+      typeof searchResult.total_results === 'number'
+        ? searchResult.total_results
+        : observations.length;
 
     // Filter out credentials from context injection (leak prevention).
     // Credentials are only accessible via the dedicated get_credential MCP tool.
@@ -146,6 +161,10 @@ async function handleUserPrompt(ctx, input) {
         }
       }
 
+      // observationCount tracks injected (post-trim) count for deciding whether
+      // to return context. matchedCount is the true total matched count from the
+      // server (pre-max_results-cap), so the badge shows meaningful signal.
+      matchedCount = totalResults - (observations.length - safeObservations.length);
       observationCount = budgetObs.length;
       let contextBuilder = '<relevant-memory>\n';
       contextBuilder += '# Relevant Knowledge From Previous Sessions\n';
@@ -211,7 +230,7 @@ async function handleUserPrompt(ctx, input) {
       claudeSessionId: ctx.SessionID,
       project: ctx.Project,
       prompt,
-      matchedObservations: observationCount,
+      matchedObservations: matchedCount,
     });
   } catch (error) {
     console.error(`[user-prompt] Failed to initialize session: ${error.message}`);

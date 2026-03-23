@@ -70,6 +70,19 @@ export interface BulkDeleteResponse {
   deleted: number;
 }
 
+/** A single observation returned by the decisions search endpoint. */
+export interface DecisionSearchObservation {
+  title?: string;
+  narrative?: string;
+  concepts?: string[];
+  rejected?: string[];
+}
+
+/** Response from POST /api/decisions/search. */
+export interface DecisionSearchResponse {
+  observations: DecisionSearchObservation[];
+}
+
 // ---------------------------------------------------------------------------
 // Client
 // ---------------------------------------------------------------------------
@@ -94,15 +107,16 @@ export class EngramRestClient {
 
   /**
    * Fetch session context for injection (static session-level context).
-   * GET /api/context/inject?agent_id={id}&cwd={cwd}
+   * POST /api/context/inject
    */
   async getContextInject(
     agentId: string,
     cwd?: string,
   ): Promise<ContextInjectResponse | null> {
-    const params = new URLSearchParams({ agent_id: agentId });
-    if (cwd) params.set('cwd', cwd);
-    return this.get<ContextInjectResponse>(`/api/context/inject?${params.toString()}`);
+    return this.post<ContextInjectResponse>('/api/context/inject', {
+      agent_id: agentId,
+      ...(cwd ? { cwd } : {}),
+    });
   }
 
   /**
@@ -116,6 +130,29 @@ export class EngramRestClient {
     agent_id?: string;
   }): Promise<ContextSearchResponse | null> {
     return this.post<ContextSearchResponse>('/api/context/search', body);
+  }
+
+  /**
+   * Search for relevant decisions.
+   * POST /api/decisions/search
+   */
+  async searchDecisions(body: {
+    query: string;
+    project: string;
+    limit?: number;
+  }): Promise<DecisionSearchResponse | null> {
+    return this.post('/api/decisions/search', body);
+  }
+
+  /**
+   * Track a search miss for self-tuning analytics.
+   * POST /api/analytics/search-misses (fire-and-forget)
+   */
+  async trackSearchMiss(body: {
+    project: string;
+    query: string;
+  }): Promise<void> {
+    void this.post('/api/analytics/search-misses', body, 3000);
   }
 
   /**

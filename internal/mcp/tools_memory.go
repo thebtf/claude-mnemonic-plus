@@ -30,14 +30,17 @@ func (s *Server) handleStoreMemory(ctx context.Context, args json.RawMessage) (s
 
 	var params struct {
 		Tags       []string
+		Rejected   []string
 		Content    string
 		Title      string
 		Type       string
 		Scope      string
 		Project    string
 		Importance *float64
+		TtlDays    *int
 	}
 	params.Tags = coerceStringSlice(m["tags"])
+	params.Rejected = coerceStringSlice(m["rejected"])
 	params.Content = coerceString(m["content"], "")
 	params.Title = coerceString(m["title"], "")
 	params.Type = coerceString(m["type"], "")
@@ -46,6 +49,12 @@ func (s *Server) handleStoreMemory(ctx context.Context, args json.RawMessage) (s
 	if v, ok := m["importance"]; ok && v != nil {
 		f := coerceFloat64(v, 0)
 		params.Importance = &f
+	}
+	if v, ok := m["ttl_days"]; ok && v != nil {
+		d := coerceInt(v, 0)
+		if d > 0 {
+			params.TtlDays = &d
+		}
 	}
 	if params.Content == "" {
 		return "", fmt.Errorf("content is required")
@@ -157,6 +166,7 @@ func (s *Server) handleStoreMemory(ctx context.Context, args json.RawMessage) (s
 		Title:      title,
 		Narrative:  params.Content,
 		Concepts:   concepts,
+		Rejected:   params.Rejected,
 		Scope:      scope,
 	}
 
@@ -175,6 +185,45 @@ func (s *Server) handleStoreMemory(ctx context.Context, args json.RawMessage) (s
 		}
 	}
 
+	// Write-time supersession: if storing a decision and a very similar decision exists,
+	// mark the old one as superseded (new decision replaces old).
+	if s.vectorClient != nil && s.vectorClient.IsConnected() && obsType == models.ObsTypeDecision && config.Get().SupersessionEnabled {
+		threshold := config.Get().SupersessionThreshold
+		if threshold <= 0 {
+			threshold = 0.9
+		}
+		where := vector.BuildWhereFilter(vector.DocTypeObservation, params.Project, false)
+		similar, err := s.vectorClient.Query(ctx, params.Content, 3, where)
+		if err == nil {
+			for _, result := range similar {
+				if result.Similarity >= threshold {
+					oldID := vector.ExtractRowID(result.Metadata)
+					if oldID > 0 && oldID != id {
+						oldObs, err := s.observationStore.GetObservationByID(ctx, oldID)
+						if err == nil && oldObs != nil && oldObs.Type == models.ObsTypeDecision && oldObs.Project == params.Project {
+							if err := s.observationStore.MarkAsSuperseded(ctx, oldID); err != nil {
+								log.Warn().Err(err).Int64("old_id", oldID).Int64("new_id", id).Msg("supersession: failed to mark old decision")
+							} else {
+								log.Info().Int64("old_id", oldID).Int64("new_id", id).Float64("similarity", result.Similarity).Msg("supersession: old decision marked superseded")
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+
+	// Apply TTL for verified facts.
+	ttlDays := computeTTLDays(params.TtlDays, concepts)
+	ttlApplied := false
+	if ttlDays > 0 {
+		if err := s.observationStore.SetObservationTTL(ctx, id, ttlDays); err != nil {
+			log.Warn().Err(err).Int64("id", id).Int("ttl_days", ttlDays).Msg("failed to set observation TTL")
+		} else {
+			ttlApplied = true
+		}
+	}
+
 	result := map[string]any{
 		"id":      id,
 		"title":   title,
@@ -182,11 +231,55 @@ func (s *Server) handleStoreMemory(ctx context.Context, args json.RawMessage) (s
 		"scope":   string(scope),
 		"message": "Memory stored successfully",
 	}
+	if ttlApplied {
+		result["ttl_days"] = ttlDays
+	}
 	out, err := json.MarshalIndent(result, "", "  ")
 	if err != nil {
 		return "", fmt.Errorf("marshal result: %w", err)
 	}
 	return string(out), nil
+}
+
+// computeTTLDays determines the TTL for an observation based on explicit override or auto-TTL from tags.
+// Returns 0 if no TTL should be applied.
+func computeTTLDays(explicit *int, concepts []string) int {
+	// 1. Explicit override takes priority
+	if explicit != nil && *explicit > 0 {
+		return *explicit
+	}
+
+	// 2. Auto-TTL only applies to observations with "verified" tag
+	hasVerified := false
+	for _, c := range concepts {
+		if c == "verified" {
+			hasVerified = true
+			break
+		}
+	}
+	if !hasVerified {
+		return 0
+	}
+
+	// 3. Auto-TTL by concept tags (exact match) — use minimum TTL from all matching tags
+	autoTTL := map[string]int{
+		"api": 7, "endpoint": 7,
+		"library": 30, "framework": 30,
+		"language-feature": 90,
+		"architecture": 180, "pattern": 180,
+	}
+	minTTL := 0
+	for _, c := range concepts {
+		if days, ok := autoTTL[c]; ok && (minTTL == 0 || days < minTTL) {
+			minTTL = days
+		}
+	}
+	if minTTL > 0 {
+		return minTTL
+	}
+
+	// 4. Default for verified facts with no matching tag
+	return 30
 }
 
 // truncateTitle creates a short title from content, truncating at a word boundary.
@@ -327,4 +420,64 @@ func (s *Server) handleRecallMemory(ctx context.Context, args json.RawMessage) (
 		}
 		return sb.String(), nil
 	}
+}
+
+// handleRateMemory allows agents to rate observation usefulness.
+// A "useful" rating increments user_feedback by 1; "not_useful" decrements by 1.
+func (s *Server) handleRateMemory(ctx context.Context, args json.RawMessage) (string, error) {
+	if s.observationStore == nil {
+		return "", fmt.Errorf("observation store not available")
+	}
+
+	m, err := parseArgs(args)
+	if err != nil {
+		return "", err
+	}
+
+	id := coerceInt64(m["id"], 0)
+	rating := coerceString(m["rating"], "")
+
+	if id == 0 {
+		return "", fmt.Errorf("id required")
+	}
+	if rating != "useful" && rating != "not_useful" {
+		return "", fmt.Errorf("rating must be 'useful' or 'not_useful'")
+	}
+
+	delta := 1
+	if rating == "not_useful" {
+		delta = -1
+	}
+
+	if err := s.observationStore.GetDB().WithContext(ctx).
+		Exec("UPDATE observations SET user_feedback = COALESCE(user_feedback, 0) + ? WHERE id = ?", delta, id).Error; err != nil {
+		return "", fmt.Errorf("update feedback: %w", err)
+	}
+
+	return fmt.Sprintf("Rated observation %d as %s", id, rating), nil
+}
+
+// handleSuppressMemory marks an observation as suppressed, excluding it from future search results.
+// The observation remains in the database but is hidden from all FTS and LIKE search queries.
+func (s *Server) handleSuppressMemory(ctx context.Context, args json.RawMessage) (string, error) {
+	if s.observationStore == nil {
+		return "", fmt.Errorf("observation store not available")
+	}
+
+	m, err := parseArgs(args)
+	if err != nil {
+		return "", err
+	}
+
+	id := coerceInt64(m["id"], 0)
+	if id == 0 {
+		return "", fmt.Errorf("id required")
+	}
+
+	if err := s.observationStore.GetDB().WithContext(ctx).
+		Exec("UPDATE observations SET is_suppressed = TRUE WHERE id = ?", id).Error; err != nil {
+		return "", fmt.Errorf("suppress: %w", err)
+	}
+
+	return fmt.Sprintf("Observation %d suppressed", id), nil
 }

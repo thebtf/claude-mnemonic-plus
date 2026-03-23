@@ -9,7 +9,6 @@
 import type { EngramRestClient } from '../client.js';
 import type { PluginConfig } from '../config.js';
 import { resolveIdentity } from '../identity.js';
-import { redactSecrets } from '../security/redactor.js';
 import type { BeforeCompactionEvent, ConversationMessage, PluginHookContext, PluginLogger } from '../types/openclaw.js';
 
 /** Maximum recent messages to include in the backfill payload. */
@@ -37,6 +36,8 @@ export function handleBeforeCompaction(
     if (!config.autoExtract) return;
 
     const agentId = ctx.agentId ?? '';
+    const sessionId = ctx.sessionId ?? ctx.sessionKey ?? agentId;
+    if (!sessionId?.trim()) return; // no session identity available — skip
     const identity = resolveIdentity(agentId, ctx.workspaceDir);
     const project = config.project ?? identity.projectId;
 
@@ -46,14 +47,13 @@ export function handleBeforeCompaction(
     if (!content) return;
 
     const stripped = stripEngramContext(content);
-    const redacted = redactSecrets(stripped);
-    const truncated = redacted.length > CONTENT_MAX_CHARS
-      ? redacted.slice(0, CONTENT_MAX_CHARS)
-      : redacted;
+    const truncated = stripped.length > CONTENT_MAX_CHARS
+      ? stripped.slice(0, CONTENT_MAX_CHARS)
+      : stripped;
 
     // Fire-and-forget — do not await
     void client.backfillSession({
-      session_id: agentId,
+      session_id: sessionId,
       project,
       content: truncated,
     });

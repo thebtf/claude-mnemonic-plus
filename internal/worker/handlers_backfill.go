@@ -1,6 +1,7 @@
 package worker
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -11,6 +12,7 @@ import (
 	"github.com/thebtf/engram/internal/backfill"
 	"github.com/thebtf/engram/internal/backfill/extract"
 	"github.com/thebtf/engram/internal/learning"
+	"github.com/thebtf/engram/internal/privacy"
 	"github.com/thebtf/engram/internal/sessions"
 	"github.com/thebtf/engram/internal/vector"
 	"github.com/thebtf/engram/pkg/models"
@@ -97,7 +99,18 @@ func (t *backfillTracker) snapshot() map[string]*RunInfo {
 	return cp
 }
 
-// handleBackfillIngest handles POST /api/backfill — stores extracted observations.
+// handleBackfillIngest godoc
+// @Summary Ingest backfill observations
+// @Description Stores pre-extracted observations from a backfill run. Supports semantic deduplication via vector similarity.
+// @Tags Backfill
+// @Accept json
+// @Produce json
+// @Security ApiKeyAuth
+// @Param body body BackfillRequest true "Backfill observations"
+// @Success 200 {object} BackfillResponse
+// @Failure 400 {string} string "bad request"
+// @Failure 503 {string} string "observation store not initialized"
+// @Router /api/backfill [post]
 func (s *Service) handleBackfillIngest(w http.ResponseWriter, r *http.Request) {
 	var req BackfillRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -190,7 +203,14 @@ func (s *Service) handleBackfillIngest(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(resp)
 }
 
-// handleBackfillStatus handles GET /api/backfill/status.
+// handleBackfillStatus godoc
+// @Summary Get backfill status
+// @Description Returns status of all active backfill runs including stored/skipped/error counts per run.
+// @Tags Backfill
+// @Produce json
+// @Security ApiKeyAuth
+// @Success 200 {object} BackfillStatus
+// @Router /api/backfill/status [get]
 func (s *Service) handleBackfillStatus(w http.ResponseWriter, r *http.Request) {
 	runs := s.backfillTracker.snapshot()
 	totalObs := 0
@@ -230,8 +250,18 @@ type BackfillSessionResponse struct {
 	MetricsReport        string `json:"metrics_report,omitempty"`
 }
 
-// handleBackfillSession handles POST /api/backfill/session — accepts raw JSONL content,
-// runs server-side LLM extraction, and stores the resulting observations.
+// handleBackfillSession godoc
+// @Summary Backfill session with LLM extraction
+// @Description Accepts raw JSONL session content, runs server-side LLM extraction, and stores resulting observations with semantic deduplication.
+// @Tags Backfill
+// @Accept json
+// @Produce json
+// @Security ApiKeyAuth
+// @Param body body BackfillSessionRequest true "Session content and metadata"
+// @Success 200 {object} BackfillSessionResponse
+// @Failure 400 {string} string "bad request"
+// @Failure 503 {string} string "LLM not configured or store not initialized"
+// @Router /api/backfill/session [post]
 func (s *Service) handleBackfillSession(w http.ResponseWriter, r *http.Request) {
 	var req BackfillSessionRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -261,6 +291,19 @@ func (s *Service) handleBackfillSession(w http.ResponseWriter, r *http.Request) 
 	}
 	if req.SessionID != "" {
 		sess.SessionID = req.SessionID
+	}
+
+	// Detect secrets in the raw content, store in vault, then redact session exchanges.
+	project := sess.ProjectPath
+	if req.Project != "" {
+		project = req.Project
+	}
+	if privacy.ContainsSecrets(req.Content) {
+		vaultStoreDetectedSecrets(r.Context(), s, req.Content, project)
+	}
+	for i := range sess.Exchanges {
+		sess.Exchanges[i].UserText = privacy.RedactSecrets(sess.Exchanges[i].UserText)
+		sess.Exchanges[i].AssistantText = privacy.RedactSecrets(sess.Exchanges[i].AssistantText)
 	}
 
 	// Initialize LLM client from server env vars.
@@ -343,4 +386,70 @@ func (s *Service) handleBackfillSession(w http.ResponseWriter, r *http.Request) 
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(resp)
+}
+
+// vaultStoreDetectedSecrets extracts secrets from text, encrypts each with the vault,
+// and stores them as credential observations. All errors are non-fatal — secrets are
+// still redacted from the transcript even if vault storage fails.
+func vaultStoreDetectedSecrets(ctx context.Context, s *Service, text, project string) {
+	secrets := privacy.ExtractSecrets(text)
+	if len(secrets) == 0 {
+		return
+	}
+
+	vault, err := s.getVault()
+	if err != nil {
+		log.Warn().Err(err).Msg("backfill: vault not available, skipping secret storage")
+		return
+	}
+
+	s.initMu.RLock()
+	obsStore := s.observationStore
+	s.initMu.RUnlock()
+	if obsStore == nil {
+		log.Warn().Msg("backfill: observation store not available, skipping secret storage")
+		return
+	}
+
+	stored := 0
+	for _, secret := range secrets {
+		// Idempotency: skip if credential with this name already exists.
+		existing, err := obsStore.GetCredential(ctx, secret.Name, project)
+		if err != nil {
+			log.Warn().Err(err).Str("name", secret.Name).Msg("backfill: failed to check existing credential")
+			continue
+		}
+		if existing != nil {
+			continue
+		}
+
+		ciphertext, err := vault.Encrypt(secret.Value)
+		if err != nil {
+			log.Warn().Err(err).Str("name", secret.Name).Msg("backfill: failed to encrypt secret")
+			continue
+		}
+
+		obs := &models.ParsedObservation{
+			Type:                     models.ObsTypeCredential,
+			SourceType:               models.SourceBackfill,
+			Title:                    secret.Name,
+			Narrative:                secret.Name,
+			Concepts:                 []string{"auto-detected", "redactor"},
+			Scope:                    models.ScopeProject,
+			EncryptedSecret:          ciphertext,
+			EncryptionKeyFingerprint: vault.Fingerprint(),
+		}
+
+		const vaultSessionID = "credential:auto-redactor"
+		_, _, storeErr := obsStore.StoreObservation(ctx, vaultSessionID, project, obs, 0, 0)
+		if storeErr != nil {
+			log.Warn().Err(storeErr).Str("name", secret.Name).Msg("backfill: failed to store auto-detected credential")
+			continue
+		}
+		stored++
+	}
+
+	if stored > 0 {
+		log.Info().Int("count", stored).Int("detected", len(secrets)).Msg("backfill: auto-detected secrets stored in vault")
+	}
 }

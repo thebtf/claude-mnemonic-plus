@@ -13,6 +13,7 @@ import (
 
 	"github.com/thebtf/engram/internal/db/gorm"
 	"github.com/thebtf/engram/internal/reranking"
+	"github.com/thebtf/engram/internal/search"
 	"github.com/thebtf/engram/internal/search/expansion"
 	"github.com/thebtf/engram/internal/vector"
 	"github.com/thebtf/engram/internal/worker/sdk"
@@ -20,10 +21,24 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
-// handleSearchByPrompt searches observations relevant to a user prompt.
-// IMPORTANT: This is on the critical startup path - must be fast!
-// No synchronous verification - just filter by staleness and return.
-// Supports both GET (query params) and POST (JSON body) to avoid URL length limits.
+// handleSearchByPrompt godoc
+// @Summary Search observations by prompt
+// @Description Searches observations relevant to a user prompt using hybrid vector + FTS search with query expansion, cross-encoder reranking, and clustering. Supports both GET (query params) and POST (JSON body) to avoid URL length limits.
+// @Tags Search
+// @Accept json
+// @Produce json
+// @Security ApiKeyAuth
+// @Param project query string false "Project filter"
+// @Param query query string false "Search query"
+// @Param cwd query string false "Working directory (ignored server-side)"
+// @Param agent_id query string false "Agent ID (acts as project scope if project empty)"
+// @Param limit query int false "Number of results (default 50, max 200)"
+// @Param body body object false "POST body: {project, query, agent_id, cwd, limit}"
+// @Success 200 {object} map[string]interface{}
+// @Failure 400 {string} string "project and query required"
+// @Failure 500 {string} string "internal error"
+// @Router /api/context/search [get]
+// @Router /api/context/search [post]
 func (s *Service) handleSearchByPrompt(w http.ResponseWriter, r *http.Request) {
 	project := r.URL.Query().Get("project")
 	query := r.URL.Query().Get("query")
@@ -68,6 +83,11 @@ func (s *Service) handleSearchByPrompt(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Server-side: ignore client-provided cwd to prevent filesystem probing (S9-003).
+	// File mtime staleness checks are only meaningful on the client; the server has no
+	// access to client filesystems.
+	cwd = ""
+
 	// Validate project name to prevent path traversal
 	if err := ValidateProjectName(project); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
@@ -75,6 +95,7 @@ func (s *Service) handleSearchByPrompt(w http.ResponseWriter, r *http.Request) {
 	}
 
 	limit := gorm.ParseLimitParamWithMax(r, DefaultSearchLimit, 200)
+	searchStart := time.Now()
 
 	var observations []*models.Observation
 	var err error
@@ -110,7 +131,7 @@ func (s *Service) handleSearchByPrompt(w http.ResponseWriter, r *http.Request) {
 	// Try vector search first if available
 	var vectorSearchFailed bool
 	if s.vectorClient != nil && s.vectorClient.IsConnected() {
-		where := vector.BuildWhereFilter(vector.DocTypeObservation, "", false)
+		where := vector.BuildWhereFilter(vector.DocTypeObservation, project, true)
 
 		// Search with each expanded query and merge results
 		// Pre-allocate with estimated capacity to avoid repeated reallocation
@@ -213,7 +234,6 @@ func (s *Service) handleSearchByPrompt(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Apply cross-encoder reranking if available
-	var reranked bool
 	if s.reranker != nil && len(freshObservations) > 0 && usedVector {
 		// Build candidates from observations with their bi-encoder scores
 		candidates := make([]reranking.Candidate, len(freshObservations))
@@ -270,7 +290,6 @@ func (s *Service) handleSearchByPrompt(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 			freshObservations = reorderedObs
-			reranked = true
 
 			log.Debug().
 				Int("candidates", len(candidates)).
@@ -283,8 +302,25 @@ func (s *Service) handleSearchByPrompt(w http.ResponseWriter, r *http.Request) {
 	clusteredObservations := clusterObservations(freshObservations, s.config.ClusteringThreshold)
 	duplicatesRemoved := len(freshObservations) - len(clusteredObservations)
 
-	// Sort by similarity score (highest first) if we have scores and didn't rerank
-	if len(similarityScores) > 0 && len(clusteredObservations) > 0 && !reranked {
+	// Apply composite scoring (recency × type × importance) as a post-processing step.
+	// This re-weights scores already computed by vector search or cross-encoder reranking.
+	if len(clusteredObservations) > 0 {
+		search.ApplyCompositeScoring(clusteredObservations, similarityScores)
+
+		// Apply injection diversity penalty: observations injected across many projects = generic = penalize
+		if s.observationStore != nil {
+			ids := make([]int64, 0, len(clusteredObservations))
+			for _, obs := range clusteredObservations {
+				ids = append(ids, obs.ID)
+			}
+			if diversityScores, err := s.observationStore.GetDiversityScores(r.Context(), ids); err == nil && len(diversityScores) > 0 {
+				search.ApplyDiversityPenalty(clusteredObservations, similarityScores, diversityScores)
+			}
+		}
+	}
+
+	// Sort by composite score (highest first)
+	if len(similarityScores) > 0 && len(clusteredObservations) > 0 {
 		sort.Slice(clusteredObservations, func(i, j int) bool {
 			scoreI := similarityScores[clusteredObservations[i].ID]
 			scoreJ := similarityScores[clusteredObservations[j].ID]
@@ -292,9 +328,57 @@ func (s *Service) handleSearchByPrompt(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
+	// Capture total before applying max results cap so callers can tell whether results were truncated.
+	totalResults := len(clusteredObservations)
+
 	// Apply max results cap if configured
 	if maxResults > 0 && len(clusteredObservations) > maxResults {
 		clusteredObservations = clusteredObservations[:maxResults]
+	}
+
+	// Apply LLM behavioral relevance filter if enabled
+	if s.llmFilter != nil && s.config.LLMFilterEnabled && len(clusteredObservations) > 0 {
+		llmFilter := s.llmFilter
+		// Take top candidates for LLM evaluation (avoid sending too many)
+		candidates := clusteredObservations
+		if s.config.LLMFilterCandidates > 0 && len(candidates) > s.config.LLMFilterCandidates {
+			candidates = candidates[:s.config.LLMFilterCandidates]
+		}
+		relevantIDs := llmFilter.FilterByRelevance(r.Context(), candidates, project, query)
+		if len(relevantIDs) > 0 && len(relevantIDs) < len(candidates) {
+			// Build a fast lookup set
+			idSet := make(map[int64]struct{}, len(relevantIDs))
+			for _, id := range relevantIDs {
+				idSet[id] = struct{}{}
+			}
+			filtered := make([]*models.Observation, 0, len(relevantIDs))
+			for _, obs := range clusteredObservations {
+				if _, ok := idSet[obs.ID]; ok {
+					filtered = append(filtered, obs)
+				}
+			}
+			log.Info().
+				Str("project", project).
+				Int("before", len(clusteredObservations)).
+				Int("after", len(filtered)).
+				Msg("LLM filter applied")
+			clusteredObservations = filtered
+		}
+	}
+
+	// Async: log which observations were injected into this context
+	if s.observationStore != nil && len(clusteredObservations) > 0 {
+		resultIDs := make([]int64, len(clusteredObservations))
+		for i, obs := range clusteredObservations {
+			resultIDs[i] = obs.ID
+		}
+		go func() {
+			logCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+			defer cancel()
+			if err := s.observationStore.LogInjections(logCtx, resultIDs, project, "", ""); err != nil {
+				log.Debug().Err(err).Msg("Failed to log injections")
+			}
+		}()
 	}
 
 	// Record retrieval stats with staleness metrics
@@ -340,22 +424,38 @@ func (s *Service) handleSearchByPrompt(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Track search misses for self-tuning analytics (inline — avoids unbounded goroutine spawn)
+	if len(clusteredObservations) == 0 && query != "" {
+		s.trackSearchMiss(project, query)
+	}
+
 	// Track this search for analytics
-	s.trackSearchQuery(query, project, "observations", len(clusteredObservations), usedVector)
+	s.trackSearchQuery(query, project, "observations", len(clusteredObservations), usedVector, float32(time.Since(searchStart).Milliseconds()))
 
 	writeJSON(w, map[string]any{
-		"project":      project,
-		"query":        query,
-		"intent":       detectedIntent,
-		"expansions":   expansionInfo,
-		"observations": obsWithScores,
-		"threshold":    threshold,
-		"max_results":  maxResults,
+		"project":       project,
+		"query":         query,
+		"intent":        detectedIntent,
+		"expansions":    expansionInfo,
+		"observations":  obsWithScores,
+		"threshold":     threshold,
+		"max_results":   maxResults,
+		"total_results": totalResults,
 	})
 }
 
-// handleFileContext returns observations relevant to specific files being worked on.
-// Uses vector similarity search to find observations that mention or relate to the given files.
+// handleFileContext godoc
+// @Summary Get file context
+// @Description Returns observations relevant to specific files being worked on, using vector similarity search.
+// @Tags Context
+// @Produce json
+// @Security ApiKeyAuth
+// @Param project query string true "Project name"
+// @Param files query string true "Comma-separated file paths (max 20)"
+// @Param limit query int false "Results per file (default 10, max 50)"
+// @Success 200 {object} map[string]interface{}
+// @Failure 400 {string} string "bad request"
+// @Router /api/context/files [get]
 func (s *Service) handleFileContext(w http.ResponseWriter, r *http.Request) {
 	project := r.URL.Query().Get("project")
 	if project == "" {
@@ -431,7 +531,7 @@ func (s *Service) handleFileContext(w http.ResponseWriter, r *http.Request) {
 			// Build search query from file path
 			query := buildFileQuery(file)
 
-			where := vector.BuildWhereFilter(vector.DocTypeObservation, "", false)
+			where := vector.BuildWhereFilter(vector.DocTypeObservation, project, true)
 			vectorResults, vecErr := s.vectorClient.Query(ctx, query, limit*2, where)
 			if vecErr != nil {
 				log.Warn().Err(vecErr).Str("file", file).Msg("Vector search failed for file context")
@@ -713,15 +813,54 @@ func splitCamelCase(s string) string {
 	return result.String()
 }
 
-// handleContextInject returns context for injection at session start.
-// IMPORTANT: This is on the critical startup path - must be fast!
-// No synchronous verification - just filter by staleness and return.
-// Response includes two sections:
-//   - recent: last 5 observations by created_at
-//   - relevant: top 10 semantic search results (if vector store is connected)
+// handleContextInject godoc
+// @Summary Inject context for session start
+// @Description Returns context for injection at session start. Response includes recent (last 5), relevant (top 10 semantic), and guidance sections. Supports GET (deprecated) and POST. Critical startup path — optimized for speed.
+// @Tags Context
+// @Accept json
+// @Produce json
+// @Security ApiKeyAuth
+// @Param project query string false "Project name (required)"
+// @Param agent_id query string false "Agent ID (acts as project scope if project empty)"
+// @Param format query string false "Response format: 'compact' for minimal payload"
+// @Param body body object false "POST body: {project, agent_id, cwd, legacy_project, git_remote, relative_path}"
+// @Success 200 {object} map[string]interface{}
+// @Failure 400 {string} string "project required"
+// @Failure 500 {string} string "internal error"
+// @Router /api/context/inject [post]
+// @Router /api/context/inject [get]
 func (s *Service) handleContextInject(w http.ResponseWriter, r *http.Request) {
-	project := r.URL.Query().Get("project")
-	agentID := r.URL.Query().Get("agent_id")
+	var project, agentID, cwd, legacyProject, gitRemote, relativePath string
+
+	if r.Method == http.MethodPost {
+		var req struct {
+			Project      string `json:"project"`
+			AgentID      string `json:"agent_id"`
+			Cwd          string `json:"cwd"`
+			LegacyProject string `json:"legacy_project"`
+			GitRemote    string `json:"git_remote"`
+			RelativePath string `json:"relative_path"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "Invalid JSON: "+err.Error(), http.StatusBadRequest)
+			return
+		}
+		project = req.Project
+		agentID = req.AgentID
+		cwd = req.Cwd
+		legacyProject = req.LegacyProject
+		gitRemote = req.GitRemote
+		relativePath = req.RelativePath
+	} else {
+		// GET (deprecated — use POST)
+		project = r.URL.Query().Get("project")
+		agentID = r.URL.Query().Get("agent_id")
+		cwd = r.URL.Query().Get("cwd")
+		legacyProject = r.URL.Query().Get("legacy_project")
+		gitRemote = r.URL.Query().Get("git_remote")
+		relativePath = r.URL.Query().Get("relative_path")
+	}
+
 	// agent_id acts as project scope for OpenClaw agents without filesystem context
 	if project == "" && agentID != "" {
 		project = agentID
@@ -737,14 +876,10 @@ func (s *Service) handleContextInject(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	cwd := r.URL.Query().Get("cwd")
-	if cwd == "" {
-		cwd = "/"
-	}
-
-	legacyProject := r.URL.Query().Get("legacy_project")
-	gitRemote := r.URL.Query().Get("git_remote")
-	relativePath := r.URL.Query().Get("relative_path")
+	// Server-side: ignore client-provided cwd to prevent filesystem probing (S9-003).
+	// File mtime staleness checks are only meaningful on the client; the server has no
+	// access to client filesystems.
+	cwd = ""
 
 	if legacyProject != "" && legacyProject != project {
 		displayName := project
@@ -809,7 +944,7 @@ func (s *Service) handleContextInject(w http.ResponseWriter, r *http.Request) {
 	var relevantObservations []*models.Observation
 	if s.vectorClient != nil && s.vectorClient.IsConnected() {
 		query := project + " code development"
-		where := vector.BuildWhereFilter(vector.DocTypeObservation, "", false)
+		where := vector.BuildWhereFilter(vector.DocTypeObservation, project, true)
 
 		vectorResults, vecErr := s.vectorClient.Query(ctx, query, 20, where)
 		if vecErr != nil {
@@ -1029,7 +1164,78 @@ func (s *Service) handleContextInject(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// handleContextCount returns the count of observations for a project.
+// handleSearchDecisions godoc
+// @Summary Search decisions
+// @Description Searches observations using decision-optimized semantic search. Thin REST wrapper over the search manager's Decisions method.
+// @Tags Search
+// @Accept json
+// @Produce json
+// @Security ApiKeyAuth
+// @Param body body object true "Search params: query, project (required), limit (optional)"
+// @Success 200 {object} map[string]interface{}
+// @Failure 400 {string} string "query and project required"
+// @Failure 500 {string} string "internal error"
+// @Router /api/decisions/search [post]
+func (s *Service) handleSearchDecisions(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Query   string `json:"query"`
+		Project string `json:"project"`
+		Limit   int    `json:"limit"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, "Invalid JSON: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	if body.Query == "" || body.Project == "" {
+		http.Error(w, "query and project required", http.StatusBadRequest)
+		return
+	}
+	if err := ValidateProjectName(body.Project); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	const maxDecisionSearchLimit = 100
+	limit := body.Limit
+	if limit <= 0 {
+		limit = 10
+	}
+	if limit > maxDecisionSearchLimit {
+		limit = maxDecisionSearchLimit
+	}
+
+	params := search.SearchParams{
+		Query:   body.Query,
+		Project: body.Project,
+		Limit:   limit,
+	}
+
+	result, err := s.searchMgr.Decisions(r.Context(), params)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	writeJSON(w, map[string]any{
+		"project":      body.Project,
+		"query":        body.Query,
+		"observations": result.Results,
+		"total_count":  result.TotalCount,
+	})
+}
+
+// handleContextCount godoc
+// @Summary Get observation count
+// @Description Returns the count of observations for a project (cached).
+// @Tags Context
+// @Produce json
+// @Security ApiKeyAuth
+// @Param project query string true "Project name"
+// @Success 200 {object} map[string]interface{}
+// @Failure 400 {string} string "project required"
+// @Failure 500 {string} string "internal error"
+// @Router /api/context/count [get]
 func (s *Service) handleContextCount(w http.ResponseWriter, r *http.Request) {
 	project := r.URL.Query().Get("project")
 	if project == "" {
@@ -1046,5 +1252,78 @@ func (s *Service) handleContextCount(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, map[string]any{
 		"project": project,
 		"count":   count,
+	})
+}
+
+// trackSearchMiss records a search query that returned zero results for analytics.
+func (s *Service) trackSearchMiss(project, query string) {
+	s.initMu.RLock()
+	obsStore := s.observationStore
+	s.initMu.RUnlock()
+	if obsStore == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(s.ctx, 5*time.Second)
+	defer cancel()
+	if err := obsStore.RecordSearchMiss(ctx, project, query); err != nil {
+		log.Warn().Err(err).Str("project", project).Msg("failed to record search miss")
+	}
+}
+
+// handleSearchMissAnalytics godoc
+// @Summary Get search miss analytics
+// @Description Returns aggregated analytics for search queries that returned zero results, useful for self-tuning.
+// @Tags Search
+// @Accept json
+// @Produce json
+// @Security ApiKeyAuth
+// @Param body body object true "Params: project (optional — omit to aggregate across all projects), limit (optional)"
+// @Success 200 {object} map[string]interface{}
+// @Failure 400 {string} string "invalid project name"
+// @Failure 500 {string} string "internal error"
+// @Failure 503 {string} string "store not available"
+// @Router /api/analytics/search-misses [post]
+func (s *Service) handleSearchMissAnalytics(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Project string `json:"project"`
+		Limit   int    `json:"limit"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, "Invalid JSON: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+	if body.Project != "" {
+		if err := ValidateProjectName(body.Project); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+	}
+
+	const maxSearchMissStatsLimit = 200
+	if body.Limit <= 0 {
+		body.Limit = 50
+	}
+	if body.Limit > maxSearchMissStatsLimit {
+		body.Limit = maxSearchMissStatsLimit
+	}
+
+	s.initMu.RLock()
+	obsStore := s.observationStore
+	s.initMu.RUnlock()
+	if obsStore == nil {
+		http.Error(w, "store not available", http.StatusServiceUnavailable)
+		return
+	}
+
+	stats, err := obsStore.GetSearchMissStats(r.Context(), body.Project, body.Limit)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	writeJSON(w, map[string]any{
+		"project":      body.Project,
+		"miss_stats":   stats,
+		"total_misses": len(stats),
 	})
 }

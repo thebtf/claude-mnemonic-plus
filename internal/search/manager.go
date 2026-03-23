@@ -119,6 +119,122 @@ func (m *SearchMetrics) GetStats() map[string]any {
 	}
 }
 
+// ApplyCompositeScoring re-ranks observations using multi-signal scoring.
+// Formula: score = similarity × recencyDecay × typeWeight × max(importance, 0.3) × sourceBoost × feedbackBoost
+// This ensures that recent, high-importance decisions rank above old generic discoveries.
+// Explicit saves (store_memory) never decay and receive a source boost.
+func ApplyCompositeScoring(observations []*models.Observation, similarityScores map[int64]float64) {
+	now := time.Now()
+
+	// Type weights: decisions and patterns have higher behavioral impact
+	typeWeights := map[models.ObservationType]float64{
+		"decision":  1.4,
+		"bugfix":    1.3,
+		"feature":   1.2,
+		"pattern":   1.2,
+		"discovery": 0.8,
+		"change":    0.7,
+		"refactor":  0.9,
+	}
+
+	// Per-type half-life in days. Longer = slower decay = more persistent.
+	typeHalfLife := map[models.ObservationType]float64{
+		"decision":  30,
+		"pattern":   30,
+		"bugfix":    14,
+		"feature":   14,
+		"discovery": 7,
+		"change":    7,
+		"refactor":  7,
+	}
+
+	for _, obs := range observations {
+		sim := similarityScores[obs.ID]
+		if sim == 0 {
+			sim = 0.5 // default if no similarity score
+		}
+
+		// Recency decay: per-type half-life; manual saves (store_memory) never decay
+		var recency float64
+		if obs.SourceType == models.SourceManual {
+			// Explicit saves are permanent until suppressed — no decay
+			recency = 1.0
+		} else {
+			halfLife := 7.0 // default half-life in days for unknown types
+			if hl, ok := typeHalfLife[obs.Type]; ok {
+				halfLife = hl
+			}
+			ageDays := now.Sub(time.Unix(obs.CreatedAtEpoch/1000, 0)).Hours() / 24.0
+			recency = math.Pow(0.5, ageDays/halfLife)
+			// Floor at 0.05 so old but very important observations don't disappear
+			if recency < 0.05 {
+				recency = 0.05
+			}
+		}
+
+		// Type weight
+		tw := 1.0
+		if w, ok := typeWeights[obs.Type]; ok {
+			tw = w
+		}
+
+		// Importance (floor at 0.3 so unscored observations aren't penalized to zero)
+		imp := obs.ImportanceScore
+		if imp < 0.3 {
+			imp = 0.3
+		}
+
+		// Source type boost: explicit saves (store_memory) are higher value
+		sourceBoost := 1.0
+		if obs.SourceType == models.SourceManual {
+			sourceBoost = 1.5
+		}
+
+		// User feedback boost: +1 = useful, -1 = not useful
+		feedbackBoost := 1.0 + float64(obs.UserFeedback)*0.1
+		if feedbackBoost < 0.5 {
+			feedbackBoost = 0.5
+		}
+		if feedbackBoost > 2.0 {
+			feedbackBoost = 2.0
+		}
+
+		// Composite score replaces raw similarity
+		compositeScore := sim * recency * tw * imp * sourceBoost * feedbackBoost
+		similarityScores[obs.ID] = compositeScore
+	}
+}
+
+// ApplyDiversityPenalty adjusts scores based on injection diversity.
+// High diversity (observation injected across many projects) = generic = penalty.
+// Scope=global observations are exempt (they are intentionally cross-project).
+// Only scope=project observations with diversity > 0.5 are penalized.
+// Penalty formula: score *= 1.0 - (diversity - 0.5) * 0.4, floored at multiplier 0.8.
+func ApplyDiversityPenalty(observations []*models.Observation, scores map[int64]float64, diversityScores map[int64]float64) {
+	if len(diversityScores) == 0 {
+		return
+	}
+	for _, obs := range observations {
+		// Exempt global-scope observations
+		if obs.Scope == models.ScopeGlobal {
+			continue
+		}
+		diversity, ok := diversityScores[obs.ID]
+		if !ok || diversity <= 0.5 {
+			continue
+		}
+		// Apply penalty: the more generic (high diversity), the lower the score.
+		// Cap multiplier floor at 0.8 to avoid over-penalizing.
+		multiplier := 1.0 - (diversity-0.5)*0.4
+		if multiplier < 0.8 {
+			multiplier = 0.8
+		}
+		if current, exists := scores[obs.ID]; exists {
+			scores[obs.ID] = current * multiplier
+		}
+	}
+}
+
 // Manager provides unified search across PostgreSQL and pgvector.
 type Manager struct {
 	ctx              context.Context
@@ -1231,6 +1347,7 @@ func (m *Manager) observationToResult(obs *models.Observation, format string) Se
                         "scope":            string(obs.Scope),
                         "memory_type":      string(obs.MemoryType),
                         "facts":            obs.Facts,
+                        "rejected":         obs.Rejected,
                         "importance_score": obs.ImportanceScore,
                 },
         }

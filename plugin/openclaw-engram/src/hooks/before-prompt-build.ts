@@ -41,8 +41,14 @@ export async function handleBeforePromptBuild(
     if (!client.isAvailable()) return;
     if (!event.prompt || event.prompt.trim() === '') return;
 
-    const tier: TierResult = turnTracker.classify(event.prompt ?? '');
-    logger?.debug(`[engram] before-prompt-build: tier=${tier.tier} reason=${tier.reason}`);
+    // Skip HEARTBEAT prompts — they are workspace health checks, not real user queries
+    const promptLower = event.prompt.toLowerCase();
+    if (promptLower.includes('heartbeat.md') || promptLower.includes('heartbeat_ok')) {
+      return;
+    }
+
+    const tier: TierResult = turnTracker.classify(event.prompt ?? '', event.messages);
+    logger?.debug(`[engram] before-prompt-build: tier=${tier.tier} budget=${tier.tokenBudget} reason=${tier.reason}`);
 
     if (tier.tier === 'NONE') return;
 
@@ -64,6 +70,13 @@ export async function handleBeforePromptBuild(
     }
 
     if (!response || !Array.isArray(response.observations) || response.observations.length === 0) {
+      // Track search miss for self-tuning analytics (fire-and-forget).
+      // Normalize and truncate prompt to avoid sending raw PII or very long strings.
+      const normalizedPrompt = event.prompt?.trim() ?? '';
+      if (normalizedPrompt.length > 10) {
+        const query = normalizedPrompt.replace(/\s+/g, ' ').slice(0, 512);
+        void client.trackSearchMiss({ project, query }).catch(() => {});
+      }
       return;
     }
 

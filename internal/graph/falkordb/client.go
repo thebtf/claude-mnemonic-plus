@@ -193,11 +193,13 @@ func (s *FalkorDBGraphStore) GetNeighbors(_ context.Context, obsID int64, maxHop
 		limit = 20
 	}
 
-	// Variable-length path query
+	// Variable-length path query — use named path to avoid FalkorDB
+	// "Type mismatch: expected List or Null but was Path" on relationship list ops.
 	query := fmt.Sprintf(
-		"MATCH (a:Observation {id: $id})-[r:REL*1..%d]-(b:Observation) "+
+		"MATCH p = (a:Observation {id: $id})-[:REL*1..%d]-(b:Observation) "+
 			"WHERE b.id <> $id "+
-			"RETURN DISTINCT b.id, length(r) as hops, head([x IN r | x.type]) as rel_type "+
+			"WITH DISTINCT b, length(p)-1 as hops, relationships(p) as rels "+
+			"RETURN b.id, hops, type(rels[0]) as rel_type "+
 			"ORDER BY hops "+
 			"LIMIT %d",
 		maxHops, limit,
