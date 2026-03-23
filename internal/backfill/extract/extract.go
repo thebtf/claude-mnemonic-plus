@@ -204,6 +204,40 @@ func BuildChunkUserPrompt(projectPath string, exchangeCount int, chunkInfo, tran
 	return fmt.Sprintf(ChunkExtractionUserTemplate, projectPath, exchangeCount, chunkInfo, sanitized)
 }
 
+// ParseSingleObservation extracts a single observation from XML that may contain
+// a bare <observation>...</observation> element (without a wrapper <observations> element).
+// Returns nil if parsing fails or the input is empty.
+func ParseSingleObservation(raw string) *XMLObservation {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil
+	}
+
+	// Strip markdown code fences if present.
+	if strings.HasPrefix(raw, "```") {
+		lines := strings.Split(raw, "\n")
+		start := 1
+		end := len(lines) - 1
+		if end > start && strings.HasPrefix(lines[end], "```") {
+			raw = strings.Join(lines[start:end], "\n")
+			raw = strings.TrimSpace(raw)
+		}
+	}
+
+	start := strings.Index(raw, "<observation>")
+	end := strings.Index(raw, "</observation>")
+	if start == -1 || end == -1 || end <= start {
+		return nil
+	}
+	xmlStr := raw[start : end+len("</observation>")]
+
+	var obs XMLObservation
+	if err := xml.Unmarshal([]byte(xmlStr), &obs); err != nil {
+		return nil
+	}
+	return &obs
+}
+
 // BuildAlreadyExtracted builds the <already_extracted> context block for multi-chunk dedup.
 func BuildAlreadyExtracted(titles []string) string {
 	if len(titles) == 0 {
