@@ -5,6 +5,7 @@ import EmptyState from '@/components/layout/EmptyState.vue'
 
 const {
   sessions,
+  totalSessions,
   projects,
   loading,
   error,
@@ -38,7 +39,7 @@ function setProject(project: string) {
       <div class="flex items-center gap-3">
         <i class="fas fa-clock-rotate-left text-claude-400 text-xl" />
         <h1 class="text-2xl font-bold text-white">Sessions</h1>
-        <span v-if="sessions.length > 0" class="text-sm text-slate-500">({{ sessions.length }})</span>
+        <span v-if="totalSessions > 0" class="text-sm text-slate-500">({{ totalSessions }})</span>
       </div>
       <button
         @click="loadSessions()"

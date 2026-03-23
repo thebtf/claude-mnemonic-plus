@@ -12,6 +12,7 @@ function resolveSessionError(err: unknown, fallback: string): string {
 
 export function useSessions() {
   const sessions = ref<IndexedSession[]>([])
+  const totalSessions = ref(0)
   const projects = ref<string[]>([])
   const loading = ref(false)
   const error = ref<string | null>(null)
@@ -36,6 +37,7 @@ export function useSessions() {
         },
         abortController.signal,
       )
+      totalSessions.value = result.total || 0
       sessions.value = (result.sessions || []).map(s => ({
         id: s.claude_session_id,
         workstation: '',
@@ -100,6 +102,7 @@ export function useSessions() {
 
   return {
     sessions,
+    totalSessions,
     projects,
     loading,
     error,

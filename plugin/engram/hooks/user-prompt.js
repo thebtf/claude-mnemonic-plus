@@ -19,6 +19,11 @@ async function handleUserPrompt(ctx, input) {
   const project = typeof ctx.Project === 'string' ? ctx.Project : '';
   const cwd = typeof ctx.CWD === 'string' ? ctx.CWD : '';
 
+  // Skip system-generated task notifications — they are not user prompts
+  if (prompt && (prompt.includes('<task-notification>') || prompt.includes('<command-name>'))) {
+    return '';
+  }
+
   let contextToInject = '';
   let observationCount = 0;
   let matchedCount = 0;

@@ -35,7 +35,7 @@ const statusColor = computed(() => {
 </script>
 
 <template>
-  <div class="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+  <div class="grid grid-cols-2 xl:grid-cols-4 gap-4 mb-6">
     <!-- Uptime -->
     <div class="glass rounded-xl p-4 border border-white/10">
       <div class="flex items-center justify-between">
