@@ -194,6 +194,16 @@ func BuildUserPrompt(projectPath, gitBranch string, durationMin, exchangeCount i
 	return fmt.Sprintf(UserPromptTemplate, projectPath, gitBranch, durationMin, exchangeCount, chunkInfo, alreadyExtracted, sanitized)
 }
 
+// BuildChunkUserPrompt constructs the user prompt using ChunkExtractionUserTemplate.
+// Transcript content is sanitized to prevent XML tag injection (AG06-005).
+func BuildChunkUserPrompt(projectPath string, exchangeCount int, chunkInfo, transcript string) string {
+	// Replace XML tags that could break prompt boundaries with bracketed equivalents
+	sanitized := xmlTagRe.ReplaceAllStringFunc(transcript, func(tag string) string {
+		return strings.ReplaceAll(strings.ReplaceAll(tag, "<", "["), ">", "]")
+	})
+	return fmt.Sprintf(ChunkExtractionUserTemplate, projectPath, exchangeCount, chunkInfo, sanitized)
+}
+
 // BuildAlreadyExtracted builds the <already_extracted> context block for multi-chunk dedup.
 func BuildAlreadyExtracted(titles []string) string {
 	if len(titles) == 0 {
