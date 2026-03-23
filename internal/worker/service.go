@@ -1690,6 +1690,7 @@ func (s *Service) setupRoutes() {
 		r.Post("/api/backfill", s.handleBackfillIngest)
 		r.Post("/api/backfill/session", s.handleBackfillSession)
 		r.Get("/api/backfill/status", s.handleBackfillStatus)
+		r.Post("/api/import/feedback", s.handleImportFeedback)
 	})
 
 	// MCP routes (require DB ready, no timeout — long-lived SSE connections)
