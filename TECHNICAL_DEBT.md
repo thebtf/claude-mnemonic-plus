@@ -1,6 +1,6 @@
 # Technical Debt
 
-## 2026-03-23: Sessions View Shows Indexed Transcripts, Not SDK Sessions
+## ~~2026-03-23: Sessions View Shows Indexed Transcripts, Not SDK Sessions~~ RESOLVED v1.5.2 (PR #42)
 **What:** Dashboard "Sessions" page queries `sessions-index` API (indexed transcripts via `POST /api/sessions/index`) but users expect to see their actual Claude Code sessions (stored in `sdk_sessions` table via session-start hook).
 **Why deferred:** Requires new REST endpoint to list SDK sessions with pagination/project filter, plus frontend refactor of SessionsView to use the new endpoint instead of `fetchIndexedSessions`. The `sync-sessions.js` hook (added in v1.5.0) indexes new sessions automatically, but historical sessions remain unindexed.
 **Impact:** "No sessions found" on Sessions page even when sessions exist. UX confusion — project filter dropdown works (populated from observations) but session list is empty.
@@ -45,7 +45,7 @@
 5. Add "archive all with confidence < 0.6" bulk action
 **Context:** `pkg/models/pattern.go:165` (hardcoded 0.5), `internal/pattern/detector.go:257` (generic description), `internal/pattern/quality.go` (scoring formula), `ui/src/views/PatternsView.vue`
 
-## 2026-03-23: ScoreBreakdown Modal — API Response Mismatch
+## ~~2026-03-23: ScoreBreakdown Modal — API Response Mismatch~~ RESOLVED v1.6.1 (PR #44)
 **What:** Clicking score badge (e.g., "1.31") in ObservationCard triggers ScoreBreakdown modal but shows blank/error. API returns `{id, components, config}` but Vue component expects `{observation: {title, type}, scoring: {final_score, type_weight, recency_decay, ...}, explanation: {...}}`.
 **Root cause:** `handleExplainScore` in `handlers_scoring.go` returns raw `scoreCalculator.CalculateComponents()` output. Frontend `ScoreBreakdown.vue` expects a different shape with nested `observation`, `scoring`, `explanation` objects.
 **Impact:** Score breakdown feature broken — modal shows loading then nothing.
@@ -63,10 +63,7 @@ What: MCP server returns empty lists for resources/list, prompts/list, completio
 Why deferred: MCP spec allows graceful empty responses for unsupported capabilities
 Impact: No functional impact — clients handle empty lists
 
-## 2026-03-19: Memory Blocks Table Unpopulated
-What: migration 024 created memory_blocks table but no code populates it
-Why deferred: Consolidation-driven population requires redesign of consolidation scheduler
-Impact: Table exists but empty — no runtime impact
+## ~~2026-03-19: Memory Blocks Table Unpopulated~~ RESOLVED v1.5.2 — dropped via migration 047
 
 ## 2026-03-19: Config Reload via os.Exit(0)
 What: reloadConfig calls os.Exit(0) instead of hot-reload
