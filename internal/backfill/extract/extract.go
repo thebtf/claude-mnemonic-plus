@@ -81,12 +81,19 @@ var ValidOutcomes = map[string]bool{
 
 // XMLObservation represents a single observation parsed from LLM XML output.
 type XMLObservation struct {
+	Category  string      `xml:"category"` // decision|correction|debugging|gotcha|pattern|user_behavior
 	Type      string      `xml:"type"`
 	Outcome   string      `xml:"outcome"`
 	Title     string      `xml:"title"`
 	Narrative string      `xml:"narrative"`
 	Concepts  xmlConcepts `xml:"concepts"`
 	Files     xmlFiles    `xml:"files"`
+}
+
+// ValidCategories contains allowed observation category values.
+var ValidCategories = map[string]bool{
+	"decision": true, "correction": true, "debugging": true,
+	"gotcha": true, "pattern": true, "user_behavior": true,
 }
 
 type xmlObservations struct {
