@@ -56,13 +56,14 @@ type detectRequest struct {
 
 // Detector performs async relation and conflict detection after observation creation.
 type Detector struct {
-	vectorClient     vector.Client
-	relationStore    *gorm.RelationStore
-	conflictStore    *gorm.ConflictStore
-	observationStore *gorm.ObservationStore
-	promptStore      *gorm.PromptStore
-	parentCtx        context.Context
-	queue            chan detectRequest
+	vectorClient      vector.Client
+	relationStore     *gorm.RelationStore
+	conflictStore     *gorm.ConflictStore
+	observationStore  *gorm.ObservationStore
+	promptStore       *gorm.PromptStore
+	causalClassifier  *CausalClassifier
+	parentCtx         context.Context
+	queue             chan detectRequest
 }
 
 // NewDetector creates a new relation detector.
@@ -82,6 +83,11 @@ func NewDetector(
 		promptStore:      promptStore,
 		queue:            make(chan detectRequest, queueSize),
 	}
+}
+
+// SetCausalClassifier sets the LLM-based causal classifier for FR-44/FR-45.
+func (d *Detector) SetCausalClassifier(c *CausalClassifier) {
+	d.causalClassifier = c
 }
 
 // Start launches the background goroutine that processes detection requests.
@@ -425,6 +431,36 @@ func (d *Detector) Detect(ctx context.Context, obsID int64, project string) erro
 			Int("relations", relationsStored).
 			Int("conflicts", conflictsStored).
 			Msg("Relation detection completed")
+	}
+
+	// 8. Causal classification via LLM for bugfix/guidance observations (FR-44/FR-45)
+	if d.causalClassifier != nil && ShouldClassify(obs) && len(candidates) > 0 {
+		// Classify top-3 similarity candidates only (limit LLM calls)
+		maxCausal := 3
+		if len(candidates) < maxCausal {
+			maxCausal = len(candidates)
+		}
+		for _, candidate := range candidates[:maxCausal] {
+			label, classErr := d.causalClassifier.ClassifyPair(ctx, obs, candidate)
+			if classErr != nil {
+				log.Debug().Err(classErr).Int64("obs_a", obs.ID).Int64("obs_b", candidate.ID).Msg("Causal classification failed")
+				continue
+			}
+			if label == "unrelated" {
+				continue
+			}
+			causalRel := &models.ObservationRelation{
+				SourceID:     obs.ID,
+				TargetID:     candidate.ID,
+				RelationType: models.RelationType(label),
+				Confidence:   0.8,
+			}
+			if _, storeErr := d.relationStore.StoreRelation(ctx, causalRel); storeErr != nil {
+				log.Debug().Err(storeErr).Str("type", label).Int64("from", obs.ID).Int64("to", candidate.ID).Msg("Failed to store causal relation")
+			} else {
+				relationsStored++
+			}
+		}
 	}
 
 	return nil
