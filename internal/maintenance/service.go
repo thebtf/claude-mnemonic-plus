@@ -602,11 +602,11 @@ func (s *Service) detectMissingVectors(ctx context.Context) (int64, error) {
 
 // cleanStaleRelations deletes relations where the source or target observation no longer exists.
 func (s *Service) cleanStaleRelations(ctx context.Context) (int64, error) {
-	// Delete relations whose source_id does not exist in observations.
+	// Delete relations whose source or target observation no longer exists.
 	result := s.store.GetDB().WithContext(ctx).
 		Exec(`DELETE FROM observation_relations
-		      WHERE source_id NOT IN (SELECT id FROM observations)
-		         OR target_id NOT IN (SELECT id FROM observations)`)
+		      WHERE source_observation_id NOT IN (SELECT id FROM observations)
+		         OR target_observation_id NOT IN (SELECT id FROM observations)`)
 	if result.Error != nil {
 		return 0, fmt.Errorf("delete stale relations: %w", result.Error)
 	}

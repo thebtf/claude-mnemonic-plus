@@ -365,16 +365,21 @@ func (s *FalkorDBGraphStore) GetCluster(_ context.Context, nodeID int64, maxNode
 		maxNodes = 50
 	}
 
-	// BFS: find all connected nodes up to 3 hops, limited by maxNodes
+	// BFS: find all connected nodes up to 3 hops, limited by maxNodes.
+	// nodeID is passed as a parameter to avoid injection risk; LIMIT does not
+	// support parameters in Cypher so maxNodes (an int) is interpolated safely.
 	query := fmt.Sprintf(
-		"MATCH (a:Observation {id: %d})-[:REL*1..3]-(b:Observation) "+
-			"WHERE b.id <> %d "+
+		"MATCH (a:Observation {id: $nodeID})-[:REL*1..3]-(b:Observation) "+
+			"WHERE b.id <> $nodeID "+
 			"RETURN DISTINCT b.id "+
 			"LIMIT %d",
-		nodeID, nodeID, maxNodes,
+		maxNodes,
 	)
+	params := map[string]interface{}{
+		"nodeID": nodeID,
+	}
 
-	result, err := g.Query(query)
+	result, err := g.ParameterizedQuery(query, params)
 	if err != nil {
 		return nil, fmt.Errorf("cluster query: %w", err)
 	}

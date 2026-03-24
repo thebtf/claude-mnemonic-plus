@@ -114,6 +114,7 @@ async function executeBatchAction() {
     }
     selectedIds.value = new Set()
     await fetchPage()
+    loadTagCloud()
   } catch {
     // Error will show in page reload
   } finally {
@@ -124,7 +125,11 @@ async function executeBatchAction() {
 
 async function loadTagCloud() {
   try {
-    const response = await fetch('/api/observations/tag-cloud?limit=20')
+    const params = new URLSearchParams({ limit: '20' })
+    if (currentProject.value) {
+      params.set('project', currentProject.value)
+    }
+    const response = await fetch(`/api/observations/tag-cloud?${params}`)
     if (response.ok) {
       tagCloud.value = await response.json()
     }
@@ -215,6 +220,7 @@ function setProject(project: string | null) {
   currentProject.value = project
   offset.value = 0
   fetchPage()
+  loadTagCloud()
 }
 
 function setType(type: ObservationType | null) {

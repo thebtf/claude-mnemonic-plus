@@ -43,7 +43,7 @@ func (s *ProjectSettingsStore) GetThreshold(ctx context.Context, project string)
 		if err == gorm.ErrRecordNotFound {
 			return 0.3, nil
 		}
-		return 0.3, err
+		return 0, err
 	}
 	return ps.RelevanceThreshold, nil
 }

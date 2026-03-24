@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useAuth } from '@/composables/useAuth'
 import { useSSE } from '@/composables/useSSE'
@@ -8,29 +8,10 @@ import { useHealth } from '@/composables/useHealth'
 
 const route = useRoute()
 const router = useRouter()
-const { logout } = useAuth()
+const { logout, authDisabled } = useAuth()
 const { isConnected } = useSSE()
 const { stats } = useStats()
 const { health } = useHealth()
-
-// Auth-disabled detection
-const authDisabled = ref(false)
-
-async function checkAuthDisabled() {
-  try {
-    const res = await fetch('/api/auth/me', { credentials: 'include' })
-    if (res.ok) {
-      const data = await res.json()
-      authDisabled.value = data?.auth_disabled === true
-    }
-  } catch {
-    // Non-critical
-  }
-}
-
-onMounted(() => {
-  checkAuthDisabled()
-})
 
 const collapsed = ref(localStorage.getItem('nav-sidebar-collapsed') === 'true')
 

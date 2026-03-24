@@ -294,7 +294,7 @@ func (d *Detector) Detect(ctx context.Context, obsID int64, project string) erro
 			continue
 		}
 		// Use file path hash as a pseudo node ID (negative to avoid collision with observation IDs)
-		fileNodeID := int64(hashString(filePath))
+		fileNodeID := -int64(hashString(filePath))
 		rel := &models.ObservationRelation{
 			SourceID:     obsID,
 			TargetID:     fileNodeID,
@@ -309,7 +309,7 @@ func (d *Detector) Detect(ctx context.Context, obsID int64, project string) erro
 		if filePath == "" {
 			continue
 		}
-		fileNodeID := int64(hashString(filePath))
+		fileNodeID := -int64(hashString(filePath))
 		rel := &models.ObservationRelation{
 			SourceID:     obsID,
 			TargetID:     fileNodeID,
@@ -441,22 +441,25 @@ func (d *Detector) Detect(ctx context.Context, obsID int64, project string) erro
 			maxCausal = len(candidates)
 		}
 		for _, candidate := range candidates[:maxCausal] {
-			label, classErr := d.causalClassifier.ClassifyPair(ctx, obs, candidate)
+			// candidate = A (the original problem/observation), obs = B (the fix/rule).
+			// ClassifyPair(A, B) returns "fixed_by" when A is the bug fixed by B,
+			// or "corrects" when B is a rule correcting A.
+			label, classErr := d.causalClassifier.ClassifyPair(ctx, candidate, obs)
 			if classErr != nil {
-				log.Debug().Err(classErr).Int64("obs_a", obs.ID).Int64("obs_b", candidate.ID).Msg("Causal classification failed")
+				log.Debug().Err(classErr).Int64("obs_a", candidate.ID).Int64("obs_b", obs.ID).Msg("Causal classification failed")
 				continue
 			}
 			if label == "unrelated" {
 				continue
 			}
 			causalRel := &models.ObservationRelation{
-				SourceID:     obs.ID,
-				TargetID:     candidate.ID,
+				SourceID:     candidate.ID,
+				TargetID:     obs.ID,
 				RelationType: models.RelationType(label),
 				Confidence:   0.8,
 			}
 			if _, storeErr := d.relationStore.StoreRelation(ctx, causalRel); storeErr != nil {
-				log.Debug().Err(storeErr).Str("type", label).Int64("from", obs.ID).Int64("to", candidate.ID).Msg("Failed to store causal relation")
+				log.Debug().Err(storeErr).Str("type", label).Int64("from", candidate.ID).Int64("to", obs.ID).Msg("Failed to store causal relation")
 			} else {
 				relationsStored++
 			}

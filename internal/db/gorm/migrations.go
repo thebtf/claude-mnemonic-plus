@@ -1655,12 +1655,14 @@ func runMigrations(db *gorm.DB, embeddingDims int) error {
 				return tx.Exec(`DROP TABLE IF EXISTS system_config`).Error
 			},
 		},
-	// Migration 051: Documents + document_comments tables for versioned document storage.
+	// Migration 051: versioned_documents + versioned_document_comments tables for
+	// versioned document storage. Uses distinct table names to avoid collision with
+	// the RAG `documents` table created by migration 017.
 	// Foundation for AI agent collaboration platform (task/issue management).
 	{
 		ID: "051_documents",
 		Migrate: func(tx *gorm.DB) error {
-			if err := tx.Exec(`CREATE TABLE IF NOT EXISTS documents (
+			if err := tx.Exec(`CREATE TABLE IF NOT EXISTS versioned_documents (
 				id BIGSERIAL PRIMARY KEY,
 				path TEXT NOT NULL,
 				project TEXT NOT NULL,
@@ -1675,15 +1677,15 @@ func runMigrations(db *gorm.DB, embeddingDims int) error {
 			)`).Error; err != nil {
 				return err
 			}
-			if err := tx.Exec(`CREATE INDEX IF NOT EXISTS idx_documents_project_path ON documents (project, path, version DESC)`).Error; err != nil {
+			if err := tx.Exec(`CREATE INDEX IF NOT EXISTS idx_versioned_documents_project_path ON versioned_documents (project, path, version DESC)`).Error; err != nil {
 				return err
 			}
-			if err := tx.Exec(`CREATE INDEX IF NOT EXISTS idx_documents_doc_type ON documents (doc_type)`).Error; err != nil {
+			if err := tx.Exec(`CREATE INDEX IF NOT EXISTS idx_versioned_documents_doc_type ON versioned_documents (doc_type)`).Error; err != nil {
 				return err
 			}
-			if err := tx.Exec(`CREATE TABLE IF NOT EXISTS document_comments (
+			if err := tx.Exec(`CREATE TABLE IF NOT EXISTS versioned_document_comments (
 				id BIGSERIAL PRIMARY KEY,
-				document_id BIGINT NOT NULL REFERENCES documents(id),
+				document_id BIGINT NOT NULL REFERENCES versioned_documents(id),
 				author TEXT NOT NULL,
 				content TEXT NOT NULL,
 				line_start INT,
@@ -1693,12 +1695,13 @@ func runMigrations(db *gorm.DB, embeddingDims int) error {
 			)`).Error; err != nil {
 				return err
 			}
-			return tx.Exec(`CREATE INDEX IF NOT EXISTS idx_document_comments_doc ON document_comments (document_id)`).Error
+			return tx.Exec(`CREATE INDEX IF NOT EXISTS idx_versioned_document_comments_doc ON versioned_document_comments (document_id)`).Error
 		},
 		Rollback: func(tx *gorm.DB) error {
-			tx.Exec(`DROP TABLE IF EXISTS document_comments`)
-			tx.Exec(`DROP TABLE IF EXISTS documents`)
-			return nil
+			if err := tx.Exec(`DROP TABLE IF EXISTS versioned_document_comments`).Error; err != nil {
+				return err
+			}
+			return tx.Exec(`DROP TABLE IF EXISTS versioned_documents`).Error
 		},
 	},
 	})

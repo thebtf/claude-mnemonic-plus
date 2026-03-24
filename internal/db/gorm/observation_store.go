@@ -1662,14 +1662,7 @@ func (s *ObservationStore) GetRecentSessionIDs(ctx context.Context, project stri
 
 // GetTopImportanceObservations retrieves observations for a project ordered by importance DESC.
 // Used to fill the injection floor when the main result set falls below the minimum.
+// Delegates to GetActiveObservations which applies the same filter/ordering.
 func (s *ObservationStore) GetTopImportanceObservations(ctx context.Context, project string, limit int) ([]*models.Observation, error) {
-	var dbObservations []Observation
-	err := s.db.WithContext(ctx).
-		Scopes(projectScopeFilter(project), activeObservationFilter(), importanceOrdering()).
-		Limit(limit).
-		Find(&dbObservations).Error
-	if err != nil {
-		return nil, err
-	}
-	return toModelObservations(dbObservations), nil
+	return s.GetActiveObservations(ctx, project, limit)
 }

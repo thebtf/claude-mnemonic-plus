@@ -22,6 +22,7 @@ const error = ref<string | null>(null)
 // Vault setup helper
 const vaultKeyConfigured = ref<boolean | null>(null)
 const vaultCopyFeedback = ref(false)
+const vaultCopyError = ref(false)
 
 // Maintenance
 const consolidating = ref(false)
@@ -62,7 +63,7 @@ async function loadAll() {
     }
 
     // Surface real errors (not AbortErrors for the current signal).
-    const failures = [h, v, g]
+    const failures = [h, v, g, vaultResult]
       .filter(r => r.status === 'rejected')
       .map(r => (r as PromiseRejectedResult).reason)
       .filter(e => !(e instanceof Error && e.name === 'AbortError'))
@@ -84,6 +85,10 @@ async function copyVaultSetupCommand() {
   if (ok) {
     vaultCopyFeedback.value = true
     setTimeout(() => { vaultCopyFeedback.value = false }, 2000)
+  } else {
+    console.warn('Failed to copy vault setup command to clipboard')
+    vaultCopyError.value = true
+    setTimeout(() => { vaultCopyError.value = false }, 2000)
   }
 }
 
@@ -346,8 +351,8 @@ onUnmounted(() => {
           @click="copyVaultSetupCommand"
           class="px-3 py-1.5 rounded-lg text-xs bg-slate-800/50 border border-slate-700/50 text-slate-300 hover:text-white hover:border-yellow-500/50 transition-colors"
         >
-          <i :class="['fas mr-1.5', vaultCopyFeedback ? 'fa-check text-green-400' : 'fa-copy']" />
-          {{ vaultCopyFeedback ? 'Copied!' : 'Copy command' }}
+          <i :class="['fas mr-1.5', vaultCopyFeedback ? 'fa-check text-green-400' : vaultCopyError ? 'fa-times text-red-400' : 'fa-copy']" />
+          {{ vaultCopyFeedback ? 'Copied!' : vaultCopyError ? 'Copy failed' : 'Copy command' }}
         </button>
       </div>
 

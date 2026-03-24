@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 // VersionedDocument is the GORM model for the documents table created by migration 051.
@@ -25,11 +26,11 @@ type VersionedDocument struct {
 	DocType     string `gorm:"column:doc_type;not null;default:markdown"`
 	Metadata    string `gorm:"type:jsonb;default:'{}'"`
 	Author      string `gorm:"not null"`
-	CreatedAt   string `gorm:"column:created_at;not null"`
+	CreatedAt   time.Time `gorm:"column:created_at;not null;autoCreateTime"`
 }
 
-// TableName maps VersionedDocument to the documents table.
-func (VersionedDocument) TableName() string { return "documents" }
+// TableName maps VersionedDocument to the versioned_documents table.
+func (VersionedDocument) TableName() string { return "versioned_documents" }
 
 // VersionedDocumentComment is the GORM model for the document_comments table.
 type VersionedDocumentComment struct {
@@ -40,11 +41,11 @@ type VersionedDocumentComment struct {
 	LineStart  *int   `gorm:"column:line_start"`
 	LineEnd    *int   `gorm:"column:line_end"`
 	Status     string `gorm:"not null;default:open"`
-	CreatedAt  string `gorm:"column:created_at;not null"`
+	CreatedAt  time.Time `gorm:"column:created_at;not null;autoCreateTime"`
 }
 
-// TableName maps VersionedDocumentComment to the document_comments table.
-func (VersionedDocumentComment) TableName() string { return "document_comments" }
+// TableName maps VersionedDocumentComment to the versioned_document_comments table.
+func (VersionedDocumentComment) TableName() string { return "versioned_document_comments" }
 
 // VersionedDocumentStore provides CRUD operations for versioned documents
 // and their associated comments (migration 051 schema).
@@ -71,7 +72,6 @@ func (s *VersionedDocumentStore) Create(
 	path, project, content, docType, metadata, author string,
 ) (int64, error) {
 	contentHash := versionedDocHashContent(content)
-	now := time.Now().Format(time.RFC3339)
 
 	if docType == "" {
 		docType = "markdown"
@@ -80,32 +80,48 @@ func (s *VersionedDocumentStore) Create(
 		metadata = "{}"
 	}
 
-	// Determine next version: COALESCE(MAX(version), 0) + 1 for this path+project.
-	var maxVersion int
-	if err := s.db.WithContext(ctx).
-		Model(&VersionedDocument{}).
-		Where("path = ? AND project = ?", path, project).
-		Select("COALESCE(MAX(version), 0)").
-		Scan(&maxVersion).Error; err != nil {
-		return 0, fmt.Errorf("versioned_document_store: query max version: %w", err)
-	}
+	var docID int64
+	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		// Lock all existing rows for this path+project to prevent concurrent version races.
+		var existing []VersionedDocument
+		if err := tx.
+			Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("path = ? AND project = ?", path, project).
+			Find(&existing).Error; err != nil {
+			return fmt.Errorf("lock rows: %w", err)
+		}
 
-	doc := VersionedDocument{
-		Path:        path,
-		Project:     project,
-		Version:     maxVersion + 1,
-		Content:     content,
-		ContentHash: contentHash,
-		DocType:     docType,
-		Metadata:    metadata,
-		Author:      author,
-		CreatedAt:   now,
-	}
+		// Determine next version atomically within the transaction.
+		var maxVersion int
+		if err := tx.
+			Model(&VersionedDocument{}).
+			Where("path = ? AND project = ?", path, project).
+			Select("COALESCE(MAX(version), 0)").
+			Scan(&maxVersion).Error; err != nil {
+			return fmt.Errorf("query max version: %w", err)
+		}
 
-	if err := s.db.WithContext(ctx).Create(&doc).Error; err != nil {
-		return 0, fmt.Errorf("versioned_document_store: insert document: %w", err)
+		doc := VersionedDocument{
+			Path:        path,
+			Project:     project,
+			Version:     maxVersion + 1,
+			Content:     content,
+			ContentHash: contentHash,
+			DocType:     docType,
+			Metadata:    metadata,
+			Author:      author,
+		}
+
+		if err := tx.Create(&doc).Error; err != nil {
+			return fmt.Errorf("insert document: %w", err)
+		}
+		docID = doc.ID
+		return nil
+	})
+	if err != nil {
+		return 0, fmt.Errorf("versioned_document_store: create: %w", err)
 	}
-	return doc.ID, nil
+	return docID, nil
 }
 
 // ReadLatest returns the highest-versioned document for the given path+project.
@@ -144,7 +160,7 @@ func (s *VersionedDocumentStore) List(ctx context.Context, project, docType, pat
 	extraClauses, args := versionedDocBuildListFilters(project, docType, pathPrefix)
 	rawSQL := `SELECT DISTINCT ON (path)
 	              id, path, project, version, content, content_hash, doc_type, metadata, author, created_at
-	           FROM documents
+	           FROM versioned_documents
 	           WHERE project = ?` + extraClauses + `
 	           ORDER BY path, version DESC`
 
@@ -215,7 +231,6 @@ func (s *VersionedDocumentStore) AddComment(
 		LineStart:  lineStart,
 		LineEnd:    lineEnd,
 		Status:     "open",
-		CreatedAt:  time.Now().Format(time.RFC3339),
 	}
 	if err := s.db.WithContext(ctx).Create(&comment).Error; err != nil {
 		return 0, fmt.Errorf("versioned_document_store: add comment: %w", err)
