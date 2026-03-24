@@ -1582,10 +1582,23 @@ func runMigrations(db *gorm.DB, embeddingDims int) error {
 			return nil
 		},
 	},
-	// Migration 048: GIN indexes for concept-tag queries (always-inject) and file-context lookup.
+	// Migration 048: Convert text JSON columns to jsonb + GIN indexes for concept-tag queries and file-context lookup.
+	// Columns concepts, files_modified, files_read were stored as text (JSON strings).
+	// PostgreSQL GIN indexes require jsonb type, so we ALTER TYPE first.
 	{
 		ID: "048_gin_indexes_concepts_files",
 		Migrate: func(tx *gorm.DB) error {
+			// Convert text columns to jsonb (safe: content is already valid JSON)
+			if err := tx.Exec(`ALTER TABLE observations ALTER COLUMN concepts TYPE jsonb USING COALESCE(concepts::jsonb, '[]'::jsonb)`).Error; err != nil {
+				return err
+			}
+			if err := tx.Exec(`ALTER TABLE observations ALTER COLUMN files_modified TYPE jsonb USING COALESCE(files_modified::jsonb, '[]'::jsonb)`).Error; err != nil {
+				return err
+			}
+			if err := tx.Exec(`ALTER TABLE observations ALTER COLUMN files_read TYPE jsonb USING COALESCE(files_read::jsonb, '[]'::jsonb)`).Error; err != nil {
+				return err
+			}
+			// Now create GIN indexes on jsonb columns
 			if err := tx.Exec(`CREATE INDEX IF NOT EXISTS idx_observations_concepts_gin ON observations USING GIN (concepts)`).Error; err != nil {
 				return err
 			}
@@ -1595,6 +1608,7 @@ func runMigrations(db *gorm.DB, embeddingDims int) error {
 			if err := tx.Exec(`CREATE INDEX IF NOT EXISTS idx_observations_files_read_gin ON observations USING GIN (files_read)`).Error; err != nil {
 				return err
 			}
+			// Composite index for temporal chain lookups
 			return tx.Exec(`CREATE INDEX IF NOT EXISTS idx_observations_session_prompt ON observations (sdk_session_id, prompt_number DESC) WHERE COALESCE(is_superseded, 0) = 0`).Error
 		},
 		Rollback: func(tx *gorm.DB) error {
@@ -1602,6 +1616,10 @@ func runMigrations(db *gorm.DB, embeddingDims int) error {
 			tx.Exec(`DROP INDEX IF EXISTS idx_observations_files_modified_gin`)
 			tx.Exec(`DROP INDEX IF EXISTS idx_observations_files_read_gin`)
 			tx.Exec(`DROP INDEX IF EXISTS idx_observations_session_prompt`)
+			// Revert jsonb back to text
+			tx.Exec(`ALTER TABLE observations ALTER COLUMN concepts TYPE text USING concepts::text`)
+			tx.Exec(`ALTER TABLE observations ALTER COLUMN files_modified TYPE text USING files_modified::text`)
+			tx.Exec(`ALTER TABLE observations ALTER COLUMN files_read TYPE text USING files_read::text`)
 			return nil
 		},
 	},

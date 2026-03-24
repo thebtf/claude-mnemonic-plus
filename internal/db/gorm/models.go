@@ -61,9 +61,9 @@ type Observation struct {
 	Facts           models.JSONStringArray  `gorm:"type:text"`
 	Rejected        models.JSONStringArray  `gorm:"type:jsonb;default:'[]'"`
 	Narrative       sql.NullString          `gorm:"type:text"`
-	Concepts        models.JSONStringArray  `gorm:"type:text"`
-	FilesRead       models.JSONStringArray  `gorm:"type:text"`
-	FilesModified   models.JSONStringArray  `gorm:"type:text"`
+	Concepts        models.JSONStringArray  `gorm:"type:jsonb"`
+	FilesRead       models.JSONStringArray  `gorm:"type:jsonb"`
+	FilesModified   models.JSONStringArray  `gorm:"type:jsonb"`
 	Subtitle        sql.NullString          `gorm:"type:text"`
 	Title           sql.NullString          `gorm:"type:text"`
 	ArchivedReason  sql.NullString
