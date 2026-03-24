@@ -41,11 +41,13 @@ func (h *MCPHealth) RecordError() {
 
 func (h *MCPHealth) rotateWindowIfNeeded() {
 	now := time.Now().Unix()
-	windowAge := now - h.windowStart.Load()
-	if windowAge >= 300 { // 5 minutes
-		h.windowStart.Store(now)
-		h.windowReqs.Store(0)
-		h.windowErrs.Store(0)
+	oldStart := h.windowStart.Load()
+	if now-oldStart >= 300 { // 5 minutes
+		// CAS ensures only one goroutine performs the rotation
+		if h.windowStart.CompareAndSwap(oldStart, now) {
+			h.windowReqs.Store(0)
+			h.windowErrs.Store(0)
+		}
 	}
 }
 
