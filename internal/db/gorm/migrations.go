@@ -1623,6 +1623,84 @@ func runMigrations(db *gorm.DB, embeddingDims int) error {
 			return nil
 		},
 	},
+	// Migration 049: Create project_settings table for per-project adaptive threshold.
+	{
+		ID: "049_project_settings",
+		Migrate: func(tx *gorm.DB) error {
+			return tx.Exec(`CREATE TABLE IF NOT EXISTS project_settings (
+				project TEXT PRIMARY KEY,
+				relevance_threshold FLOAT NOT NULL DEFAULT 0.3,
+				feedback_count INT NOT NULL DEFAULT 0,
+				updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+			)`).Error
+		},
+		Rollback: func(tx *gorm.DB) error {
+			return tx.Exec(`DROP TABLE IF EXISTS project_settings`).Error
+		},
+	},
+
+		// Migration 050: System configuration key-value store.
+		// Stores persistent system-level settings such as the current embedding model name.
+		// Used by the maintenance service to detect embedding model changes across restarts.
+		{
+			ID: "050_system_config",
+			Migrate: func(tx *gorm.DB) error {
+				return tx.Exec(`CREATE TABLE IF NOT EXISTS system_config (
+					key        TEXT PRIMARY KEY,
+					value      TEXT NOT NULL,
+					updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+				)`).Error
+			},
+			Rollback: func(tx *gorm.DB) error {
+				return tx.Exec(`DROP TABLE IF EXISTS system_config`).Error
+			},
+		},
+	// Migration 051: Documents + document_comments tables for versioned document storage.
+	// Foundation for AI agent collaboration platform (task/issue management).
+	{
+		ID: "051_documents",
+		Migrate: func(tx *gorm.DB) error {
+			if err := tx.Exec(`CREATE TABLE IF NOT EXISTS documents (
+				id BIGSERIAL PRIMARY KEY,
+				path TEXT NOT NULL,
+				project TEXT NOT NULL,
+				version INT NOT NULL DEFAULT 1,
+				content TEXT NOT NULL,
+				content_hash TEXT NOT NULL,
+				doc_type TEXT NOT NULL DEFAULT 'markdown',
+				metadata JSONB NOT NULL DEFAULT '{}',
+				author TEXT NOT NULL,
+				created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+				UNIQUE(path, project, version)
+			)`).Error; err != nil {
+				return err
+			}
+			if err := tx.Exec(`CREATE INDEX IF NOT EXISTS idx_documents_project_path ON documents (project, path, version DESC)`).Error; err != nil {
+				return err
+			}
+			if err := tx.Exec(`CREATE INDEX IF NOT EXISTS idx_documents_doc_type ON documents (doc_type)`).Error; err != nil {
+				return err
+			}
+			if err := tx.Exec(`CREATE TABLE IF NOT EXISTS document_comments (
+				id BIGSERIAL PRIMARY KEY,
+				document_id BIGINT NOT NULL REFERENCES documents(id),
+				author TEXT NOT NULL,
+				content TEXT NOT NULL,
+				line_start INT,
+				line_end INT,
+				status TEXT NOT NULL DEFAULT 'open',
+				created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+			)`).Error; err != nil {
+				return err
+			}
+			return tx.Exec(`CREATE INDEX IF NOT EXISTS idx_document_comments_doc ON document_comments (document_id)`).Error
+		},
+		Rollback: func(tx *gorm.DB) error {
+			tx.Exec(`DROP TABLE IF EXISTS document_comments`)
+			tx.Exec(`DROP TABLE IF EXISTS documents`)
+			return nil
+		},
+	},
 	})
 	if err := m.Migrate(); err != nil {
 		return fmt.Errorf("run gormigrate migrations: %w", err)
