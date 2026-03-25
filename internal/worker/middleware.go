@@ -219,13 +219,16 @@ func (ta *TokenAuth) Middleware(next http.Handler) http.Handler {
 			return
 		}
 
-		// 1. Check for token in header
+		// 1. Check for token in header or query param (SSE EventSource can't set headers)
 		providedToken := r.Header.Get("X-Auth-Token")
 		if providedToken == "" {
 			auth := r.Header.Get("Authorization")
 			if bearer, found := strings.CutPrefix(auth, "Bearer "); found {
 				providedToken = bearer
 			}
+		}
+		if providedToken == "" {
+			providedToken = r.URL.Query().Get("token")
 		}
 
 		if providedToken != "" {
