@@ -146,7 +146,7 @@ async function handlePreCompact(ctx, input) {
   };
 
   // Write discovery report to project dir for agent inspection
-  const projectDir = ctx.CWD || input.cwd || process.cwd();
+  const projectDir = ctx.CWD || process.cwd();
   const logDir = path.join(projectDir, '.agent');
   try {
     fs.mkdirSync(logDir, { recursive: true });
