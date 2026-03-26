@@ -182,6 +182,7 @@ func (s *ObservationStore) StoreObservation(ctx context.Context, sdkSessionID, p
 		DiscoveryTokens:          discoveryTokens,
 		CreatedAt:                now.Format(time.RFC3339),
 		CreatedAtEpoch:           nowEpoch,
+		MemoryType:               obs.MemoryType,
 		EncryptedSecret:          obs.EncryptedSecret,
 		EncryptionKeyFingerprint: sql.NullString{String: obs.EncryptionKeyFingerprint, Valid: obs.EncryptionKeyFingerprint != ""},
 	}
