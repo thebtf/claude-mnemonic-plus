@@ -1747,6 +1747,31 @@ func runMigrations(db *gorm.DB, embeddingDims int) error {
 			return tx.Exec(`ALTER TABLE observations DROP COLUMN IF EXISTS status`).Error
 		},
 	},
+	{
+		// Migration 055: Backfill memory_type for existing store_memory observations.
+		// store_memory creates observations with source_type='manual' but never set memory_type.
+		// Classify based on type column and concepts JSONB content, mirroring ClassifyMemoryType() logic.
+		ID: "055_backfill_memory_type",
+		Migrate: func(tx *gorm.DB) error {
+			return tx.Exec(`
+				UPDATE observations SET memory_type = CASE
+					WHEN type = 'guidance' THEN 'guidance'
+					WHEN concepts::text ILIKE '%architecture%' OR concepts::text ILIKE '%design%' OR concepts::text ILIKE '%choice%' THEN 'decision'
+					WHEN concepts::text ILIKE '%pattern%' OR concepts::text ILIKE '%best-practice%' OR concepts::text ILIKE '%anti-pattern%' THEN 'pattern'
+					WHEN concepts::text ILIKE '%preference%' OR concepts::text ILIKE '%config%' OR concepts::text ILIKE '%setting%' THEN 'preference'
+					WHEN concepts::text ILIKE '%style%' OR concepts::text ILIKE '%naming%' OR concepts::text ILIKE '%format%' THEN 'style'
+					WHEN concepts::text ILIKE '%workflow%' OR concepts::text ILIKE '%habit%' OR concepts::text ILIKE '%routine%' THEN 'habit'
+					WHEN concepts::text ILIKE '%insight%' OR concepts::text ILIKE '%discovery%' OR concepts::text ILIKE '%gotcha%' THEN 'insight'
+					ELSE 'context'
+				END
+				WHERE source_type = 'manual'
+				AND (memory_type IS NULL OR memory_type = '')
+			`).Error
+		},
+		Rollback: func(tx *gorm.DB) error {
+			return tx.Exec(`UPDATE observations SET memory_type = '' WHERE source_type = 'manual'`).Error
+		},
+	},
 	})
 	if err := m.Migrate(); err != nil {
 		return fmt.Errorf("run gormigrate migrations: %w", err)
