@@ -31,17 +31,17 @@
               "darwin-arm64": {
                 "url": "https://github.com/thebtf/engram/releases/download/v1.8.0/engram_1.8.0_darwin_arm64.tar.gz",
                 "format": "tar.gz",
-                "sha256": "3e1ac3b83a62468f661159a0878fccf8dd9408be007e0e99246c8eef0e058627"
+                "sha256": "bae8c51841aa52930451fca731ff3ac215c6908b4039b15887bb091f40ef709b"
               },
               "linux-amd64": {
                 "url": "https://github.com/thebtf/engram/releases/download/v1.8.0/engram_1.8.0_linux_amd64.tar.gz",
                 "format": "tar.gz",
-                "sha256": "e0f1c4eae15fee2200d2584cb1894babe3850d4fbef5a6cca6d81010fe3acbfe"
+                "sha256": "8d2949f98c38dcd1b8a8171132c7e22a9297323f1b5c6269860e3c7c2c1c970c"
               },
               "windows-amd64": {
                 "url": "https://github.com/thebtf/engram/releases/download/v1.8.0/engram_1.8.0_windows_amd64.zip",
                 "format": "zip",
-                "sha256": "9dc7d752a1f9edc15a034bfd9afaefd9b264cc34e89bfbfb466eca8227d341bb"
+                "sha256": "9c9440affc57b5458814bfb94691d7374a3572caebe5ef81dabb2127e4cb7a84"
               }
             }
           }
