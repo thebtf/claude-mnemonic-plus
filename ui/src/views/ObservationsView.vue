@@ -429,23 +429,69 @@ onUnmounted(() => {
     </div>
 
     <!-- Filters Bar -->
-    <div class="flex flex-wrap items-center gap-3 mb-6">
-      <!-- Project filter -->
-      <div class="relative">
-        <select
-          :value="currentProject || ''"
-          @change="setProject(($event.target as HTMLSelectElement).value || null)"
-          class="appearance-none pl-8 pr-8 py-2 rounded-lg bg-slate-800/50 border border-slate-700/50 text-sm text-slate-200 focus:outline-none focus:ring-2 focus:ring-claude-500/50 focus:border-claude-500 cursor-pointer"
-        >
-          <option value="">All Projects</option>
-          <option v-for="p in projects" :key="p" :value="p">{{ shortProject(p) }}</option>
-        </select>
-        <i class="fas fa-folder absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-500 text-xs pointer-events-none" />
-        <i class="fas fa-chevron-down absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-500 text-xs pointer-events-none" />
+    <div class="flex flex-col gap-2 mb-6">
+
+      <!-- Row 1: Project dropdown + View mode toggle (left) | Concept dropdown (right) -->
+      <div class="flex flex-wrap items-center gap-2">
+        <!-- Project filter -->
+        <div class="relative">
+          <select
+            :value="currentProject || ''"
+            @change="setProject(($event.target as HTMLSelectElement).value || null)"
+            class="appearance-none pl-8 pr-8 py-2 rounded-lg bg-slate-800/50 border border-slate-700/50 text-sm text-slate-200 focus:outline-none focus:ring-2 focus:ring-claude-500/50 focus:border-claude-500 cursor-pointer"
+          >
+            <option value="">All Projects</option>
+            <option v-for="p in projects" :key="p" :value="p">{{ shortProject(p) }}</option>
+          </select>
+          <i class="fas fa-folder absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-500 text-xs pointer-events-none" />
+          <i class="fas fa-chevron-down absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-500 text-xs pointer-events-none" />
+        </div>
+
+        <!-- View mode toggle: All | Memories -->
+        <div class="flex items-center gap-1 p-0.5 rounded-lg bg-slate-800/50 border border-slate-700/50">
+          <button
+            @click="setViewMode('all')"
+            :class="[
+              'px-3 py-1 rounded-md text-xs font-medium transition-colors',
+              viewMode === 'all'
+                ? 'bg-slate-700 text-white shadow'
+                : 'text-slate-400 hover:text-slate-200',
+            ]"
+          >
+            <i class="fas fa-list mr-1" />
+            All
+          </button>
+          <button
+            @click="setViewMode('memories')"
+            :class="[
+              'px-3 py-1 rounded-md text-xs font-medium transition-colors',
+              viewMode === 'memories'
+                ? 'bg-purple-600/40 text-purple-200 shadow'
+                : 'text-slate-400 hover:text-slate-200',
+            ]"
+          >
+            <i class="fas fa-brain mr-1" />
+            Memories
+          </button>
+        </div>
+
+        <!-- Concept filter (if concepts exist on current page) — right-aligned -->
+        <div v-if="availableConcepts.length > 0" class="flex items-center gap-1.5 ml-auto">
+          <span class="text-xs text-slate-600">Concept:</span>
+          <select
+            :value="currentConcept"
+            @change="setConcept(($event.target as HTMLSelectElement).value)"
+            class="appearance-none pl-2 pr-6 py-1 rounded bg-slate-800/50 border border-slate-700/50 text-xs text-slate-300 focus:outline-none focus:ring-1 focus:ring-claude-500/50 cursor-pointer"
+          >
+            <option value="">All</option>
+            <option v-for="c in availableConcepts" :key="c" :value="c">{{ c }}</option>
+          </select>
+        </div>
       </div>
 
-      <!-- Type filter pills -->
-      <div class="flex items-center gap-1.5">
+      <!-- Row 2: Type filter chips + Status pills (hidden in Memories view) -->
+      <div v-if="viewMode === 'all'" class="flex flex-wrap items-center gap-1.5">
+        <!-- Type filter pills -->
         <button
           v-for="type in OBSERVATION_TYPES"
           :key="type"
@@ -460,10 +506,11 @@ onUnmounted(() => {
           <i :class="['fas', getTypeConfig(type).icon, 'mr-1']" />
           {{ type }}
         </button>
-      </div>
 
-      <!-- Status filter pills -->
-      <div class="flex items-center gap-1.5">
+        <!-- Divider between type chips and status pills -->
+        <span class="w-px h-5 bg-slate-700 mx-1 self-center" />
+
+        <!-- Status filter pills -->
         <button
           @click="setStatus(null)"
           :class="[
@@ -501,46 +548,6 @@ onUnmounted(() => {
         </button>
       </div>
 
-      <!-- View mode toggle: All | Memories -->
-      <div class="flex items-center gap-1 ml-2 p-0.5 rounded-lg bg-slate-800/50 border border-slate-700/50">
-        <button
-          @click="setViewMode('all')"
-          :class="[
-            'px-3 py-1 rounded-md text-xs font-medium transition-colors',
-            viewMode === 'all'
-              ? 'bg-slate-700 text-white shadow'
-              : 'text-slate-400 hover:text-slate-200',
-          ]"
-        >
-          <i class="fas fa-list mr-1" />
-          All
-        </button>
-        <button
-          @click="setViewMode('memories')"
-          :class="[
-            'px-3 py-1 rounded-md text-xs font-medium transition-colors',
-            viewMode === 'memories'
-              ? 'bg-purple-600/40 text-purple-200 shadow'
-              : 'text-slate-400 hover:text-slate-200',
-          ]"
-        >
-          <i class="fas fa-brain mr-1" />
-          Memories
-        </button>
-      </div>
-
-      <!-- Concept filter (if concepts exist on current page) -->
-      <div v-if="availableConcepts.length > 0" class="flex items-center gap-1.5 ml-auto">
-        <span class="text-xs text-slate-600">Concept:</span>
-        <select
-          :value="currentConcept"
-          @change="setConcept(($event.target as HTMLSelectElement).value)"
-          class="appearance-none pl-2 pr-6 py-1 rounded bg-slate-800/50 border border-slate-700/50 text-xs text-slate-300 focus:outline-none focus:ring-1 focus:ring-claude-500/50 cursor-pointer"
-        >
-          <option value="">All</option>
-          <option v-for="c in availableConcepts" :key="c" :value="c">{{ c }}</option>
-        </select>
-      </div>
     </div>
 
     <!-- Batch Actions Toolbar -->

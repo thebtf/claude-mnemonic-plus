@@ -2,10 +2,12 @@
 package worker
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/thebtf/engram/internal/learning"
@@ -529,7 +531,14 @@ func (s *Service) handlePostPatternInsight(w http.ResponseWriter, r *http.Reques
 	}
 
 	// Generate summary — failures are non-fatal: return source observations with empty summary.
-	summary, llmErr := learning.GeneratePatternInsight(r.Context(), llm, observations)
+	// Apply 5-second timeout per NFR-1 (pattern insight LLM call < 5s).
+	var summary string
+	var llmErr error
+	if llm != nil {
+		insightCtx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+		defer cancel()
+		summary, llmErr = learning.GeneratePatternInsight(insightCtx, llm, observations)
+	}
 	if llmErr == nil && summary != "" {
 		// Persist generated summary so subsequent calls return cached.
 		updated := *pattern

@@ -163,6 +163,7 @@ func (s *Server) handleStoreMemory(ctx context.Context, args json.RawMessage) (s
 	obs := &models.ParsedObservation{
 		Type:       obsType,
 		SourceType: models.SourceManual,
+		MemoryType: models.ClassifyMemoryType(&models.ParsedObservation{Type: obsType, Narrative: params.Content, Concepts: concepts}),
 		Title:      title,
 		Narrative:  params.Content,
 		Concepts:   concepts,
