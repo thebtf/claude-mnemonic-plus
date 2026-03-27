@@ -6,7 +6,7 @@
 **Remaining:** Step 5 — cleanup existing 403 phantom sessions via migration or maintenance DELETE.
 **Context:** `internal/worker/handlers_import_export.go`, `internal/db/gorm/migrations.go`
 
-## 2026-03-25: Cleanup Existing Phantom bulk-import-* Sessions
+## ~~2026-03-25: Cleanup Existing Phantom bulk-import-* Sessions~~ RESOLVED v2.0.3 (PR #99)
 **What:** 403+ sessions with `claude_session_id LIKE 'bulk-import-%'` exist from before PR #65 fix. New phantom sessions no longer created, but old ones pollute Sessions page.
 **Fix plan:** Add migration or maintenance SQL: `DELETE FROM sdk_sessions WHERE claude_session_id LIKE 'bulk-import-%' AND prompt_counter = 0`
 **Impact:** Cleaner Sessions page. ~11% of sessions are phantom.
@@ -28,7 +28,7 @@
 4. Keep `sessions-index` as secondary "transcript search" feature
 **Context:** `internal/worker/handlers_sessions.go:416`, `ui/src/composables/useSessions.ts`, `internal/db/gorm/session_store.go`
 
-## 2026-03-23: T027 Post-Deploy Verification Pending
+## ~~2026-03-23: T027 Post-Deploy Verification Pending~~ RESOLVED v2.0.2 (scoring active, observations show non-trivial scores)
 **What:** Retrospective eval skill (T027) needs manual execution after v1.5.1 deploy to verify >50% observation relevance.
 **Why deferred:** Requires server restart with v1.5.1 image (migration 046 fix), then manual `/retrospective-eval` run.
 **Impact:** No automated verification that composite scoring + diversity penalty actually improve relevance. Currently based on qualitative assessment only.
@@ -120,6 +120,25 @@ Impact: No functional impact — clients handle empty lists
 2. Show tags, scope, importance for each memory
 3. Allow edit/delete from UI
 **Context:** `ui/src/views/ObservationsView.vue`, `internal/worker/handlers_data.go`
+
+## 2026-03-26: OpenClaw Reports "POST /api/context/inject failed" — Root Cause Unknown
+**What:** OpenClaw gateway reports: "POST /api/context/inject failed, server marked unavailable after 3 consecutive failures" → 60s cooldown → all engram tools disabled.
+**Observed:** Engram server responds 200 OK in 0.27-0.8s when tested directly (10/10 calls stable). No inject errors in engram server logs. Problem reported by OpenClaw, not reproducible from this machine.
+**Not investigated:** What OpenClaw actually receives (HTTP status, error message, network path). Whether the issue is DNS, Docker networking, auth, response parsing, or something else entirely.
+**Impact:** All engram tools (search, decisions, store_memory, recall_memory) return "unreachable" during 60s cooldown.
+**Next step:** Reproduce from OpenClaw side — check OpenClaw gateway logs for the actual error message/stack trace.
+**Context:** `plugin/openclaw-engram/src/availability.ts` (STRIKE_THRESHOLD=3, COOLDOWN_MS=60000), `src/client.ts` (request method with AbortController).
+
+## 2026-03-26: GPU Contention — SocratiCode Embedding Floods LLM Queue
+**What:** SocratiCode codebase indexer sends 65,000+ embedding requests to shared Ollama GPU. Embedding model (qwen3-embedding-8b) and LLM model (qwen3.5-9b-abliterated) share same GPU with Parallel=4. Embedding backlog starves LLM requests — pattern insight and observation extraction timeout.
+**Root cause:** SocratiCode re-indexes same files repeatedly (nvmd-devops SKILL.md files appear every 2-3 seconds in Ollama logs). Multiple Claude Code sessions may trigger concurrent `codebase_index(force: true)`.
+**Impact:** Pattern insight "Summary unavailable" despite model being loaded and key being correct. Observation LLM extraction falls back to CLI.
+**Fix options:**
+1. LiteLLM priority queues — separate embedding and LLM traffic (LiteLLM feature, not engram)
+2. Deduplicate SocratiCode embedding requests — batch dedup at proxy level
+3. Reduce SocratiCode re-index frequency — don't index unchanged files
+4. Separate GPU instances for embedding vs LLM (hardware solution)
+**Context:** Ollama dashboard showed: embedding model 65,702 queued, LLM model 108 GEN + 4 queued. Both on same GPU.
 
 ## 2026-03-19: Config Reload via os.Exit(0)
 What: reloadConfig calls os.Exit(0) instead of hot-reload
