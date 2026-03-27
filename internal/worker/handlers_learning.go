@@ -14,6 +14,37 @@ import (
 	gormstorage "github.com/thebtf/engram/internal/db/gorm"
 )
 
+// handleGetEffectivenessDistribution godoc
+// @Summary Get effectiveness distribution
+// @Description Returns aggregated counts of observations grouped by effectiveness tier (high/medium/low/insufficient).
+// Uses SQL aggregation server-side — does not page through observations.
+// @Tags Learning
+// @Produce json
+// @Security ApiKeyAuth
+// @Success 200 {object} gormstorage.EffectivenessDistribution
+// @Failure 503 {string} string "service not ready"
+// @Failure 500 {string} string "internal error"
+// @Router /api/learning/effectiveness-distribution [get]
+func (s *Service) handleGetEffectivenessDistribution(w http.ResponseWriter, r *http.Request) {
+	s.initMu.RLock()
+	obsStore := s.observationStore
+	s.initMu.RUnlock()
+
+	if obsStore == nil {
+		http.Error(w, "service not ready", http.StatusServiceUnavailable)
+		return
+	}
+
+	dist, err := obsStore.GetEffectivenessDistribution(r.Context())
+	if err != nil {
+		log.Warn().Err(err).Msg("Failed to query effectiveness distribution")
+		http.Error(w, "failed to query effectiveness distribution: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	writeJSON(w, dist)
+}
+
 // handleSetSessionOutcome godoc
 // @Summary Set session outcome
 // @Description Records the outcome of a session (success/partial/failure/abandoned).

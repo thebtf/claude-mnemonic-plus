@@ -3,7 +3,7 @@ import { ref, computed, onMounted, onUnmounted } from 'vue'
 import {
   fetchLearningCurve,
   fetchStrategies,
-  fetchObservationsPaginated,
+  fetchEffectivenessDistribution,
   type LearningCurvePoint,
   type StrategyRow,
 } from '@/utils/api'
@@ -15,11 +15,12 @@ const curvePoints = ref<LearningCurvePoint[]>([])
 const strategies = ref<StrategyRow[]>([])
 const selectedDays = ref(30)
 
-// Effectiveness distribution counters
+// Effectiveness distribution counters (populated from server-side aggregation)
 const effGreen = ref(0)
 const effYellow = ref(0)
 const effRed = ref(0)
 const effGray = ref(0)
+const effTotal = ref(0)
 
 let abortController: AbortController | null = null
 
@@ -30,34 +31,20 @@ async function loadAll() {
   error.value = null
 
   try {
-    const [curveData, strategiesData, obsData] = await Promise.all([
+    const [curveData, strategiesData, distData] = await Promise.all([
       fetchLearningCurve(selectedDays.value, undefined, abortController.signal).catch(() => ({ data_points: [] })),
       fetchStrategies(abortController.signal).catch(() => ({ strategies: [] })),
-      fetchObservationsPaginated({ limit: 500 }, abortController.signal).catch(() => ({ observations: [], total: 0, limit: 500, offset: 0, hasMore: false })),
+      fetchEffectivenessDistribution(abortController.signal).catch(() => ({ high: 0, medium: 0, low: 0, insufficient: 0, total: 0 })),
     ])
 
     curvePoints.value = curveData.data_points || []
     strategies.value = strategiesData.strategies || []
 
-    // Compute effectiveness distribution from observations
-    let green = 0, yellow = 0, red = 0, gray = 0
-    for (const obs of (obsData.observations || [])) {
-      const injections = obs.effectiveness_injections ?? 0
-      const score = obs.effectiveness_score ?? 0
-      if (injections < 10) {
-        gray++
-      } else if (score >= 0.7) {
-        green++
-      } else if (score >= 0.4) {
-        yellow++
-      } else {
-        red++
-      }
-    }
-    effGreen.value = green
-    effYellow.value = yellow
-    effRed.value = red
-    effGray.value = gray
+    effGreen.value = distData.high
+    effYellow.value = distData.medium
+    effRed.value = distData.low
+    effGray.value = distData.insufficient
+    effTotal.value = distData.total
   } catch (err) {
     if (err instanceof Error && err.name === 'AbortError') return
     error.value = err instanceof Error ? err.message : 'Failed to load learning data'
@@ -68,9 +55,6 @@ async function loadAll() {
 
 onMounted(() => loadAll())
 onUnmounted(() => abortController?.abort())
-
-// Effectiveness distribution total
-const effTotal = computed(() => effGreen.value + effYellow.value + effRed.value + effGray.value)
 
 function effPct(n: number): number {
   if (effTotal.value === 0) return 0
