@@ -471,6 +471,37 @@ func (s *ObservationStore) IncrementImportanceScores(ctx context.Context, deltas
 	})
 }
 
+// EffectivenessDistribution holds aggregated counts of observations grouped by effectiveness tier.
+type EffectivenessDistribution struct {
+	High        int64 `json:"high"`
+	Medium      int64 `json:"medium"`
+	Low         int64 `json:"low"`
+	Insufficient int64 `json:"insufficient"`
+	Total       int64 `json:"total"`
+}
+
+// GetEffectivenessDistribution returns aggregated effectiveness tier counts using a single SQL
+// aggregation query. Excludes archived and suppressed observations.
+func (s *ObservationStore) GetEffectivenessDistribution(ctx context.Context) (EffectivenessDistribution, error) {
+	var result EffectivenessDistribution
+
+	err := s.db.WithContext(ctx).Raw(`
+		SELECT
+			COUNT(*) FILTER (WHERE effectiveness_injections >= 10 AND effectiveness_score >= 0.7) AS high,
+			COUNT(*) FILTER (WHERE effectiveness_injections >= 10 AND effectiveness_score >= 0.4 AND effectiveness_score < 0.7) AS medium,
+			COUNT(*) FILTER (WHERE effectiveness_injections >= 10 AND effectiveness_score < 0.4) AS low,
+			COUNT(*) FILTER (WHERE effectiveness_injections < 10 OR effectiveness_injections IS NULL) AS insufficient,
+			COUNT(*) AS total
+		FROM observations
+		WHERE COALESCE(is_archived, 0) = 0 AND COALESCE(is_suppressed, FALSE) = FALSE
+	`).Scan(&result).Error
+	if err != nil {
+		return EffectivenessDistribution{}, fmt.Errorf("failed to query effectiveness distribution: %w", err)
+	}
+
+	return result, nil
+}
+
 // UpdateEffectivenessStats updates the effectiveness counters and recomputes effectiveness_score
 // for a single observation. Called after outcome propagation for each injected observation.
 func (s *ObservationStore) UpdateEffectivenessStats(ctx context.Context, id int64, addInjections, addSuccesses int, newUtilityScore float64) error {

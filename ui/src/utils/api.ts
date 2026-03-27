@@ -876,6 +876,18 @@ export async function fetchEffectiveness(id: number, agentId?: string, signal?: 
   return fetchWithRetry<EffectivenessResult>(`${API_BASE}/observations/${id}/effectiveness${params}`, { signal })
 }
 
+export interface EffectivenessDistribution {
+  high: number
+  medium: number
+  low: number
+  insufficient: number
+  total: number
+}
+
+export async function fetchEffectivenessDistribution(signal?: AbortSignal): Promise<EffectivenessDistribution> {
+  return fetchWithRetry<EffectivenessDistribution>(`${API_BASE}/learning/effectiveness-distribution`, { signal })
+}
+
 // Observation tag management
 export async function updateObservationTags(
   id: number,
