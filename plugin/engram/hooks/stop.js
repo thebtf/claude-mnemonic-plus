@@ -389,6 +389,44 @@ async function handleStop(ctx, input) {
     console.error(`[stop] Warning: manual search detection failed: ${error.message}`);
   }
 
+  // Record session outcome for closed-loop learning (FR-1).
+  // Heuristic from hook-accumulated signals — no transcript content parsing (NFR-4).
+  try {
+    let outcome = 'abandoned';
+    let reason = 'no observations stored during session';
+
+    // Check observations created during this session
+    const sessionObs = await lib.requestGet(
+      `/api/observations?limit=100&offset=0`
+    );
+    const observations = Array.isArray(sessionObs && sessionObs.observations)
+      ? sessionObs.observations
+      : [];
+
+    if (observations.length > 0) {
+      // Check for bugfix/feature type observations (success signal)
+      const hasActionableObs = observations.some(
+        (o) => o.type === 'bugfix' || o.type === 'feature'
+      );
+      if (hasActionableObs) {
+        outcome = 'success';
+        reason = 'session produced bugfix or feature observations';
+      } else {
+        outcome = 'partial';
+        reason = 'session has observations but no bugfix/feature activity';
+      }
+    }
+
+    await lib.requestPost(
+      `/api/sessions/${sessionID}/outcome`,
+      { outcome, reason },
+      5000
+    );
+    console.error(`[stop] Session outcome recorded: ${outcome}`);
+  } catch (error) {
+    console.error(`[stop] Warning: outcome recording failed: ${error.message}`);
+  }
+
   return '';
 }
 
