@@ -1891,6 +1891,18 @@ func runMigrations(db *gorm.DB, embeddingDims int) error {
 			return tx.Exec(`DROP TABLE IF EXISTS observation_versions`).Error
 		},
 	},
+	{
+		// Migration 062: Cleanup remaining phantom bulk-import sessions.
+		// PR #65 stopped creating new phantom sessions. Migration 052 cleaned most.
+		// This catches any remaining bulk-import-* sessions with 0 prompts.
+		ID: "062_cleanup_phantom_bulk_import_sessions",
+		Migrate: func(tx *gorm.DB) error {
+			return tx.Exec(`DELETE FROM sdk_sessions WHERE claude_session_id LIKE 'bulk-import-%'`).Error
+		},
+		Rollback: func(tx *gorm.DB) error {
+			return nil
+		},
+	},
 	})
 	if err := m.Migrate(); err != nil {
 		return fmt.Errorf("run gormigrate migrations: %w", err)
