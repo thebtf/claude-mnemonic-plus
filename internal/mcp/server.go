@@ -315,151 +315,178 @@ func (s *Server) buildInstructions() string {
 // It teaches any agent how to effectively use engram's tools without needing a plugin.
 const engramInstructions = `# Engram — Persistent Memory for AI Agents
 
-## MANDATORY Rules (non-negotiable)
+## MANDATORY Rules
 
-1. **BEFORE modifying any file** → call ` + "`find_by_file(files=\"path/to/file\")`" + ` to check what is known about it.
-2. **BEFORE architectural decisions** → call ` + "`decisions(query=\"...\")`" + ` to check prior choices.
-3. **BEFORE exploring unfamiliar code** → call ` + "`search(query=\"...\")`" + ` first — it may already be documented.
-4. **Read injected context** — ` + "`<engram-context>`" + ` and ` + "`<relevant-memory>`" + ` blocks contain prior knowledge. Use it.
+1. **BEFORE modifying any file** → ` + "`recall(action=\"by_file\", files=\"path/to/file\")`" + `
+2. **BEFORE architectural decisions** → ` + "`recall(action=\"preset\", preset=\"decisions\", query=\"...\")`" + `
+3. **BEFORE exploring unfamiliar code** → ` + "`recall(query=\"...\")`" + ` — it may already be documented.
+4. **Read injected context** — ` + "`<engram-context>`" + ` and ` + "`<relevant-memory>`" + ` blocks contain prior knowledge.
 5. Do NOT check env vars — call ` + "`check_system_health()`" + ` to verify connectivity.
 
-Engram stores observations from coding sessions in PostgreSQL+pgvector and provides semantic search across them.
-Hooks automatically capture knowledge from your sessions. Your job is to **retrieve, connect, and maintain** that knowledge.
+## 7 Tools — What They Do
+
+| Tool | Purpose | Key Actions |
+|------|---------|-------------|
+| ` + "`recall`" + ` | **Search & retrieve** memories | search (default), preset, by_file, by_concept, by_type, similar, timeline, related, patterns, get, sessions, explain |
+| ` + "`store`" + ` | **Save** memories, edit, merge | create (default), edit, merge, import |
+| ` + "`feedback`" + ` | **Rate** quality, suppress bad data, record outcomes | rate, suppress, outcome |
+| ` + "`vault`" + ` | **Credentials** — encrypted storage | store, get, list, delete, status |
+| ` + "`docs`" + ` | **Documents** — versioned docs & collections | create, read, list, history, comment, collections, documents, get_doc, remove, ingest, search_docs |
+| ` + "`admin`" + ` | **Bulk ops**, maintenance, analytics | bulk_delete, bulk_supersede, tag, graph, stats, trends, quality, export, maintenance, ... |
+| ` + "`check_system_health`" + ` | **Health** check of all subsystems | (no action needed) |
 
 ## Quick Start
 
 1. Verify connection: ` + "`check_system_health()`" + `
-2. Search existing knowledge: ` + "`search(query=\"...\")`" + `
-3. Before modifying code: ` + "`find_by_file(files=\"path/to/file\")`" + `
-4. Before architectural decisions: ` + "`decisions(query=\"...\")`" + `
-5. To explicitly remember something: ` + "`store_memory(content=\"...\", title=\"...\")`" + `
-6. To recall stored knowledge: ` + "`recall_memory(query=\"...\")`" + `
-
-## Tool Categories
-
-### Memory Management (Tier 1 — use proactively)
-| Tool | When to Use |
-|------|-------------|
-| ` + "`store_memory`" + ` | Explicitly remember something across sessions — decisions, patterns, preferences, insights. |
-| ` + "`recall_memory`" + ` | Retrieve stored knowledge by semantic search. Supports text/items/detailed formats. |
-
-### Credential Management (secure storage)
-| Tool | When to Use |
-|------|-------------|
-| ` + "`store_credential`" + ` | Securely store an API key, password, or token. Encrypted with AES-256-GCM. |
-| ` + "`get_credential`" + ` | Retrieve and decrypt a stored credential by name. |
-| ` + "`list_credentials`" + ` | List stored credentials (names and metadata only, no values). |
-| ` + "`delete_credential`" + ` | Delete a stored credential by name. Scope-aware (project or global). |
-| ` + "`vault_status`" + ` | Check vault encryption status: key configured, fingerprint, credential count, key source. |
-
-### Search & Retrieval (primary workflow)
-| Tool | When to Use |
-|------|-------------|
-| ` + "`search`" + ` | General semantic search across observations, sessions, prompts. Start here. |
-| ` + "`decisions`" + ` | Find past architecture/design decisions before making new ones. |
-| ` + "`changes`" + ` | Find code modifications, refactorings, migration history. |
-| ` + "`how_it_works`" + ` | Understand system design, patterns, implementation details. |
-| ` + "`find_by_concept`" + ` | Browse by concept tag (e.g., "vector-search", "authentication"). |
-| ` + "`find_by_file`" + ` | What's known about a file? Check BEFORE modifying unfamiliar code. |
-| ` + "`find_by_type`" + ` | Filter by observation type (decision, bugfix, feature, etc.). |
-| ` + "`find_similar_observations`" + ` | Pure vector similarity — detect duplicates before creating new ones. |
-| ` + "`search_sessions`" + ` | Full-text search across indexed Claude Code session transcripts. |
-
-### Timeline & Context
-| Tool | When to Use |
-|------|-------------|
-| ` + "`timeline`" + ` | Browse observations around a specific point in time. |
-| ` + "`get_recent_context`" + ` | Quick dump of latest observations for a project. |
-| ` + "`get_context_timeline`" + ` | Timeline around a specific observation ID. |
-| ` + "`get_timeline_by_query`" + ` | Search + timeline combined — finds best match, shows surrounding context. |
-
-### Graph & Relationships
-| Tool | When to Use |
-|------|-------------|
-| ` + "`find_related_observations`" + ` | Follow knowledge graph edges (causes, fixes, explains, contradicts). |
-| ` + "`get_observation_relationships`" + ` | Multi-hop graph traversal with configurable depth. |
-| ` + "`get_graph_neighbors`" + ` | FalkorDB graph neighbors (requires FalkorDB backend). |
-| ` + "`get_graph_stats`" + ` | Graph backend status and statistics. |
-
-### Observation Management
-| Tool | When to Use |
-|------|-------------|
-| ` + "`get_observation`" + ` | Fetch single observation by ID with full metadata. |
-| ` + "`edit_observation`" + ` | Correct errors, add details, update scope. Only provided fields change. |
-| ` + "`tag_observation`" + ` | Add/remove/set concept tags. Modes: add, remove, set. |
-| ` + "`get_observations_by_tag`" + ` | List all observations with a specific tag. |
-| ` + "`batch_tag_by_pattern`" + ` | Auto-tag observations matching a text pattern. Use dry_run=true first. |
-| ` + "`merge_observations`" + ` | Combine duplicates — target kept and boosted, source superseded. |
-| ` + "`bulk_delete_observations`" + ` | Batch delete by IDs. |
-| ` + "`bulk_mark_superseded`" + ` | Mark observations as stale without deleting. |
-| ` + "`bulk_boost_observations`" + ` | Adjust importance scores in bulk (-1.0 to 1.0). |
-| ` + "`export_observations`" + ` | Export as JSON, JSONL, or Markdown. |
-
-### Quality & Analytics
-| Tool | When to Use |
-|------|-------------|
-| ` + "`get_memory_stats`" + ` | System overview — counts, storage, health. |
-| ` + "`get_observation_quality`" + ` | Quality score for a single observation with improvement suggestions. |
-| ` + "`get_data_quality_report`" + ` | Comprehensive quality assessment across observations. |
-| ` + "`get_observation_scoring_breakdown`" + ` | Debug why an observation has its current importance score. |
-| ` + "`analyze_observation_importance`" + ` | Project-level importance analysis — top scored, most retrieved. |
-| ` + "`get_temporal_trends`" + ` | Activity patterns over time (daily, weekly, hourly). |
-| ` + "`explain_search_ranking`" + ` | Debug search result ordering for a query. |
-| ` + "`analyze_search_patterns`" + ` | Search usage analytics — common queries, missed results. |
-| ` + "`get_patterns`" + ` | Detected recurring patterns (workflow, best_practice, anti_pattern). |
-
-### Maintenance
-| Tool | When to Use |
-|------|-------------|
-| ` + "`check_system_health`" + ` | Health check of all subsystems. Also verifies engram connectivity. |
-| ` + "`suggest_consolidations`" + ` | Find observations that should be merged. |
-| ` + "`run_consolidation`" + ` | Trigger decay, association discovery, and/or forgetting cycles. |
-| ` + "`trigger_maintenance`" + ` | Run cleanup (old observations, DB optimization). |
-| ` + "`get_maintenance_stats`" + ` | Last run time, cleanup counts, configuration. |
-
-### Sessions
-| Tool | When to Use |
-|------|-------------|
-| ` + "`list_sessions`" + ` | List indexed sessions with workstation/project filters. |
-| ` + "`search_sessions`" + ` | Full-text search within session transcripts. |
-
-### Collections & Documents
-| Tool | When to Use |
-|------|-------------|
-| ` + "`list_collections`" + ` | Show configured collections with document counts. |
-| ` + "`list_documents`" + ` | List documents in a collection. |
-| ` + "`get_document`" + ` | Retrieve full document content. |
-| ` + "`ingest_document`" + ` | Add document — chunks, embeds, stores. Idempotent (same hash = skip). |
-| ` + "`search_collection`" + ` | Semantic search across document chunks. |
-| ` + "`remove_document`" + ` | Soft-delete (deactivate) a document. |
-
-### Import
-| Tool | When to Use |
-|------|-------------|
-| ` + "`import_instincts`" + ` | Import ECC instinct files as guidance observations. Idempotent. |
+2. Search knowledge: ` + "`recall(query=\"...\")`" + `
+3. Before modifying code: ` + "`recall(action=\"by_file\", files=\"path/to/file\")`" + `
+4. Before decisions: ` + "`recall(action=\"preset\", preset=\"decisions\", query=\"...\")`" + `
+5. Remember something: ` + "`store(content=\"...\", title=\"...\")`" + `
+6. Rate a memory: ` + "`feedback(action=\"rate\", id=123, useful=true)`" + `
+7. Store a secret: ` + "`vault(action=\"store\", name=\"API_KEY\", value=\"...\")`" + `
 
 ## Workflow Patterns
 
-**Starting work:** Context is auto-injected by hooks. Use ` + "`search`" + ` or ` + "`get_recent_context`" + ` for more.
-**Before modifying code:** ` + "`find_by_file`" + ` + ` + "`how_it_works`" + ` to understand what's known.
-**Before architectural decisions:** ` + "`decisions`" + ` to check prior choices.
-**Debugging:** ` + "`find_related_observations`" + ` to trace cause chains.
-**Periodic cleanup:** ` + "`suggest_consolidations`" + ` → ` + "`merge_observations`" + ` → ` + "`trigger_maintenance`" + `.
-**Storing secrets:** ` + "`store_credential`" + ` for API keys, passwords, tokens. ` + "`vault_status`" + ` to verify encryption is active.
+**Starting work:** Context is auto-injected by hooks. Use ` + "`recall(query=\"...\")`" + ` for more.
+**Before modifying code:** ` + "`recall(action=\"by_file\")`" + ` + ` + "`recall(action=\"preset\", preset=\"how_it_works\")`" + `
+**Before architectural decisions:** ` + "`recall(action=\"preset\", preset=\"decisions\")`" + `
+**After using a memory:** ` + "`feedback(action=\"rate\", id=N, useful=true)`" + `
+**Debugging:** ` + "`recall(action=\"related\", id=N)`" + ` to trace cause chains.
+**Cleanup:** ` + "`admin(action=\"consolidations\")`" + ` → ` + "`store(action=\"merge\")`" + ` → ` + "`admin(action=\"maintenance\")`" + `
+**Secrets:** ` + "`vault(action=\"store\")`" + ` for API keys. ` + "`vault(action=\"status\")`" + ` to verify encryption.
 
-## Engram vs File-Based Memory
+## Backward Compatibility
 
-Prefer ` + "`store_memory`" + ` over file-based memory for decisions, patterns, and insights.
-Engram provides semantic search, cross-project visibility (global scope), and cross-machine access.
-Use file-based memory only for static instructions and user preferences.
+All legacy tool names (search, store_memory, find_by_file, decisions, etc.) still work.
+Use ` + "`cursor=all`" + ` in tools/list to see all 61 legacy aliases.`
 
-## Common Mistakes
-
-- Do NOT check ENGRAM_URL/ENGRAM_API_TOKEN env vars — call ` + "`check_system_health()`" + ` instead.
-- Use ` + "`store_memory`" + ` when you want to explicitly remember something. Hooks capture observations automatically, but ` + "`store_memory`" + ` lets you create memories on demand.
-- Read injected ` + "`<engram-context>`" + ` and ` + "`<relevant-memory>`" + ` blocks — they contain prior knowledge.
-- Search BEFORE re-exploring code — someone already documented it.
-- Use specialized tools: ` + "`decisions`" + ` for architecture, ` + "`find_by_file`" + ` for code, ` + "`timeline`" + ` for history.`
+// primaryTools returns the 7 consolidated primary tools shown by default.
+func (s *Server) primaryTools() []Tool {
+	return []Tool{
+		{
+			Name:        "recall",
+			Description: "Search and retrieve memories. Actions: search (default), preset (decisions/changes/how_it_works), by_file, by_concept, by_type, similar, timeline, related, patterns, get, sessions, explain.",
+			tier:        tierCore,
+			InputSchema: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"action":         map[string]any{"type": "string", "enum": []string{"search", "preset", "by_file", "by_concept", "by_type", "similar", "timeline", "related", "patterns", "get", "sessions", "explain"}, "default": "search", "description": "Action to perform"},
+					"query":          map[string]any{"type": "string", "description": "Search query (for search, preset, similar, timeline:query, sessions, explain)"},
+					"preset":         map[string]any{"type": "string", "enum": []string{"decisions", "changes", "how_it_works"}, "description": "Search preset (for action=preset)"},
+					"files":          map[string]any{"type": "string", "description": "File paths (for action=by_file)"},
+					"concept":        map[string]any{"type": "string", "description": "Concept tag (for action=by_concept)"},
+					"type":           map[string]any{"type": "string", "description": "Observation type (for action=by_type)"},
+					"id":             map[string]any{"type": "number", "description": "Observation ID (for action=get, related)"},
+					"project":        map[string]any{"type": "string", "description": "Project name filter"},
+					"limit":          map[string]any{"type": "number", "description": "Max results"},
+					"mode":           map[string]any{"type": "string", "description": "Timeline mode: recent/anchor/query (for action=timeline)"},
+					"min_similarity": map[string]any{"type": "number", "description": "Min similarity 0-1 (for action=similar)"},
+					"min_confidence": map[string]any{"type": "number", "description": "Min confidence 0-1 (for action=related)"},
+					"format":         map[string]any{"type": "string", "description": "Output format: text/items/detailed"},
+				},
+			},
+		},
+		{
+			Name:        "store",
+			Description: "Store, edit, or merge memories. Actions: create (default), edit, merge, import.",
+			tier:        tierCore,
+			InputSchema: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"action":        map[string]any{"type": "string", "enum": []string{"create", "edit", "merge", "import"}, "default": "create", "description": "Action to perform"},
+					"content":       map[string]any{"type": "string", "description": "Observation content (for create)"},
+					"title":         map[string]any{"type": "string", "description": "Title (for create, edit)"},
+					"id":            map[string]any{"type": "number", "description": "Observation ID (for edit)"},
+					"source_id":     map[string]any{"type": "number", "description": "Source observation ID (for merge)"},
+					"target_id":     map[string]any{"type": "number", "description": "Target observation ID (for merge)"},
+					"type":          map[string]any{"type": "string", "description": "Observation type (for create)"},
+					"tags":          map[string]any{"type": "string", "description": "Comma-separated tags (for create)"},
+					"scope":         map[string]any{"type": "string", "description": "Scope: project/global/agent (for create)"},
+					"always_inject": map[string]any{"type": "boolean", "description": "Always inject in context (for create, edit)"},
+					"narrative":     map[string]any{"type": "string", "description": "Narrative text (for edit)"},
+					"path":          map[string]any{"type": "string", "description": "File path (for import)"},
+					"project":       map[string]any{"type": "string", "description": "Project name"},
+				},
+			},
+		},
+		{
+			Name:        "feedback",
+			Description: "Rate observations, suppress bad ones, or record session outcome. Actions: rate, suppress, outcome. Action required.",
+			tier:        tierCore,
+			InputSchema: map[string]any{
+				"type":     "object",
+				"required": []string{"action"},
+				"properties": map[string]any{
+					"action":  map[string]any{"type": "string", "enum": []string{"rate", "suppress", "outcome"}, "description": "Action to perform (required)"},
+					"id":      map[string]any{"type": "number", "description": "Observation ID (for rate, suppress)"},
+					"useful":  map[string]any{"type": "boolean", "description": "Was it helpful? (for rate)"},
+					"outcome": map[string]any{"type": "string", "enum": []string{"success", "partial", "failure", "abandoned"}, "description": "Session outcome (for outcome action)"},
+					"reason":  map[string]any{"type": "string", "description": "Outcome reason (for outcome action)"},
+				},
+			},
+		},
+		{
+			Name:        "vault",
+			Description: "Manage encrypted credentials. Actions: store, get, list, delete, status. Action required.",
+			tier:        tierCore,
+			InputSchema: map[string]any{
+				"type":     "object",
+				"required": []string{"action"},
+				"properties": map[string]any{
+					"action":  map[string]any{"type": "string", "enum": []string{"store", "get", "list", "delete", "status"}, "description": "Action to perform (required)"},
+					"name":    map[string]any{"type": "string", "description": "Credential name (for store, get, delete)"},
+					"value":   map[string]any{"type": "string", "description": "Credential value (for store)"},
+					"scope":   map[string]any{"type": "string", "description": "Scope: project/global (for store)"},
+					"project": map[string]any{"type": "string", "description": "Project name (for store)"},
+				},
+			},
+		},
+		{
+			Name:        "docs",
+			Description: "Versioned documents and collections. Actions: create, read, list, history, comment, collections, documents, get_doc, remove, ingest, search_docs. Action required.",
+			tier:        tierUseful,
+			InputSchema: map[string]any{
+				"type":     "object",
+				"required": []string{"action"},
+				"properties": map[string]any{
+					"action":     map[string]any{"type": "string", "enum": []string{"create", "read", "list", "history", "comment", "collections", "documents", "get_doc", "remove", "ingest", "search_docs"}, "description": "Action to perform (required)"},
+					"path":       map[string]any{"type": "string", "description": "Document path (for create, read, list, history, comment)"},
+					"project":    map[string]any{"type": "string", "description": "Project name"},
+					"content":    map[string]any{"type": "string", "description": "Document content (for create, ingest)"},
+					"collection": map[string]any{"type": "string", "description": "Collection name (for documents, get_doc, remove, ingest, search_docs)"},
+					"query":      map[string]any{"type": "string", "description": "Search query (for search_docs)"},
+					"version":    map[string]any{"type": "number", "description": "Version number (for read)"},
+					"comment":    map[string]any{"type": "string", "description": "Comment text (for comment)"},
+					"doc_type":   map[string]any{"type": "string", "description": "Document type (for create, list)"},
+					"id":         map[string]any{"type": "string", "description": "Document ID (for get_doc, remove)"},
+				},
+			},
+		},
+		{
+			Name:        "admin",
+			Description: "Administrative operations: bulk ops, tagging, graph, analytics, maintenance. Actions: bulk_delete, bulk_supersede, bulk_boost, tag, by_tag, batch_tag, graph, graph_stats, stats, trends, quality, importance, search_analytics, obs_quality, scoring, consolidations, maintenance, maintenance_stats, consolidation, export, backfill_status. Action required.",
+			tier:        tierUseful,
+			InputSchema: map[string]any{
+				"type":     "object",
+				"required": []string{"action"},
+				"properties": map[string]any{
+					"action":  map[string]any{"type": "string", "description": "Action to perform (required). See tool description for valid actions."},
+					"ids":     map[string]any{"type": "array", "items": map[string]any{"type": "number"}, "description": "Observation IDs (for bulk_delete, bulk_supersede, bulk_boost)"},
+					"id":      map[string]any{"type": "number", "description": "Observation ID (for tag, obs_quality, scoring, graph)"},
+					"tag":     map[string]any{"type": "string", "description": "Tag name (for by_tag, batch_tag)"},
+					"project": map[string]any{"type": "string", "description": "Project name (for trends, quality, importance, etc.)"},
+					"format":  map[string]any{"type": "string", "description": "Export format: json/jsonl/markdown (for export)"},
+					"mode":    map[string]any{"type": "string", "description": "Graph mode (for graph action)"},
+					"amount":  map[string]any{"type": "number", "description": "Boost amount (for bulk_boost)"},
+					"add":     map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "Tags to add (for tag)"},
+					"remove":  map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "Tags to remove (for tag)"},
+					"pattern": map[string]any{"type": "string", "description": "Search pattern (for batch_tag)"},
+					"days":    map[string]any{"type": "number", "description": "Days to analyze (for trends)"},
+				},
+			},
+		},
+	}
+}
 
 // handleToolsList returns the list of available tools.
 func (s *Server) handleToolsList(req *Request) *Response {
@@ -1387,9 +1414,7 @@ func (s *Server) handleToolsList(req *Request) *Response {
 		)
 	}
 
-	// Tool tiering: parse optional cursor and include_all from request params.
-	// No cursor / empty → return T1+T2 tools only + nextCursor: "all"
-	// cursor: "all" OR include_all: true → return ALL tools
+	// Tool tiering: consolidated primary tools by default, all aliases with cursor=all.
 	var listParams struct {
 		Cursor     string `json:"cursor"`
 		IncludeAll bool   `json:"include_all"`
@@ -1398,14 +1423,20 @@ func (s *Server) handleToolsList(req *Request) *Response {
 		_ = json.Unmarshal(req.Params, &listParams)
 	}
 
+	primary := s.primaryTools()
+
+	// Always include check_system_health with primary tools
+	primary = append(primary, Tool{
+		Name:        "check_system_health",
+		Description: "Comprehensive system health check. Returns status of all subsystems (database, vectors, cache, search) with actionable diagnostics.",
+		tier:        tierCore,
+		InputSchema: map[string]any{
+			"type":       "object",
+			"properties": map[string]any{},
+		},
+	})
+
 	if listParams.Cursor != "all" && !listParams.IncludeAll {
-		// Filter to primary tools (T1 + T2)
-		primary := make([]Tool, 0, len(tools))
-		for _, t := range tools {
-			if t.tier <= tierUseful {
-				primary = append(primary, t)
-			}
-		}
 		return &Response{
 			JSONRPC: "2.0",
 			ID:      req.ID,
@@ -1416,11 +1447,16 @@ func (s *Server) handleToolsList(req *Request) *Response {
 		}
 	}
 
+	// cursor=all: primary tools first, then all legacy aliases
+	allTools := make([]Tool, 0, len(primary)+len(tools))
+	allTools = append(allTools, primary...)
+	allTools = append(allTools, tools...)
+
 	return &Response{
 		JSONRPC: "2.0",
 		ID:      req.ID,
 		Result: map[string]any{
-			"tools": tools,
+			"tools": allTools,
 		},
 	}
 }
@@ -1476,7 +1512,23 @@ func (s *Server) handleToolsCall(ctx context.Context, req *Request) *Response {
 
 // callTool dispatches to the appropriate tool handler.
 func (s *Server) callTool(ctx context.Context, name string, args json.RawMessage) (string, error) {
-	// Special handlers for non-search tools
+	// Primary consolidated tool handlers
+	switch name {
+	case "recall":
+		return s.handleRecall(ctx, args)
+	case "store":
+		return s.handleStoreConsolidated(ctx, args)
+	case "feedback":
+		return s.handleFeedbackConsolidated(ctx, args)
+	case "vault":
+		return s.handleVaultConsolidated(ctx, args)
+	case "docs":
+		return s.handleDocsConsolidated(ctx, args)
+	case "admin":
+		return s.handleAdmin(ctx, args)
+	}
+
+	// Legacy alias handlers for non-search tools
 	switch name {
 	case "graph_query":
 		// Consolidated graph tool — routes by mode parameter
