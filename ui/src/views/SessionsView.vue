@@ -1,7 +1,10 @@
 <script setup lang="ts">
+import { useRouter } from 'vue-router'
 import { useSessions } from '@/composables/useSessions'
 import { formatRelativeTime } from '@/utils/formatters'
 import EmptyState from '@/components/layout/EmptyState.vue'
+
+const router = useRouter()
 
 const {
   sessions,
@@ -124,7 +127,8 @@ function setProject(project: string) {
       <div
         v-for="session in sessions"
         :key="session.id"
-        class="p-4 rounded-xl border-2 border-slate-700/50 bg-gradient-to-br from-slate-800/50 to-slate-900/50"
+        class="p-4 rounded-xl border-2 border-slate-700/50 bg-gradient-to-br from-slate-800/50 to-slate-900/50 cursor-pointer hover:border-claude-500/50 transition-colors"
+        @click="router.push('/sessions/' + session.id)"
       >
         <div class="flex items-center justify-between">
           <div class="flex-1 min-w-0">

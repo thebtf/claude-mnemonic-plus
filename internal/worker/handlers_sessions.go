@@ -428,8 +428,21 @@ func (s *Service) handleListSessions(w http.ResponseWriter, r *http.Request) {
 			offset = parsed
 		}
 	}
+	minPrompts := 0
+	if v := r.URL.Query().Get("min_prompts"); v != "" {
+		if parsed, err := strconv.Atoi(v); err == nil && parsed >= 0 {
+			minPrompts = parsed
+		}
+	}
+	var from, to int64
+	if v := r.URL.Query().Get("from"); v != "" {
+		from, _ = strconv.ParseInt(v, 10, 64)
+	}
+	if v := r.URL.Query().Get("to"); v != "" {
+		to, _ = strconv.ParseInt(v, 10, 64)
+	}
 
-	sessions, total, err := s.sessionStore.ListSDKSessions(r.Context(), project, limit, offset)
+	sessions, total, err := s.sessionStore.ListSDKSessions(r.Context(), project, limit, offset, minPrompts, from, to)
 	if err != nil {
 		http.Error(w, "failed to list sessions", http.StatusInternalServerError)
 		return

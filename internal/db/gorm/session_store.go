@@ -202,13 +202,22 @@ func (s *SessionStore) GetAllProjects(ctx context.Context) ([]string, error) {
 
 // ListSDKSessions returns a paginated list of SDK sessions, optionally filtered by project.
 // Results are ordered by started_at DESC (newest first). Returns sessions and total count.
-func (s *SessionStore) ListSDKSessions(ctx context.Context, project string, limit, offset int) ([]*models.SDKSession, int64, error) {
+func (s *SessionStore) ListSDKSessions(ctx context.Context, project string, limit, offset, minPrompts int, from, to int64) ([]*models.SDKSession, int64, error) {
 	var sessions []SDKSession
 	var total int64
 
 	q := s.db.WithContext(ctx).Model(&SDKSession{})
 	if project != "" {
 		q = q.Where("project = ?", project)
+	}
+	if minPrompts > 0 {
+		q = q.Where("prompt_counter >= ?", minPrompts)
+	}
+	if from > 0 {
+		q = q.Where("started_at_epoch >= ?", from)
+	}
+	if to > 0 {
+		q = q.Where("started_at_epoch <= ?", to)
 	}
 
 	if err := q.Count(&total).Error; err != nil {

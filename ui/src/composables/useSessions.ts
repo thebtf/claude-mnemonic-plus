@@ -29,11 +29,16 @@ export function useSessions() {
     loading.value = true
     error.value = null
     try {
+      const fromEpoch = filterFrom.value ? new Date(filterFrom.value).getTime() : undefined
+      const toEpoch = filterTo.value ? new Date(filterTo.value + 'T23:59:59').getTime() : undefined
       const result = await fetchSDKSessions(
         {
           project: filterProject.value || undefined,
           limit: 50,
           offset: 0,
+          min_prompts: 1,
+          from: fromEpoch,
+          to: toEpoch,
         },
         abortController.signal,
       )
