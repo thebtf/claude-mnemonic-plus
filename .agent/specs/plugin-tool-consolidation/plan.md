@@ -238,4 +238,4 @@ Phases 1 and 5 are independent — can run in parallel with anything.
 | #8 Complete Implementations | OK — no stubs, every tool fully implemented |
 | #10 Immutable Data | OK — no mutations in hook logic |
 | #12 Tool Count Budget | OK — net reduction: -7 server tools, OpenClaw tools are separate namespace |
-| #15 Version Tracking | OK — bump openclaw-engram to 2.1.0 after Phase 4 |
+| #15 Version Tracking | OK — openclaw-engram 2.0.9→2.0.11 across phases, unified with server |
