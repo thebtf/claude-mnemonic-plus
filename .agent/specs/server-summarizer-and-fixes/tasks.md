@@ -4,24 +4,24 @@
 
 ## Phase 1: Server-Side Summarizer (FR-1)
 
-- [ ] T001 [FR-1] Add `summarizeUnsummarizedSessions()` method to `internal/maintenance/service.go`
-- [ ] T002 [FR-1] Add Task 19 call in `runMaintenance` in `internal/maintenance/service.go`
-- [ ] T003 [FR-1] Run `go build ./...` to verify
+- [x] T001 [FR-1] Add `summarizeUnsummarizedSessions()` method to `internal/maintenance/service.go`
+- [x] T002 [FR-1] Add Task 19 call in `runMaintenance` in `internal/maintenance/service.go`
+- [x] T003 [FR-1] Run `go build ./...` to verify
 
 ---
 
 ## Phase 2: P1 Fixes (FR-2, FR-3, FR-4)
 
-- [ ] T004 [P] [FR-2] Remove `guidance` from warningTypes in `plugin/engram/hooks/pre-tool-use.js`
-- [ ] T005 [P] [FR-3] Remove client-side summarizer from `plugin/engram/hooks/session-start.js` (replaced by server-side)
-- [ ] T006 [P] [FR-4] Add recovery logging to CircuitBreaker in `internal/worker/sdk/processor.go`
+- [x] T004 [P] [FR-2] Remove `guidance` from warningTypes in `plugin/engram/hooks/pre-tool-use.js`
+- [x] T005 [P] [FR-3] Remove client-side summarizer from `plugin/engram/hooks/session-start.js` (replaced by server-side)
+- [x] T006 [P] [FR-4] Add recovery logging to CircuitBreaker in `internal/worker/sdk/processor.go`
 
 ---
 
 ## Phase 3: Release
 
-- [ ] T007 Create PR, run review, merge
-- [ ] T008 Tag release
+- [x] T007 Create PR, run review, merge
+- [x] T008 Tag release
 
 ## Dependencies
 
