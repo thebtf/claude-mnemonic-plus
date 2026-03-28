@@ -639,7 +639,7 @@ func (s *ObservationStore) GetAllRecentObservationsPaginated(ctx context.Context
 		baseQuery = baseQuery.Where("memory_type = ?", memoryType)
 	}
 	if concept != "" {
-		baseQuery = baseQuery.Where("concepts LIKE ?", "%"+concept+"%")
+		baseQuery = baseQuery.Where("concepts @> ?::jsonb", `["`+concept+`"]`)
 	}
 
 	if err := baseQuery.Count(&total).Error; err != nil {
@@ -682,7 +682,7 @@ func (s *ObservationStore) GetObservationsByProjectStrictPaginated(ctx context.C
 		baseQuery = baseQuery.Where("memory_type = ?", memoryType)
 	}
 	if concept != "" {
-		baseQuery = baseQuery.Where("concepts LIKE ?", "%"+concept+"%")
+		baseQuery = baseQuery.Where("concepts @> ?::jsonb", `["`+concept+`"]`)
 	}
 
 	if err := baseQuery.Count(&total).Error; err != nil {
