@@ -8,7 +8,7 @@
 - [x] **[idea]** ~~Memory: consistency checker~~ IMPLEMENTED v2.1.5 (PR #118) — GET /api/maintenance/consistency _2026-03-24_
 - [x] **[idea]** ~~Memory: search indexes~~ RESOLVED — 50+ indexes already exist (FTS tsvector, GIN JSONB, composite covering) _2026-03-24_
 - [x] **[idea]** ~~Plugin: memory_get markdown bridge~~ IMPLEMENTED v2.1.5 (PR #118) — store=true flag imports .md into engram _2026-03-24_
-- [ ] **[investigate]** Audit incomplete specs: self-learning.md (14/24), and all other specs in .agent/specs/ — find partially implemented features, gaps, abandoned work _2026-03-27_
+- [x] **[investigate]** ~~Audit incomplete specs~~ DONE — 4 specs marked Implemented (plugin-tool-consolidation, mcp-tool-api-consolidation, dashboard-bugfixes-v2, engram-user-commands). Remaining specs have accurate status. _2026-03-28_
 - [x] **[debt]** ~~Missing MCP tools: tag_observation~~ Already implemented (server.go line 890). _2026-03-24_ → verified 2026-03-28
 - [~] **[bug]** OpenClaw engram v1.4.0 — 90s init delay regression. DEFERRED — external (needs OpenClaw gateway-side profiling, not engram code). _2026-03-25_
 - [x] **[debt]** ~~store_memory without always-inject concept~~ Fixed: added always_inject param (PR #98). _2026-03-28_

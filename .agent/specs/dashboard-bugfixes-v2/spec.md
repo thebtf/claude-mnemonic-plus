@@ -2,7 +2,7 @@
 
 **Slug:** dashboard-bugfixes-v2
 **Created:** 2026-03-28
-**Status:** Draft
+**Status:** Implemented
 **Author:** AI Agent (reviewed by user)
 
 ## Overview

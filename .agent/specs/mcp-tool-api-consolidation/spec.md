@@ -2,7 +2,7 @@
 
 **Slug:** mcp-tool-api-consolidation
 **Created:** 2026-03-28
-**Status:** Draft
+**Status:** Implemented
 **Author:** AI Agent (reviewed by user)
 **Predecessor:** plugin-tool-consolidation (cleanup phase — removed 7 duplicates, expanded OpenClaw)
 
