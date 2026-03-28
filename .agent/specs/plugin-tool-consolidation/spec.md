@@ -181,10 +181,10 @@ Every plugin file change must bump the respective package version.
 ## Edge Cases
 
 - OpenClaw `session_end` may fire without a valid DB session ID (session not yet initialized) — must handle gracefully
-- `memory_forget` with both `suppress=true` and `permanent=true` — `permanent` wins
+- `memory_forget` with invalid ID and `permanent=true` — returns "Invalid observation ID" error
 - Statusline learning endpoint may return empty data (no sessions with outcomes yet) — show "eff: --"
 - Removed tools called via MCP with invalid parameters — same error handling as before
-- OpenClaw `after_tool_call` for Write on non-existent file path — skip file context injection
+- OpenClaw `before_tool_call` for Write on non-existent file path — skip file context injection
 
 ## Out of Scope
 
