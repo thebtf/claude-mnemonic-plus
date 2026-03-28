@@ -228,7 +228,8 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--model", default="all")
     parser.add_argument("--prompt", default="all", help="Prompt variant: A_strict, B_fewshot, C_json, D_think, E_minimal, or all")
-    parser.add_argument("--parallel", type=int, default=4)
+    parser.add_argument("--parallel", type=int, default=1,
+                        help="Fragments per model in parallel. Default 1 — avoids loading multiple model instances in LM Studio")
     args = parser.parse_args()
 
     with open(FRAGMENTS_FILE, "r", encoding="utf-8") as f:
