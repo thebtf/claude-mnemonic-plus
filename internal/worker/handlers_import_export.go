@@ -629,12 +629,16 @@ func (s *Service) handleBulkStatusUpdate(w http.ResponseWriter, r *http.Request)
 
 	case "suppress":
 		for _, id := range req.IDs {
-			if err := s.observationStore.GetDB().WithContext(ctx).
-				Exec("UPDATE observations SET is_suppressed = TRUE WHERE id = ?", id).Error; err != nil {
+			result := s.observationStore.GetDB().WithContext(ctx).
+				Exec("UPDATE observations SET is_suppressed = TRUE WHERE id = ?", id)
+			if result.Error != nil {
 				failed++
-				errors = append(errors, fmt.Sprintf("id %d: %v", id, err))
-			} else {
+				errors = append(errors, fmt.Sprintf("id %d: %v", id, result.Error))
+			} else if result.RowsAffected > 0 {
 				updated++
+			} else {
+				failed++
+				errors = append(errors, fmt.Sprintf("id %d: not found", id))
 			}
 		}
 
@@ -643,8 +647,8 @@ func (s *Service) handleBulkStatusUpdate(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	// Invalidate cache for archive action (affects observation counts)
-	if req.Action == "archive" && updated > 0 {
+	// Invalidate cache for actions that affect visibility/counts
+	if (req.Action == "archive" || req.Action == "suppress") && updated > 0 {
 		// No project info available, invalidate all caches
 		s.invalidateAllObsCountCache()
 	}

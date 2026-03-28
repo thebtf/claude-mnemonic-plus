@@ -48,6 +48,11 @@ export function createMemoryForgetTool(
         return 'engram is currently unreachable — memory forget unavailable';
       }
 
+      const numericId = Number(parsed.data.id);
+      if (Number.isNaN(numericId) || numericId <= 0) {
+        return `Invalid observation ID: ${parsed.data.id}`;
+      }
+
       if (parsed.data.permanent) {
         const response = await client.bulkDelete([parsed.data.id]);
         if (!response) {
@@ -56,11 +61,6 @@ export function createMemoryForgetTool(
         return response.deleted > 0
           ? `Permanently archived observation: ${parsed.data.id}`
           : `Observation not found or already archived: ${parsed.data.id}`;
-      }
-
-      const numericId = Number(parsed.data.id);
-      if (Number.isNaN(numericId) || numericId <= 0) {
-        return `Invalid observation ID: ${parsed.data.id}`;
       }
 
       const suppressed = await client.suppressObservation(numericId);
