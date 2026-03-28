@@ -77,7 +77,7 @@ Phase B (quality improvement):
 **Decision needed:** Is this a linter task (golangci-lint) or an engram task (context-aware), or both?
 **Context:** Hardcoded 4096 in `internal/learning/llm.go`, caught by user not by system. Fixed in PR #49.
 
-## 2026-03-24: Re-benchmark All 12 Models with max_tokens: 4096
+## 2026-03-24: Re-benchmark All 12 Models with max_tokens: 4096 — DEFERRED (external/infra)
 **What:** Benchmark Rounds 1-2 used max_tokens: 1024 (hardcoded in benchmark script). Thinking models were unfairly penalized — reasoning consumed token budget. With production max_tokens: 4096, results may differ significantly.
 **Impact:** Current winner (huihui-qwen3.5-9b-abliterated) may not be the best choice. Thinking models that scored poorly (qwen3.5-9b 5.0, ernie 5.5) could improve dramatically.
 **Action:** Update run_benchmark_v2.py to use 4096, re-run all 12 models with B_fewshot. Compare with current results.
@@ -115,7 +115,7 @@ MCP spec explicitly allows empty responses for unsupported capabilities. Not a b
 **Next step:** Reproduce from OpenClaw side — check OpenClaw gateway logs for the actual error message/stack trace.
 **Context:** `plugin/openclaw-engram/src/availability.ts` (STRIKE_THRESHOLD=3, COOLDOWN_MS=60000), `src/client.ts` (request method with AbortController).
 
-## 2026-03-26: GPU Contention — SocratiCode Embedding Floods LLM Queue
+## 2026-03-26: GPU Contention — SocratiCode Embedding Floods LLM Queue — DEFERRED (external/infra)
 **What:** SocratiCode codebase indexer sends 65,000+ embedding requests to shared Ollama GPU. Embedding model (qwen3-embedding-8b) and LLM model (qwen3.5-9b-abliterated) share same GPU with Parallel=4. Embedding backlog starves LLM requests — pattern insight and observation extraction timeout.
 **Root cause:** SocratiCode re-indexes same files repeatedly (nvmd-devops SKILL.md files appear every 2-3 seconds in Ollama logs). Multiple Claude Code sessions may trigger concurrent `codebase_index(force: true)`.
 **Impact:** Pattern insight "Summary unavailable" despite model being loaded and key being correct. Observation LLM extraction falls back to CLI.
