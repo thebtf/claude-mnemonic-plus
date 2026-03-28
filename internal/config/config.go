@@ -724,6 +724,9 @@ func Reload() (*Config, []string, error) {
 		if old.WorkerPort != newCfg.WorkerPort {
 			changed = append(changed, "worker_port (requires restart)")
 		}
+		if old.WorkerToken != newCfg.WorkerToken {
+			changed = append(changed, "worker_token (requires restart)")
+		}
 	}
 
 	return newCfg, changed, nil
