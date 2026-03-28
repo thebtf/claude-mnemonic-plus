@@ -50,6 +50,7 @@ type Service struct {
 	totalOrphanVectorsCleaned  int64
 	totalStaleRelationsCleaned int64
 	embeddingModelChanged      bool
+	llmClient                  learning.LLMClient
 	mu                         sync.Mutex
 	running                    bool
 }
@@ -72,6 +73,7 @@ func NewService(
 	graphStore graph.GraphStore,
 	sessionStore *gorm.SessionStore,
 	agentStatsStore *gorm.AgentStatsStore,
+	llmClient learning.LLMClient,
 	log zerolog.Logger,
 ) *Service {
 	svcLog := log.With().Str("component", "maintenance").Logger()
@@ -98,6 +100,7 @@ func NewService(
 		relationStore:       relationStore,
 		graphStore:          graphStore,
 		sessionStore:        sessionStore,
+		llmClient:           llmClient,
 		agentStatsStore:     agentStatsStore,
 		log:                 svcLog,
 		stopCh:              make(chan struct{}),
@@ -435,6 +438,16 @@ func (s *Service) runMaintenance(ctx context.Context) {
 		s.detectAPOCandidates(ctx)
 	}
 
+	// Task 18: Generate LLM insights for patterns with generic descriptions
+	if s.llmClient != nil && s.patternStore != nil && s.observationStore != nil {
+		generated, err := s.generatePatternInsights(ctx)
+		if err != nil {
+			s.log.Warn().Err(err).Msg("Pattern insight generation failed")
+		} else if generated > 0 {
+			s.log.Info().Int("generated", generated).Msg("Generated pattern insights")
+		}
+	}
+
 	// Update metrics
 	s.mu.Lock()
 	s.lastRunTime = time.Now()
@@ -446,6 +459,38 @@ func (s *Service) runMaintenance(ctx context.Context) {
 		Dur("duration", time.Since(start)).
 		Int64("observations_cleaned", totalCleaned).
 		Msg("Maintenance run completed")
+}
+
+// generatePatternInsights finds patterns with generic/empty descriptions and
+// generates LLM-powered 2-3 sentence insights from their source observations.
+func (s *Service) generatePatternInsights(ctx context.Context) (int, error) {
+	patterns, err := s.patternStore.GetPatternsWithGenericDescriptions(ctx, 5)
+	if err != nil {
+		return 0, err
+	}
+
+	generated := 0
+	for _, p := range patterns {
+		ids := []int64(p.ObservationIDs)
+		if len(ids) == 0 {
+			continue
+		}
+		observations, err := s.observationStore.GetObservationsByIDs(ctx, ids, "date_desc", 0)
+		if err != nil || len(observations) == 0 {
+			continue
+		}
+		insight, err := learning.GeneratePatternInsight(ctx, s.llmClient, observations)
+		if err != nil {
+			s.log.Debug().Err(err).Int64("patternId", p.ID).Msg("Insight generation failed for pattern")
+			continue
+		}
+		if insight != "" {
+			if err := s.patternStore.UpdatePatternDescription(ctx, p.ID, insight); err == nil {
+				generated++
+			}
+		}
+	}
+	return generated, nil
 }
 
 // cleanupOldObservations deletes observations older than the retention period.

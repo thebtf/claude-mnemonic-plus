@@ -628,7 +628,15 @@ export interface SearchMiss {
 }
 
 export async function fetchSearchMisses(signal?: AbortSignal): Promise<SearchMiss[]> {
-  return postJson<SearchMiss[]>(`${API_BASE}/analytics/search-misses`, {}, { signal })
+  const result = await postJson<{ miss_stats: Array<{ query: string; miss_count: number; last_seen: string; project?: string }> }>(
+    `${API_BASE}/analytics/search-misses`, {}, { signal }
+  )
+  return (result?.miss_stats || []).map(s => ({
+    query: s.query,
+    project: s.project || '',
+    frequency: s.miss_count,
+    last_seen: s.last_seen,
+  }))
 }
 
 export interface RetrievalStatsResponse {
@@ -797,13 +805,16 @@ export async function searchIndexedSessions(
 }
 
 export async function fetchSDKSessions(
-  params?: { project?: string; limit?: number; offset?: number },
+  params?: { project?: string; limit?: number; offset?: number; min_prompts?: number; from?: number; to?: number },
   signal?: AbortSignal
 ): Promise<SDKSessionListResponse> {
   const query = new URLSearchParams()
   if (params?.project) query.set('project', params.project)
   if (params?.limit) query.set('limit', String(params.limit))
   if (params?.offset) query.set('offset', String(params.offset))
+  if (params?.min_prompts) query.set('min_prompts', String(params.min_prompts))
+  if (params?.from) query.set('from', String(params.from))
+  if (params?.to) query.set('to', String(params.to))
 
   const url = `${API_BASE}/sessions/list${query.toString() ? '?' + query.toString() : ''}`
   return fetchWithRetry<SDKSessionListResponse>(url, { signal })

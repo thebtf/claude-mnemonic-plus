@@ -444,6 +444,32 @@ func toModelPattern(p *Pattern) *models.Pattern {
 	return pattern
 }
 
+// GetPatternsWithGenericDescriptions returns active patterns whose description is NULL,
+// empty, or the auto-generated placeholder. Ordered by confidence DESC so the
+// highest-quality patterns get insights first.
+func (s *PatternStore) GetPatternsWithGenericDescriptions(ctx context.Context, limit int) ([]*models.Pattern, error) {
+	var patterns []Pattern
+	err := s.db.WithContext(ctx).
+		Where("status = ?", models.PatternStatusActive).
+		Where("description IS NULL OR description = '' OR description = 'Automatically detected pattern from recurring observations'").
+		Order("confidence DESC").
+		Limit(limit).
+		Find(&patterns).Error
+	if err != nil {
+		return nil, err
+	}
+	return toModelPatterns(patterns), nil
+}
+
+// UpdatePatternDescription sets the description field for a pattern.
+func (s *PatternStore) UpdatePatternDescription(ctx context.Context, id int64, description string) error {
+	return s.db.WithContext(ctx).
+		Model(&Pattern{}).
+		Where("id = ?", id).
+		Update("description", sql.NullString{String: description, Valid: description != ""}).
+		Error
+}
+
 // toModelPatterns converts a slice of GORM Patterns to pkg/models Patterns.
 func toModelPatterns(patterns []Pattern) []*models.Pattern {
 	result := make([]*models.Pattern, len(patterns))
