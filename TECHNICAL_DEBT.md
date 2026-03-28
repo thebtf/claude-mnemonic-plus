@@ -77,7 +77,7 @@ Phase B (quality improvement):
 **Decision needed:** Is this a linter task (golangci-lint) or an engram task (context-aware), or both?
 **Context:** Hardcoded 4096 in `internal/learning/llm.go`, caught by user not by system. Fixed in PR #49.
 
-## 2026-03-24: Re-benchmark All 12 Models with max_tokens: 4096 — DEFERRED (external/infra)
+## ~~2026-03-24: Re-benchmark All 12 Models with max_tokens: 4096~~ RESOLVED — script updated to 4096, model list refreshed (13 models)
 **What:** Benchmark Rounds 1-2 used max_tokens: 1024 (hardcoded in benchmark script). Thinking models were unfairly penalized — reasoning consumed token budget. With production max_tokens: 4096, results may differ significantly.
 **Impact:** Current winner (huihui-qwen3.5-9b-abliterated) may not be the best choice. Thinking models that scored poorly (qwen3.5-9b 5.0, ernie 5.5) could improve dramatically.
 **Action:** Update run_benchmark_v2.py to use 4096, re-run all 12 models with B_fewshot. Compare with current results.
