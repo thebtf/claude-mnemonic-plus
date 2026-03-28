@@ -1,7 +1,7 @@
 
 - [x] **[investigate]** ~~Session tracking audit: Active Sessions=0~~ PARTIALLY RESOLVED v2.1.5 — "Sessions Today" replaces misleading in-memory count. Investigation found: counter is working-as-designed (transient, 30min timeout). Remaining: OpenClaw empty sessions (heartbeat filtering) is OpenClaw-side. _2026-03-24_
 
-- [ ] **[investigate]** Engram + OpenClaw integration architecture: hook receives ALL messages (heartbeat, Telegram, agent-to-agent, real user prompts) through single UserPromptSubmit entry point. Current approach = regex content filtering (whack-a-mole). Correct approach = message classification at entry: ctx/input metadata should indicate message type (user_prompt, heartbeat, system, agent, external). Requires openclaw audit + engram hook redesign. _2026-03-24_
+- [~] **[investigate]** Engram + OpenClaw integration architecture — requires OpenClaw SDK source audit (external repo). Message classification design documented but implementation depends on OpenClaw SDK changes. _2026-03-24_
 
 - [x] **[idea]** ~~UI: memory notes viewer~~ RESOLVED — ObservationsView already has "Memories" toggle with edit/delete. No separate view needed. _2026-03-24_
 - [ ] **[idea]** Memory: tree structure + Obsidian-style graph — T2: vis-network + GraphView.vue exist, needs UX polish _2026-03-24_
