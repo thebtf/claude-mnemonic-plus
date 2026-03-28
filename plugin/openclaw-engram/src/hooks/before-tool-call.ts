@@ -72,7 +72,8 @@ export async function handleBeforeToolCall(
     const identity = resolveIdentity(ctx.agentId ?? '', ctx.workspaceDir);
     const project = config.project ?? identity.projectId;
 
-    const observations = await client.getFileContext(filePath, project, 5);
+    // 500ms timeout — must not noticeably delay Write/Edit tools
+    const observations = await client.getFileContext(filePath, project, 5, 500);
     if (observations.length === 0) return;
 
     const context = formatFileContext(filePath, observations);

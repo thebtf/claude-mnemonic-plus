@@ -58,9 +58,7 @@ export function createEngramOutcomeTool(
         prompt: '',
       });
 
-      const sessionId = sessionResp && typeof sessionResp === 'object' && 'id' in sessionResp
-        ? Number(sessionResp.id)
-        : 0;
+      const sessionId = sessionResp?.sessionDbId ?? 0;
 
       if (sessionId <= 0) {
         return 'Cannot record outcome — session not found in engram';

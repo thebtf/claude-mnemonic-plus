@@ -338,11 +338,12 @@ export class EngramRestClient {
     file: string,
     project: string,
     limit = 5,
+    timeoutMs = 3000,
   ): Promise<Observation[]> {
     const params = new URLSearchParams({ path: file, project, limit: String(limit) });
     const resp = await this.get<{ observations: Observation[] }>(
       `/api/context/by-file?${params.toString()}`,
-      3000,
+      timeoutMs,
     );
     return resp?.observations ?? [];
   }
@@ -360,7 +361,7 @@ export class EngramRestClient {
     if (params?.query) body.query = params.query;
     if (params?.anchor_id) body.anchor_id = params.anchor_id;
     if (params?.limit) body.limit = params.limit;
-    const resp = await this.post<{ observations: Observation[] }>('/api/context/search', body);
+    const resp = await this.post<{ observations: Observation[] }>('/api/context/search', body, 15_000);
     return resp?.observations ?? [];
   }
 

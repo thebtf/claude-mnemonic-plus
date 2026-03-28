@@ -24,16 +24,16 @@ function detectOutcome(messages: ConversationMessage[]): { outcome: string; reas
     .map((m) => (typeof m.content === 'string' ? m.content : '').toLowerCase())
     .join('\n');
 
-  // Success signals: explicit completion markers
+  // Success signals: multi-word phrases to avoid false positives from common words
   const successPatterns = [
-    'task complete', 'done', 'finished', 'implemented', 'fixed',
-    'merged', 'deployed', 'resolved', 'committed', 'created pr',
+    'task complete', 'successfully implemented', 'pr merged',
+    'deployed to', 'issue resolved', 'committed and pushed',
   ];
   const hasSuccess = successPatterns.some((p) => textContent.includes(p));
 
-  // Failure signals: explicit error/failure markers
+  // Failure signals: also multi-word to reduce false positives
   const failurePatterns = [
-    'failed', 'error', 'cannot', 'unable to', 'broke', 'regression',
+    'build failed', 'test failed', 'unable to fix', 'regression found',
   ];
   const hasFailure = failurePatterns.some((p) => textContent.includes(p));
 
@@ -44,13 +44,11 @@ function detectOutcome(messages: ConversationMessage[]): { outcome: string; reas
     return { outcome: 'partial', reason: 'mixed success and failure signals' };
   }
   if (hasFailure) {
-    return { outcome: 'failure', reason: 'failure signals detected' };
+    return { outcome: 'partial', reason: 'failure signals detected but session continued' };
   }
 
-  // Default: if session had meaningful messages but no clear outcome
-  return messages.length >= 3
-    ? { outcome: 'partial', reason: 'session ended without clear completion signal' }
-    : { outcome: 'abandoned', reason: 'short session with no outcome signals' };
+  // Default: completed (agent ran to end) — conservative, avoid false negatives
+  return { outcome: 'partial', reason: 'session ended without explicit outcome signal' };
 }
 
 /**
@@ -102,7 +100,8 @@ export function handleSessionEnd(
     }
 
     // 2. Record session outcome (fire-and-forget)
-    // Resolve DB session ID — may not exist if session was never initialized
+    // Only if no explicit outcome was set via engram_outcome tool during session.
+    // Resolve DB session ID — may not exist if session was never initialized.
     void (async () => {
       try {
         const sessionResp = await client.initSession({
@@ -111,11 +110,7 @@ export function handleSessionEnd(
           prompt: '',
         });
 
-        const dbSessionId =
-          sessionResp && typeof sessionResp === 'object' && 'id' in sessionResp
-            ? Number(sessionResp.id)
-            : 0;
-
+        const dbSessionId = sessionResp?.sessionDbId ?? 0;
         if (dbSessionId <= 0) {
           (logger ?? console).warn('[engram] session-end: no DB session ID — skipping outcome');
           return;

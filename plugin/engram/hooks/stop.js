@@ -336,10 +336,12 @@ async function handleStop(ctx, input) {
 
   // Detect utility signals using retrospective injection API (single enriched call)
   try {
-    const injections = await lib.requestGet(
+    const injectionsResp = await lib.requestGet(
       `/api/sessions/${sessionID}/injections`
     );
-    const injectedObs = Array.isArray(injections) ? injections : [];
+    const injectedObs = Array.isArray(injectionsResp && injectionsResp.injections)
+      ? injectionsResp.injections
+      : [];
 
     if (injectedObs.length > 0 && messages.length > 0) {
       const assistantText = messages
