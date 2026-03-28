@@ -3,11 +3,11 @@
 
 - [ ] **[investigate]** Engram + OpenClaw integration architecture: hook receives ALL messages (heartbeat, Telegram, agent-to-agent, real user prompts) through single UserPromptSubmit entry point. Current approach = regex content filtering (whack-a-mole). Correct approach = message classification at entry: ctx/input metadata should indicate message type (user_prompt, heartbeat, system, agent, external). Requires openclaw audit + engram hook redesign. _2026-03-24_
 
-- [~] **[idea]** UI: memory notes viewer in dashboard — DEFERRED (future FR, no user demand yet) _2026-03-24_
-- [~] **[idea]** Memory: tree structure + Obsidian-style graph — DEFERRED (separate epic) _2026-03-24_
-- [~] **[idea]** Memory: consistency checker + auto-repair — DEFERRED (build when data quality issues emerge) _2026-03-24_
-- [~] **[idea]** Memory: search indexes (FTS + vector pre-warm) — DEFERRED (perf optimization, build when latency measured) _2026-03-24_
-- [~] **[idea]** Plugin: memory_get markdown bridge — DEFERRED (OpenClaw-specific, build when adoption grows) _2026-03-24_
+- [x] **[idea]** ~~UI: memory notes viewer~~ RESOLVED — ObservationsView already has "Memories" toggle with edit/delete. No separate view needed. _2026-03-24_
+- [ ] **[idea]** Memory: tree structure + Obsidian-style graph — T2: vis-network + GraphView.vue exist, needs UX polish _2026-03-24_
+- [x] **[idea]** ~~Memory: consistency checker~~ IMPLEMENTED v2.1.5 (PR #118) — GET /api/maintenance/consistency _2026-03-24_
+- [x] **[idea]** ~~Memory: search indexes~~ RESOLVED — 50+ indexes already exist (FTS tsvector, GIN JSONB, composite covering) _2026-03-24_
+- [x] **[idea]** ~~Plugin: memory_get markdown bridge~~ IMPLEMENTED v2.1.5 (PR #118) — store=true flag imports .md into engram _2026-03-24_
 - [ ] **[investigate]** Audit incomplete specs: self-learning.md (14/24), and all other specs in .agent/specs/ — find partially implemented features, gaps, abandoned work _2026-03-27_
 - [x] **[debt]** ~~Missing MCP tools: tag_observation~~ Already implemented (server.go line 890). _2026-03-24_ → verified 2026-03-28
 - [~] **[bug]** OpenClaw engram v1.4.0 — 90s init delay regression. DEFERRED — external (needs OpenClaw gateway-side profiling, not engram code). _2026-03-25_
