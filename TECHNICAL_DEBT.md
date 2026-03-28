@@ -93,11 +93,9 @@ MCP spec explicitly allows empty responses for unsupported capabilities. Not a b
 **What:** Type filter was client-side. Fixed: server-side type + concept params added to handleGetObservations.
 **Fix:** PR #114 — backend accepts type/concept params, frontend passes from FilterTabs.
 
-## 2026-03-25: SDK Extraction Produces Only guidance/bugfix Types
-**What:** Over 2 days of active use (657→662 observations), all new observations are type `guidance` or `bugfix`. Zero `feature`, `refactor`, `discovery`, `decision`, `change` observations created. LLM extraction prompt in stop hook may be biased toward these two types.
-**Impact:** Type filters in dashboard are empty for most types. Knowledge base lacks diversity.
-**Fix plan:** Review LLM extraction prompt in server-side extract-learnings endpoint — verify all observation types are in the prompt and equally reachable.
-**Context:** `plugin/engram/hooks/stop.js` (calls `/api/sessions/{id}/extract-learnings`), server-side extraction prompt
+## ~~2026-03-25: SDK Extraction Produces Only guidance/bugfix Types~~ RESOLVED v2.1.1
+**What:** LLM extraction prompt biased — "guidance" listed first with broadest description.
+**Fix:** Reordered types: specific first (decision, feature, bugfix), general last (guidance). Added "prefer specific over general" instruction. `internal/learning/prompts.go`
 
 ## ~~2026-03-25: Dashboard Memories View — Browse store_memory Records~~ RESOLVED v1.8.0 (PR #70)
 **What:** Dashboard has no dedicated view or filter for `store_memory` records. Users create memories via MCP tool but can only find them mixed into the general observations list with no memory_type filter.
@@ -139,8 +137,5 @@ Impact: Docker restart policy handles the restart automatically
 **Impact:** High — this is the actual adoption fix. Tool consolidation reduces noise, behavioral rules drive usage.
 **Context:** `.agent/reports/plugin-api-gap-audit-2026-03-28.md`, `.agent/specs/plugin-tool-consolidation/spec.md`
 
-## 2026-03-28: MCP Tool Namespace Prefixes (from mcp-tools-refactoring FR7/FR8)
-**What:** Vault tools (store_credential, get_credential, etc.) and Document tools (list_collections, list_documents, etc.) lack a consistent namespace prefix. FR7 proposed `vault_*`, FR8 proposed `doc_*`.
-**Why deferred:** Tools already have distinct names that group logically. Namespace prefix is cosmetic — no functional impact. Consolidation spec (plugin-tool-consolidation) takes priority.
-**Impact:** Minor cognitive load. Vault tools (5) and doc tools (12) are recognizable without prefix.
-**Context:** `.agent/specs/mcp-tools-refactoring.md` FR7, FR8
+## ~~2026-03-28: MCP Tool Namespace Prefixes~~ RESOLVED v2.1.0 — superseded by consolidation
+**What:** Vault/doc tools lacked namespace prefix. Now moot: all tools consolidated into `vault(action=...)` and `docs(action=...)`. Old tool names are backward-compat aliases only.
