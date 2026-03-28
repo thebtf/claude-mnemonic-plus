@@ -89,16 +89,9 @@ MCP spec explicitly allows empty responses for unsupported capabilities. Not a b
 
 ## ~~2026-03-19: Memory Blocks Table Unpopulated~~ RESOLVED v1.5.2 — dropped via migration 047
 
-## 2026-03-25: Dashboard Type Filter — Client-Side Instead of Server-Side
-**What:** Observation type filter buttons (bugfix, feature, refactor, discovery, decision, change) filter client-side on the 20 records returned per page instead of sending `type` param to API. Result: "Showing 1-20 of 662" with 0-5 visible items, pagination counts wrong.
-**Root cause:** `handleGetObservations` in `handlers_data.go` doesn't accept `type` query param. `fetchObservationsPaginated` in `api.ts` doesn't send it. `filteredObservations` computed in `ObservationsView.vue:165` filters locally after fetch.
-**Impact:** Type filters unusable — show wrong counts and missing data.
-**Fix plan:**
-1. Add `type` param to `handleGetObservations` and `GetAllRecentObservationsPaginated`
-2. Add `type` param to `fetchObservationsPaginated` in `api.ts`
-3. Pass `currentType` to `fetchPage()` in ObservationsView
-4. Remove client-side `filteredObservations` filter (server does it)
-**Context:** `internal/worker/handlers_data.go:32`, `ui/src/utils/api.ts:402`, `ui/src/views/ObservationsView.vue:165`
+## ~~2026-03-25: Dashboard Type Filter — Client-Side Instead of Server-Side~~ RESOLVED v2.1.1 (PR #114)
+**What:** Type filter was client-side. Fixed: server-side type + concept params added to handleGetObservations.
+**Fix:** PR #114 — backend accepts type/concept params, frontend passes from FilterTabs.
 
 ## 2026-03-25: SDK Extraction Produces Only guidance/bugfix Types
 **What:** Over 2 days of active use (657→662 observations), all new observations are type `guidance` or `bugfix`. Zero `feature`, `refactor`, `discovery`, `decision`, `change` observations created. LLM extraction prompt in stop hook may be biased toward these two types.

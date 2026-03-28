@@ -27,14 +27,16 @@ Schema:
 
 Rules:
 - Only include clear, unambiguous observations (not guesses)
-- Type selection:
-  - "guidance": user corrected the assistant or stated a preference/rule
-  - "decision": explicit choice between alternatives (technology, approach, design)
-  - "bugfix": error found and fixed during the session
-  - "discovery": something learned about how a system works, unexpected behavior
-  - "feature": new capability implemented
-  - "refactor": code restructured without behavior change
-  - "change": configuration, dependency, or infrastructure modification
+- Type selection (use the MOST SPECIFIC type, not the most general):
+  - "decision": explicit choice between alternatives (technology, approach, design, library)
+  - "feature": new capability added — code written to do something it didn't before
+  - "bugfix": error found and fixed — something was broken and now works
+  - "refactor": code restructured for clarity/performance WITHOUT behavior change
+  - "change": configuration, dependency, environment, or infrastructure modification
+  - "discovery": something learned about how a system works, unexpected behavior found
+  - "guidance": ONLY for explicit behavioral rules — user corrected the agent or stated a requirement for future sessions
+- Prefer specific types (decision, feature, bugfix) over general ones (guidance, discovery)
+- Most sessions produce decisions, features, or changes — not just guidance
 - Maximum 5 observations per session (quality over quantity)
 - Concepts must be from: security, gotcha, best-practice, anti-pattern, architecture, performance, error-handling, pattern, testing, debugging, problem-solution, trade-off, workflow, tooling, how-it-works, why-it-exists, what-changed
 - If no clear observations exist, return {"learnings": []}
