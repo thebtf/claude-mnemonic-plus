@@ -9,14 +9,14 @@
 **Goal:** Concept and type filters work via server-side queries
 **Independent Test:** Select concept/type in UI → correct filtered results with pagination
 
-- [ ] T001 [US1] [US2] Read `handleGetObservations` in `internal/worker/handlers_data.go` — understand current pagination query
-- [ ] T002 [US2] Add `type` query param to `handleGetObservations` in `internal/worker/handlers_data.go`
-- [ ] T003 [US1] Add `concept` query param to `handleGetObservations` in `internal/worker/handlers_data.go`
-- [ ] T004 [US1] [US2] Add `type` and `concept` params to `fetchObservationsPaginated` in `ui/src/utils/api.ts`
-- [ ] T005 [US1] Wire concept dropdown to re-fetch with server param in `ui/src/views/ObservationsView.vue`
-- [ ] T006 [US2] Wire type buttons to re-fetch with server param in `ui/src/views/ObservationsView.vue`
-- [ ] T007 [US2] Remove client-side `filteredObservations` in `ui/src/views/ObservationsView.vue`
-- [ ] T008 Run `go build ./...` to verify backend compilation
+- [x] T001 [US1] [US2] Read `handleGetObservations` in `internal/worker/handlers_data.go` — understand current pagination query
+- [x] T002 [US2] Add `type` query param to `handleGetObservations` in `internal/worker/handlers_data.go`
+- [x] T003 [US1] Add `concept` query param to `handleGetObservations` in `internal/worker/handlers_data.go`
+- [x] T004 [US1] [US2] Add `type` and `concept` params to `fetchObservationsPaginated` in `ui/src/utils/api.ts`
+- [x] T005 [US1] Wire concept dropdown to re-fetch with server param in `ui/src/views/ObservationsView.vue`
+- [x] T006 [US2] Wire type buttons to re-fetch with server param in `ui/src/views/ObservationsView.vue`
+- [x] T007 [US2] Remove client-side `filteredObservations` in `ui/src/views/ObservationsView.vue`
+- [x] T008 Run `go build ./...` to verify backend compilation
 
 ---
 
@@ -27,9 +27,9 @@
 **Goal:** Display actual observation and prompt counts
 **Independent Test:** Page shows real numbers matching API stats
 
-- [ ] T009 [US3] Find hardcoded "50 obs · 50 prompts" in `ui/src/views/` or `ui/src/components/`
-- [ ] T010 [US3] Replace with real counts from API response in relevant Vue component
-- [ ] T011 [US3] Verify counts update when filters change
+- [x] T009 [US3] Find hardcoded "50 obs · 50 prompts" in `ui/src/views/` or `ui/src/components/`
+- [x] T010 [US3] Replace with real counts from API response in relevant Vue component
+- [x] T011 [US3] Verify counts update when filters change
 
 ---
 
@@ -40,10 +40,10 @@
 **Goal:** Summaries tab shows data
 **Independent Test:** At least 1 summary visible after session with summarization
 
-- [ ] T012 [US4] Test `/api/summaries` endpoint via curl — check response format
-- [ ] T013 [US4] If empty: check `stop.js` summarize call and server handler for errors
-- [ ] T014 [US4] Fix root cause of missing summaries in server or hook code
-- [ ] T015 [US4] Verify Summaries tab displays data
+- [x] T012 [US4] Test `/api/summaries` endpoint via curl — check response format
+- [x] T013 [US4] If empty: check `stop.js` summarize call and server handler for errors
+- [x] T014 [US4] Fix root cause of missing summaries in server or hook code
+- [x] T015 [US4] Verify Summaries tab displays data
 
 ---
 
@@ -51,9 +51,9 @@
 
 ## Phase 4: Visual Verification + Release
 
-- [ ] T016 Screenshot all 4 fixes (concept filter, type filter, counts, summaries)
-- [ ] T017 Create PR, run review, merge
-- [ ] T018 Bump version, tag release
+- [x] T016 Screenshot all 4 fixes (concept filter, type filter, counts, summaries)
+- [x] T017 Create PR, run review, merge
+- [x] T018 Bump version, tag release
 
 ## Dependencies
 

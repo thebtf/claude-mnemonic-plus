@@ -9,10 +9,10 @@
 **Goal:** 4 new markdown command files
 **Independent Test:** Each command visible in CC `/engram:` menu and produces output
 
-- [ ] T001 [P] [US1] Create `/engram:retro` command in `plugin/engram/commands/retro.md`
-- [ ] T002 [P] [US2] Create `/engram:stats` command in `plugin/engram/commands/stats.md`
-- [ ] T003 [P] [US3] Create `/engram:cleanup` command in `plugin/engram/commands/cleanup.md`
-- [ ] T004 [P] [US4] Create `/engram:export` command in `plugin/engram/commands/export.md`
+- [x] T001 [P] [US1] Create `/engram:retro` command in `plugin/engram/commands/retro.md`
+- [x] T002 [P] [US2] Create `/engram:stats` command in `plugin/engram/commands/stats.md`
+- [x] T003 [P] [US3] Create `/engram:cleanup` command in `plugin/engram/commands/cleanup.md`
+- [x] T004 [P] [US4] Create `/engram:export` command in `plugin/engram/commands/export.md`
 
 ---
 
@@ -20,8 +20,8 @@
 
 ## Phase 2: Release
 
-- [ ] T005 Create PR, run review, merge
-- [ ] T006 Bump version, tag release
+- [x] T005 Create PR, run review, merge
+- [x] T006 Bump version, tag release
 
 ## Dependencies
 
