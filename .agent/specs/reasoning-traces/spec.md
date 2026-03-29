@@ -144,3 +144,36 @@ None — this is the complete System 2 implementation for v1.
 - [ ] Quality scores correlate with reasoning usefulness (measured via feedback)
 - [ ] No increase in default MCP tool count (action on existing `recall`)
 - [ ] Extraction latency < 2s async (non-blocking)
+
+## Clarifications
+
+### Session 2026-03-29
+
+| # | Category | Question | Resolution | Date |
+|---|----------|----------|------------|------|
+| C1 | Data Model | Separate table or observation type? | Separate `reasoning_traces` table — different schema (steps array, quality_score, task_context) doesn't fit observation columns. Separate vector collection. | 2026-03-29 |
+| C2 | Data Lifecycle | Retention policy for traces? | Same as observations — follows observation_retention_days config. Long-lived knowledge, not ephemeral. | 2026-03-29 |
+| C3 | Terminology | "trace" vs "chain" vs "reasoning"? | Use "trace" consistently: reasoning_trace in DB, reasoning as recall action, "trace" in docs. | 2026-03-29 |
+
+## Clarification Summary
+
+| Category | Status |
+|----------|--------|
+| Functional Scope | Clear |
+| User Roles | Clear |
+| Domain/Data Model | Resolved (C1) |
+| Data Lifecycle | Resolved (C2) |
+| Interaction & UX Flow | Clear |
+| Non-Functional: Perf/Scale | Clear |
+| Non-Functional: Reliability | Clear |
+| Non-Functional: Security | Clear |
+| Integration | Clear |
+| Edge Cases | Clear |
+| Constraints & Tradeoffs | Clear |
+| Terminology | Resolved (C3) |
+| Completion Signals | Clear |
+| Miscellaneous | Clear |
+
+**Questions asked/answered:** 3/3
+**Spec status:** Ready for planning
+**Next:** /speckit-plan
