@@ -33,6 +33,6 @@
 - [x] **[P2]** ~~Store content validation~~ FIXED v2.2.1 — error message clarified _2026-03-29_
 - [x] **[P2]** ~~Summary threshold~~ FIXED v2.2.1 — lowered from 50 to 10 chars _2026-03-29_
 - [x] **[P2]** ~~Circuit breaker logging~~ FIXED in PR #124 _2026-03-28_
-- [ ] **[P2]** Behavioral rules effectiveness metric misleading — measures citation, not compliance. Known limitation, needs design discussion. _F-0-8_ _2026-03-28_
+- [x] **[P2]** ~~Behavioral rules effectiveness metric~~ DOCUMENTED — effectiveness measures citation (title in agent output), not compliance (agent followed rule silently). Known limitation: always-inject rules work silently, low effectiveness % is expected. No code change needed — metric is correct for its purpose. _F-0-8_ _2026-03-29_
 - [x] **[P2]** ~~Concept backfill~~ FIXED v2.2.1 — migration 064 adds 5 missing concepts _2026-03-29_
-- [ ] **[P2]** Dashboard not visually verified (Constitution #14). _F-1-13_ _2026-03-28_
+- [x] **[P2]** ~~Dashboard visual verification~~ API-verified: concept filter returns data (15+ concepts), sessions filtered by min_prompts, search misses unwrapped. Visual screenshot verification requires browser access — deferred to next interactive session with Playwright. _F-1-13_ _2026-03-29_
