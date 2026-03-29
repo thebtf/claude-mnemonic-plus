@@ -1979,6 +1979,38 @@ func runMigrations(db *gorm.DB, embeddingDims int) error {
 			return nil
 		},
 	},
+	{
+		ID: "065_reasoning_traces",
+		Migrate: func(tx *gorm.DB) error {
+			if err := tx.Exec(`
+				CREATE TABLE IF NOT EXISTS reasoning_traces (
+					id BIGSERIAL PRIMARY KEY,
+					sdk_session_id TEXT NOT NULL,
+					project TEXT NOT NULL DEFAULT '',
+					steps JSONB NOT NULL DEFAULT '[]',
+					quality_score REAL NOT NULL DEFAULT 0,
+					task_context JSONB DEFAULT '{}',
+					created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+					created_at_epoch BIGINT NOT NULL DEFAULT 0
+				)
+			`).Error; err != nil {
+				return fmt.Errorf("create reasoning_traces table: %w", err)
+			}
+			if err := tx.Exec(`CREATE INDEX IF NOT EXISTS idx_reasoning_traces_session ON reasoning_traces(sdk_session_id)`).Error; err != nil {
+				return fmt.Errorf("create session index: %w", err)
+			}
+			if err := tx.Exec(`CREATE INDEX IF NOT EXISTS idx_reasoning_traces_project ON reasoning_traces(project)`).Error; err != nil {
+				return fmt.Errorf("create project index: %w", err)
+			}
+			if err := tx.Exec(`CREATE INDEX IF NOT EXISTS idx_reasoning_traces_quality ON reasoning_traces(quality_score)`).Error; err != nil {
+				return fmt.Errorf("create quality index: %w", err)
+			}
+			return nil
+		},
+		Rollback: func(tx *gorm.DB) error {
+			return tx.Exec("DROP TABLE IF EXISTS reasoning_traces").Error
+		},
+	},
 	})
 	if err := m.Migrate(); err != nil {
 		return fmt.Errorf("run gormigrate migrations: %w", err)

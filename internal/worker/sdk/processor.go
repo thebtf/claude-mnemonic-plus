@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -218,6 +219,7 @@ const MaxVectorSyncWorkers = 8
 type Processor struct {
 	observationStore         *gorm.ObservationStore
 	summaryStore             *gorm.SummaryStore
+	reasoningStore           *gorm.ReasoningTraceStore
 	llmClient                learning.LLMClient
 	broadcastFunc            BroadcastFunc
 	syncObservationFunc      SyncObservationFunc
@@ -241,6 +243,11 @@ func (p *Processor) SetBroadcastFunc(fn BroadcastFunc) {
 // SetSyncObservationFunc sets the callback for syncing observations to vector DB.
 func (p *Processor) SetSyncObservationFunc(fn SyncObservationFunc) {
 	p.syncObservationFunc = fn
+}
+
+// SetReasoningStore sets the reasoning trace store for System 2 memory extraction.
+func (p *Processor) SetReasoningStore(store *gorm.ReasoningTraceStore) {
+	p.reasoningStore = store
 }
 
 // SetSyncSummaryFunc sets the callback for syncing summaries to vector DB.
@@ -521,7 +528,81 @@ func (p *Processor) ProcessObservation(ctx context.Context, sdkSessionID, projec
 			Msg("Observation processing complete (duplicates skipped)")
 	}
 
+	// Asynchronously extract reasoning traces from the LLM response (System 2 memory).
+	// Only runs when a reasoning store is configured and the response contains
+	// enough multi-step reasoning indicators.
+	if p.reasoningStore != nil && storedCount > 0 && DetectReasoning(response) {
+		go p.extractAndStoreReasoning(context.Background(), sdkSessionID, project, response)
+	}
+
 	return nil
+}
+
+// extractAndStoreReasoning extracts a reasoning trace from LLM output and
+// stores it if quality is sufficient. Runs asynchronously — errors are logged,
+// never propagated to the caller.
+func (p *Processor) extractAndStoreReasoning(ctx context.Context, sdkSessionID, project, response string) {
+	traceJSON, err := p.callLLM(ctx, reasoningExtractionPrompt+response)
+	if err != nil {
+		log.Debug().Err(err).Msg("Reasoning extraction LLM call failed")
+		return
+	}
+
+	var trace ReasoningTrace
+	if err := json.Unmarshal([]byte(traceJSON), &trace); err != nil || len(trace.Steps) == 0 {
+		log.Debug().Msg("No reasoning steps extracted")
+		return
+	}
+
+	// Evaluate quality via LLM
+	qualityStr, err := p.callLLM(ctx, reasoningQualityPrompt+traceJSON)
+	if err == nil {
+		qualityStr = strings.TrimSpace(qualityStr)
+		if q, parseErr := strconv.ParseFloat(qualityStr, 64); parseErr == nil {
+			trace.QualityScore = q
+		}
+	}
+
+	// Only persist traces with quality >= 0.5
+	if trace.QualityScore < 0.5 {
+		log.Debug().
+			Float64("quality", trace.QualityScore).
+			Int("steps", len(trace.Steps)).
+			Msg("Reasoning trace below quality threshold, discarding")
+		return
+	}
+
+	// Marshal steps and task_context back to JSON strings for DB storage
+	stepsJSON, err := json.Marshal(trace.Steps)
+	if err != nil {
+		log.Warn().Err(err).Msg("Failed to marshal reasoning steps")
+		return
+	}
+	taskCtxJSON, err := json.Marshal(trace.TaskContext)
+	if err != nil {
+		log.Warn().Err(err).Msg("Failed to marshal reasoning task context")
+		return
+	}
+
+	dbTrace := &gorm.ReasoningTrace{
+		SDKSessionID: sdkSessionID,
+		Project:      project,
+		Steps:        string(stepsJSON),
+		QualityScore: trace.QualityScore,
+		TaskContext:   string(taskCtxJSON),
+	}
+
+	id, err := p.reasoningStore.Create(ctx, dbTrace)
+	if err != nil {
+		log.Warn().Err(err).Msg("Failed to store reasoning trace")
+		return
+	}
+
+	log.Info().
+		Int64("id", id).
+		Float64("quality", trace.QualityScore).
+		Int("steps", len(trace.Steps)).
+		Msg("Reasoning trace extracted and stored")
 }
 
 // ProcessSummary processes a session summary request.

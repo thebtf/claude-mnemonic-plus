@@ -747,6 +747,12 @@ func (s *Service) initializeAsync() {
 	// Create version store for Phase 5 APO-lite observation rewrites
 	versionStore := gorm.NewVersionStore(store.GetDB())
 
+	// Create reasoning trace store for System 2 memory (reasoning chains)
+	reasoningStore := gorm.NewReasoningTraceStore(store)
+	if processor != nil {
+		processor.SetReasoningStore(reasoningStore)
+	}
+
 	// Set all the initialized components
 	s.initMu.Lock()
 	s.store = store
@@ -1001,6 +1007,10 @@ func (s *Service) initializeAsync() {
 
 	// Wire versioned document store into MCP server for collaborative document tools.
 	mcpServer.SetVersionedDocumentStore(versionedDocumentStore)
+
+	// Wire reasoning trace store into MCP server for System 2 memory recall.
+	mcpServer.SetReasoningStore(reasoningStore)
+
 	// TODO: Document embedding will be triggered on doc_create/doc_update via vectorSync.SyncDocument()
 	// when the full embedding pipeline integration is implemented.
 
@@ -1206,6 +1216,8 @@ func (s *Service) reinitializeDatabase() {
 		processor.SetBroadcastFunc(func(event map[string]any) {
 			s.sseBroadcaster.Broadcast(event)
 		})
+		// Wire reasoning trace store for System 2 memory
+		processor.SetReasoningStore(gorm.NewReasoningTraceStore(store))
 	}
 
 	// Stop old pattern detector if it exists
