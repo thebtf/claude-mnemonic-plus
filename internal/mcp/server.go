@@ -52,6 +52,7 @@ type Server struct {
 	embedSvc               *embedding.Service
 	chunkManager           *chunking.Manager
 	graphStore             graphpkg.GraphStore
+	reasoningStore         *gorm.ReasoningTraceStore
 	vault                  *crypto.Vault
 	vaultInitErr           error
 	vaultOnce              sync.Once
@@ -113,6 +114,11 @@ func (s *Server) SetBackfillStatusFunc(fn func() (any, error)) {
 // SetVersionedDocumentStore sets the versioned document store for document MCP tools.
 func (s *Server) SetVersionedDocumentStore(vds *gorm.VersionedDocumentStore) {
 	s.versionedDocumentStore = vds
+}
+
+// SetReasoningStore sets the reasoning trace store for System 2 memory tools.
+func (s *Server) SetReasoningStore(rs *gorm.ReasoningTraceStore) {
+	s.reasoningStore = rs
 }
 
 // Request represents a JSON-RPC request.
@@ -362,12 +368,12 @@ func (s *Server) primaryTools() []Tool {
 	return []Tool{
 		{
 			Name:        "recall",
-			Description: "Search and retrieve memories. Actions: search (default), preset (decisions/changes/how_it_works), by_file, by_concept, by_type, similar, timeline, related, patterns, get, sessions, explain.",
+			Description: "Search and retrieve memories. Actions: search (default), preset (decisions/changes/how_it_works), by_file, by_concept, by_type, similar, timeline, related, patterns, get, sessions, explain, reasoning.",
 			tier:        tierCore,
 			InputSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"action":         map[string]any{"type": "string", "enum": []string{"search", "preset", "by_file", "by_concept", "by_type", "similar", "timeline", "related", "patterns", "get", "sessions", "explain"}, "default": "search", "description": "Action to perform"},
+					"action":         map[string]any{"type": "string", "enum": []string{"search", "preset", "by_file", "by_concept", "by_type", "similar", "timeline", "related", "patterns", "get", "sessions", "explain", "reasoning"}, "default": "search", "description": "Action to perform"},
 					"query":          map[string]any{"type": "string", "description": "Search query (for search, preset, similar, timeline:query, sessions, explain)"},
 					"preset":         map[string]any{"type": "string", "enum": []string{"decisions", "changes", "how_it_works"}, "description": "Search preset (for action=preset)"},
 					"files":          map[string]any{"type": "string", "description": "File paths (for action=by_file)"},
