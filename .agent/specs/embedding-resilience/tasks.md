@@ -1,0 +1,23 @@
+# Tasks: Embedding Resilience Layer
+
+**Generated:** 2026-03-29
+
+## Phase 1: EmbeddingResilience struct
+
+- [ ] T001 Create `internal/embedding/resilience.go` — ResilientEmbedder with 4 states, atomic transitions, threshold logic, health check goroutine
+- [ ] T002 Run `go build ./...` to verify
+
+---
+
+## Phase 2: Wire into service
+
+- [ ] T003 Replace direct embedder in worker service with ResilientEmbedder wrapper in `internal/worker/service.go`
+- [ ] T004 Add embedding_status to selfcheck handler in `internal/worker/handlers.go`
+- [ ] T005 Run `go build ./...` to verify
+
+---
+
+## Phase 3: Release
+
+- [ ] T006 Create PR, run review, merge
+- [ ] T007 Tag release
