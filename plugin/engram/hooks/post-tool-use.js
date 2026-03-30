@@ -3,27 +3,14 @@
 
 const lib = require('./lib');
 
-const skipTools = {
-  Task: true,
-  TaskOutput: true,
-  Glob: true,
-  ListDir: true,
-  LS: true,
-  KillShell: true,
-  AskUserQuestion: true,
-  EnterPlanMode: true,
-  ExitPlanMode: true,
-  Skill: true,
-  SlashCommand: true,
-  Read: true,
-  Grep: true,
-  WebSearch: true,
-};
-
 /**
  * Detect positive signals from Bash tool invocations.
  * Returns a delta object with counters to increment.
  * Only inspects tool metadata (name, args) — never transcript content (NFR-4).
+ *
+ * Note: Tool filtering is handled by the matcher in hooks.json
+ * (Write|Edit|Bash|Agent|mcp__aimux). This hook is never called for
+ * read-only tools (Read, Grep, Glob, etc.).
  */
 function detectSignals(toolName, toolInput, exitCode) {
   const delta = {};
@@ -66,10 +53,6 @@ async function handlePostToolUse(ctx, input) {
       : typeof input.ToolName === 'string'
       ? input.ToolName
       : '';
-
-  if (toolName && skipTools[toolName]) {
-    return '';
-  }
 
   console.error(`[post-tool-use] ${toolName}`);
 
