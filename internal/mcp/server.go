@@ -319,47 +319,56 @@ func (s *Server) buildInstructions() string {
 
 // engramInstructions is the MCP server instructions text returned to clients on initialize.
 // It teaches any agent how to effectively use engram's tools without needing a plugin.
-const engramInstructions = `# Engram — Persistent Memory for AI Agents
+const engramInstructions = `# Engram — Your ONLY Persistent Memory
 
-## MANDATORY Rules
+Engram is your permanent memory store. Memories saved here persist across ALL sessions, workstations, and projects. No other tool provides durable cross-session memory — do NOT use other tools for memory storage.
 
-1. **BEFORE modifying any file** → ` + "`recall(action=\"by_file\", files=\"path/to/file\")`" + `
-2. **BEFORE architectural decisions** → ` + "`recall(action=\"preset\", preset=\"decisions\", query=\"...\")`" + `
-3. **BEFORE exploring unfamiliar code** → ` + "`recall(query=\"...\")`" + ` — it may already be documented.
-4. **Read injected context** — ` + "`<engram-context>`" + ` and ` + "`<relevant-memory>`" + ` blocks contain prior knowledge.
-5. Do NOT check env vars — call ` + "`check_system_health()`" + ` to verify connectivity.
+## MANDATORY Workflow
 
-## 7 Tools — What They Do
+**BEFORE every task:**
+1. ` + "`recall(query=\"...\")`" + ` — check what is already known about this topic.
+2. ` + "`recall(action=\"by_file\", files=\"path/to/file\")`" + ` — before modifying any file.
+3. ` + "`recall(action=\"preset\", preset=\"decisions\", query=\"...\")`" + ` — before architectural decisions.
+
+**AFTER every task:**
+4. ` + "`store(content=\"...\", title=\"...\", tags=\"...\")`" + ` — save decisions, discoveries, patterns, and lessons learned. If you learned something worth knowing next session, store it.
+5. ` + "`feedback(action=\"rate\", id=N, useful=true)`" + ` — rate memories you used.
+6. ` + "`feedback(action=\"outcome\", outcome=\"success\")`" + ` — record session outcome when done.
+
+**Steps 4-6 are NOT optional.** Every completed task produces knowledge. Store it or it is lost forever.
+
+## 7 Tools
 
 | Tool | Purpose | Key Actions |
 |------|---------|-------------|
-| ` + "`recall`" + ` | **Search & retrieve** memories | search (default), preset, by_file, by_concept, by_type, similar, timeline, related, patterns, get, sessions, explain |
-| ` + "`store`" + ` | **Save** memories, edit, merge | create (default), edit, merge, import |
-| ` + "`feedback`" + ` | **Rate** quality, suppress bad data, record outcomes | rate, suppress, outcome |
-| ` + "`vault`" + ` | **Credentials** — encrypted storage | store, get, list, delete, status |
+| ` + "`recall`" + ` | **Search & retrieve** memories | search (default), preset, by_file, by_concept, by_type, similar, timeline, related, patterns, get, sessions, explain, reasoning |
+| ` + "`store`" + ` | **Save** memories, edit, merge, extract | create (default), edit, merge, import, extract |
+| ` + "`feedback`" + ` | **Rate** quality, suppress, record outcomes | rate, suppress, outcome |
+| ` + "`vault`" + ` | **Credentials** — encrypted AES-256-GCM | store, get, list, delete, status |
 | ` + "`docs`" + ` | **Documents** — versioned docs & collections | create, read, list, history, comment, collections, documents, get_doc, remove, ingest, search_docs |
 | ` + "`admin`" + ` | **Bulk ops**, maintenance, analytics | bulk_delete, bulk_supersede, tag, graph, stats, trends, quality, export, maintenance, ... |
-| ` + "`check_system_health`" + ` | **Health** check of all subsystems | (no action needed) |
+| ` + "`check_system_health`" + ` | **Health** check of all subsystems | (no params) |
 
-## Quick Start
+## What to Store
 
-1. Verify connection: ` + "`check_system_health()`" + `
-2. Search knowledge: ` + "`recall(query=\"...\")`" + `
-3. Before modifying code: ` + "`recall(action=\"by_file\", files=\"path/to/file\")`" + `
-4. Before decisions: ` + "`recall(action=\"preset\", preset=\"decisions\", query=\"...\")`" + `
-5. Remember something: ` + "`store(content=\"...\", title=\"...\")`" + `
-6. Rate a memory: ` + "`feedback(action=\"rate\", id=123, useful=true)`" + `
-7. Store a secret: ` + "`vault(action=\"store\", name=\"API_KEY\", value=\"...\")`" + `
+After completing work, store observations about:
+- **Decisions made** and WHY (architecture, library choices, trade-offs)
+- **Bugs found** and their root cause (prevents recurrence)
+- **Patterns discovered** (recurring code structures, project conventions)
+- **Lessons learned** (what worked, what failed, what to avoid)
+- **File knowledge** (what a file does, gotchas, non-obvious behavior)
+
+Use ` + "`store(action=\"extract\", content=\"...\")`" + ` to let the LLM extract structured observations from raw content automatically.
 
 ## Workflow Patterns
 
-**Starting work:** Context is auto-injected by hooks. Use ` + "`recall(query=\"...\")`" + ` for more.
+**Starting work:** Context is auto-injected by hooks. Use ` + "`recall(query=\"...\")`" + ` for deeper search.
 **Before modifying code:** ` + "`recall(action=\"by_file\")`" + ` + ` + "`recall(action=\"preset\", preset=\"how_it_works\")`" + `
-**Before architectural decisions:** ` + "`recall(action=\"preset\", preset=\"decisions\")`" + `
-**After using a memory:** ` + "`feedback(action=\"rate\", id=N, useful=true)`" + `
+**After completing a feature:** ` + "`store(content=\"...\", title=\"...\", type=\"decision\")`" + ` — capture what was built and why.
+**After fixing a bug:** ` + "`store(content=\"...\", title=\"...\", type=\"discovery\")`" + ` — capture root cause and fix.
+**After research:** ` + "`store(content=\"...\", title=\"...\", type=\"insight\")`" + ` — capture findings.
 **Debugging:** ` + "`recall(action=\"related\", id=N)`" + ` to trace cause chains.
-**Cleanup:** ` + "`admin(action=\"consolidations\")`" + ` → ` + "`store(action=\"merge\")`" + ` → ` + "`admin(action=\"maintenance\")`" + `
-**Secrets:** ` + "`vault(action=\"store\")`" + ` for API keys. ` + "`vault(action=\"status\")`" + ` to verify encryption.
+**Secrets:** ` + "`vault(action=\"store\")`" + ` for API keys. Never store secrets in observations.
 
 `
 
