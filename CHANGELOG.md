@@ -7,6 +7,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.0.0] - 2026-04-06
+
+### Added
+
+- **Learning Memory** — engram now learns from every session which observations are useful
+  - **Citation signal wiring**: stop hook detects which injected observations were referenced by the agent (via existing `detectUtilitySignal`), sends citation data to new `POST /api/sessions/{id}/mark-cited` endpoint. `PropagateCitation` updates effectiveness_score per-observation: cited = +0.03, uncited = -0.01.
+  - **Observation enrichment**: user prompts stored server-side as context for tool calls. `BuildObservationPrompt` now includes `<user_intent>` tag — extraction LLM sees WHY the agent acted, not just WHAT it did.
+  - **Mid-session extract-learnings**: PreCompact hook sends last 20 messages (4000 token budget) to extract-learnings endpoint. Reliable trigger (replaces unreliable stop hook). Idempotent.
+  - **Contradiction detection on write** (Mem0 Algorithm 1 adapted): cosine >= 0.92 = NOOP (near-duplicate), 0.75-0.92 = UPDATE (supersede with EVOLVES_FROM), < 0.75 = ADD. Synchronous, ~3-5ms.
+  - **Adaptive per-project threshold**: maintenance Task 20 reads citation rates from injection_log, adjusts relevance threshold ± 0.05 per project. Bounds [0.15, 0.60]. Window: 50 sessions.
+  - **Migration 066**: `cited` BOOLEAN column on injection_log with composite index
+
+### Changed
+
+- Store response now includes `action` field (ADD/UPDATE/NOOP) and `superseded_id` when applicable
+
+## [2.5.0] - 2026-04-06
+
+### Added
+
+- **Minimum Viable Learning Loop** — first production system to close the retrieve → measure → adjust → re-retrieve feedback loop
+  - Bayesian effectiveness multiplier in `ApplyCompositeScoring`: `(successes + 1) / (injections + 2)`. No minimum injection gate.
+  - Project-only vector search: removed `includeGlobal=true` from 3 context search call sites
+  - Project filter on `GetAlwaysInjectObservations`
+  - Client min similarity filter > 0.10 in user-prompt.js
+
+## [2.4.1] - 2026-04-06
+
+### Added
+
+- **Stronger MCP instructions**: exclusivity claim ("Your ONLY Persistent Memory"), mandatory AFTER workflow
+
+### Changed
+
+- PostToolUse hook matcher narrowed `*` → `Write|Edit|Bash|Agent|mcp__aimux` (~50+ fewer node process spawns)
+- Behavioral rules de-duplicated (session-start only, removed from user-prompt.js)
+- Documentation rewrite (README, CHANGELOG, translations)
+
 ## [2.4.0] - 2026-03-29
 
 ### Added
