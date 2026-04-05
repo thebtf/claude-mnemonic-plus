@@ -32,7 +32,6 @@ async function handleUserPrompt(ctx, input) {
   }
 
   let contextToInject = '';
-  let behaviorRulesBlock = '';
   let observationCount = 0;
   let matchedCount = 0;
   const searchIds = [];
@@ -83,32 +82,10 @@ async function handleUserPrompt(ctx, input) {
       }
     }
 
-    // Merge always-inject + similarity-matched behavioral rules into one block
-    const allBehaviorRules = [...alwaysInjectRules, ...behaviorRules];
-    // Deduplicate by ID (always-inject may overlap with similarity results)
-    const seenRuleIds = new Set();
-    const uniqueRules = [];
-    for (const rule of allBehaviorRules) {
-      const ruleId = rule && typeof rule.id === 'number' ? rule.id : null;
-      if (ruleId !== null && seenRuleIds.has(ruleId)) continue;
-      if (ruleId !== null) seenRuleIds.add(ruleId);
-      uniqueRules.push(rule);
-    }
-
-    if (uniqueRules.length > 0) {
-      behaviorRulesBlock = '<user-behavior-rules>\n';
-      behaviorRulesBlock += '# Behavioral Rules (Always Active)\n';
-      behaviorRulesBlock += 'These rules are injected unconditionally. Follow them.\n\n';
-      for (const rule of uniqueRules.slice(0, 20)) {
-        const title = escapeXmlTags(asString(rule.title));
-        const narrative = escapeXmlTags(asString(rule.narrative));
-        behaviorRulesBlock += `## ${title}\n${narrative}\n\n`;
-      }
-      behaviorRulesBlock += '</user-behavior-rules>\n';
-      if (alwaysInjectRules.length > 0) {
-        console.error(`[engram] Injected ${alwaysInjectRules.length} always-inject + ${behaviorRules.length} similarity-matched behavioral rules`);
-      }
-    }
+    // Behavioral rules (user-preference concept + always-inject) are already
+    // injected once by session-start.js via /api/context/inject.
+    // Do NOT re-inject them here — it wastes ~4K tokens per prompt.
+    // Only technical observations go into <relevant-memory> below.
 
     if (technicalObs.length > 0) {
       // Sort by similarity score (highest first)
@@ -268,9 +245,6 @@ async function handleUserPrompt(ctx, input) {
         }
       }
 
-      contextBuilder += '\n---\n';
-      contextBuilder += 'REMINDER: Before modifying any file mentioned above, call `find_by_file(files="path")` to check for additional context. ';
-      contextBuilder += 'Before architectural decisions, call `decisions(query="...")`. These engram MCP tools are available and MUST be used.\n';
       contextBuilder += '</relevant-memory>\n';
       contextToInject = contextBuilder;
     }
@@ -324,11 +298,10 @@ async function handleUserPrompt(ctx, input) {
       console.error(`[user-prompt] Failed to notify session start: ${error.message}`);
     });
 
-  // Assemble final output: behavior rules FIRST (higher priority), then technical context.
-  const output = behaviorRulesBlock + contextToInject;
-  if (output) {
-    console.error(`[engram] Injecting: ${behaviorRulesBlock ? 'behavior rules + ' : ''}${observationCount} observations`);
-    return output;
+  // Only technical observations — behavioral rules already injected by session-start.
+  if (contextToInject) {
+    console.error(`[engram] Injecting: ${observationCount} observations`);
+    return contextToInject;
   }
 
   return '';
