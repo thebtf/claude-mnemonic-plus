@@ -30,6 +30,7 @@ type ToolExecution struct {
 	ToolInput      string
 	ToolOutput     string
 	CWD            string
+	UserIntent     string // User's prompt that preceded this tool call (Learning Memory v3 FR-4)
 	ID             int64
 	CreatedAtEpoch int64
 }
@@ -55,6 +56,9 @@ func BuildObservationPrompt(exec ToolExecution) string {
 
 	var sb strings.Builder
 	sb.WriteString("<observed_from_primary_session>\n")
+	if exec.UserIntent != "" {
+		sb.WriteString(fmt.Sprintf("  <user_intent>%s</user_intent>\n", truncate(exec.UserIntent, 500)))
+	}
 	sb.WriteString(fmt.Sprintf("  <what_happened>%s</what_happened>\n", exec.ToolName))
 	sb.WriteString(fmt.Sprintf("  <occurred_at>%s</occurred_at>\n", timestamp))
 	if exec.CWD != "" {

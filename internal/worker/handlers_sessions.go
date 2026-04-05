@@ -159,6 +159,12 @@ func (s *Service) handleSessionInit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Cache user prompt for observation enrichment (Learning Memory v3 FR-4).
+	// ProcessObservation reads this to include <user_intent> in extraction prompt.
+	if cleanedPrompt != "" && sessionID > 0 {
+		s.SetLastPrompt(sessionID, cleanedPrompt)
+	}
+
 	// Increment prompt counter
 	promptNum, err := s.sessionStore.IncrementPromptCounter(r.Context(), sessionID)
 	if err != nil {
@@ -319,12 +325,13 @@ func (s *Service) handleObservation(w http.ResponseWriter, r *http.Request) {
 		sess, _ = s.sessionStore.GetSessionByID(r.Context(), id)
 	}
 
-	// Queue observation
+	// Queue observation with user prompt context (Learning Memory v3 FR-4)
 	if err := s.sessionManager.QueueObservation(r.Context(), sess.ID, session.ObservationData{
 		ToolName:     req.ToolName,
 		ToolInput:    req.ToolInput,
 		ToolResponse: req.ToolResponse,
 		CWD:          req.CWD,
+		UserPrompt:   s.GetLastPrompt(sess.ID),
 	}); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -388,6 +395,7 @@ func (s *Service) handleSubagentComplete(w http.ResponseWriter, r *http.Request)
 					msg.Observation.ToolResponse,
 					msg.Observation.PromptNumber,
 					msg.Observation.CWD,
+					msg.Observation.UserPrompt,
 				)
 				if err != nil {
 					log.Error().Err(err).
@@ -574,6 +582,22 @@ func (s *Service) handleExtractLearnings(w http.ResponseWriter, r *http.Request)
 	s.initMu.RLock()
 	observationStore := s.observationStore
 	s.initMu.RUnlock()
+
+	// Idempotency: skip if learnings already extracted for this session (Learning Memory v3 FR-5)
+	idStr := chi.URLParam(r, "id")
+	if idStr != "" {
+		sessionID, _ := strconv.ParseInt(idStr, 10, 64)
+		if sessionID > 0 {
+			if sess, err := s.sessionStore.GetSessionByID(r.Context(), sessionID); err == nil && sess != nil {
+				existingCount, _ := observationStore.CountBySessionAndType(r.Context(), sess.SDKSessionID.String, "guidance")
+				if existingCount > 0 {
+					log.Info().Int64("session", sessionID).Int64("existing", existingCount).Msg("Skipping extract-learnings: already extracted")
+					writeJSON(w, map[string]any{"status": "already_extracted", "count": existingCount})
+					return
+				}
+			}
+		}
+	}
 
 	if observationStore == nil {
 		http.Error(w, "service not ready", http.StatusServiceUnavailable)

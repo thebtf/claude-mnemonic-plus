@@ -220,6 +220,48 @@ async function handlePreCompact(ctx, input) {
     });
   }
 
+  // Extract learnings from recent messages (Learning Memory v3 FR-5).
+  // Last 20 messages, respecting ~4000 token budget (~16000 chars).
+  // Fire-and-forget — don't block compaction (Constitution Principle 3).
+  if (sessionId && messages.length > 0) {
+    const TOKEN_BUDGET_CHARS = 16000; // ~4000 tokens × 4 chars/token
+    const recentMessages = [];
+    let charCount = 0;
+    // Take from the end (most recent first)
+    for (let i = messages.length - 1; i >= 0 && recentMessages.length < 20; i--) {
+      const msg = messages[i];
+      const textLen = (msg.text || '').length;
+      if (charCount + textLen > TOKEN_BUDGET_CHARS && recentMessages.length > 0) break;
+      charCount += textLen;
+      recentMessages.unshift(msg);
+    }
+
+    // Resolve session DB ID for the endpoint
+    lib.requestPost('/api/sessions/init', {
+      claudeSessionId: sessionId,
+      project: project,
+      prompt: '',
+      matchedObservations: 0,
+    }, 3000).then((initResp) => {
+      const dbId = initResp && initResp.sessionDbId;
+      if (dbId) {
+        lib.requestPost(`/api/sessions/${dbId}/extract-learnings`, {
+          messages: recentMessages,
+          project: project,
+        }, 30000).then((result) => {
+          const count = result && result.count;
+          if (count > 0) {
+            console.error(`[pre-compact] Extracted ${count} learnings from ${recentMessages.length} messages`);
+          }
+        }).catch((err) => {
+          console.error(`[pre-compact] Extract-learnings failed: ${err.message}`);
+        });
+      }
+    }).catch((err) => {
+      console.error(`[pre-compact] Session init for extract-learnings failed: ${err.message}`);
+    });
+  }
+
   // Return immediately — don't block compaction (Constitution Principle 3)
   return '';
 }

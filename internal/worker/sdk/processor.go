@@ -380,7 +380,7 @@ func (p *Processor) IsAvailable() bool {
 }
 
 // ProcessObservation processes a single tool observation and extracts insights.
-func (p *Processor) ProcessObservation(ctx context.Context, sdkSessionID, project string, toolName string, toolInput, toolResponse any, promptNumber int, cwd string) error {
+func (p *Processor) ProcessObservation(ctx context.Context, sdkSessionID, project string, toolName string, toolInput, toolResponse any, promptNumber int, cwd string, userPrompt ...string) error {
 	// Skip certain tools that aren't worth processing
 	if shouldSkipTool(toolName) {
 		log.Info().Str("tool", toolName).Msg("Skipping tool (not interesting for memory)")
@@ -415,12 +415,17 @@ func (p *Processor) ProcessObservation(ctx context.Context, sdkSessionID, projec
 	// Record this request to prevent duplicates
 	p.deduplicator.Record(reqHash)
 
-	// Build the prompt
+	// Build the prompt with optional user intent context (Learning Memory v3 FR-4)
+	var userIntent string
+	if len(userPrompt) > 0 && userPrompt[0] != "" {
+		userIntent = userPrompt[0]
+	}
 	exec := ToolExecution{
 		ToolName:   toolName,
 		ToolInput:  inputStr,
 		ToolOutput: outputStr,
 		CWD:        cwd,
+		UserIntent: userIntent,
 	}
 	prompt := BuildObservationPrompt(exec)
 

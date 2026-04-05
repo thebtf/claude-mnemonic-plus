@@ -201,6 +201,37 @@ type Service struct {
 	vault                  *crypto.Vault
 	vaultOnce              sync.Once
 	vaultErr               error
+	promptCache            sync.Map // map[int64]promptCacheEntry — last user prompt per session
+}
+
+// promptCacheEntry stores a user prompt with a timestamp for eviction.
+type promptCacheEntry struct {
+	Prompt    string
+	Timestamp time.Time
+}
+
+// SetLastPrompt stores the most recent user prompt for a session.
+func (s *Service) SetLastPrompt(sessionID int64, prompt string) {
+	s.promptCache.Store(sessionID, promptCacheEntry{Prompt: prompt, Timestamp: time.Now()})
+}
+
+// GetLastPrompt retrieves the most recent user prompt for a session.
+func (s *Service) GetLastPrompt(sessionID int64) string {
+	if v, ok := s.promptCache.Load(sessionID); ok {
+		return v.(promptCacheEntry).Prompt
+	}
+	return ""
+}
+
+// evictStalePrompts removes prompt cache entries older than 2 hours.
+func (s *Service) evictStalePrompts() {
+	cutoff := time.Now().Add(-2 * time.Hour)
+	s.promptCache.Range(func(key, value any) bool {
+		if entry, ok := value.(promptCacheEntry); ok && entry.Timestamp.Before(cutoff) {
+			s.promptCache.Delete(key)
+		}
+		return true
+	})
 }
 
 // cachedCount stores a cached count value with expiration.
@@ -2358,6 +2389,7 @@ func (s *Service) processAllSessions() {
 							msg.Observation.ToolResponse,
 							msg.Observation.PromptNumber,
 							msg.Observation.CWD,
+							msg.Observation.UserPrompt,
 						)
 						if err != nil {
 							log.Error().Err(err).

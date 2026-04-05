@@ -1730,6 +1730,17 @@ func (s *ObservationStore) GetTopImportanceObservations(ctx context.Context, pro
 	return s.GetActiveObservations(ctx, project, limit)
 }
 
+// CountBySessionAndType counts observations for a session with a given type.
+// Used for idempotency checks (e.g., skip extract-learnings if guidance already extracted).
+func (s *ObservationStore) CountBySessionAndType(ctx context.Context, sessionID, obsType string) (int64, error) {
+	var count int64
+	err := s.db.WithContext(ctx).
+		Table("observations").
+		Where("sdk_session_id = ? AND type = ? AND COALESCE(status, 'active') = 'active'", sessionID, obsType).
+		Count(&count).Error
+	return count, err
+}
+
 // GetObservationsBySession returns all observations recorded during the given Claude session.
 // Used by the outcome heuristic to determine session success/partial/abandoned.
 func (s *ObservationStore) GetObservationsBySession(ctx context.Context, sessionID string) ([]*models.Observation, error) {
