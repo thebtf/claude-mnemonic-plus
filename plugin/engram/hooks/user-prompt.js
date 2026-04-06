@@ -82,10 +82,34 @@ async function handleUserPrompt(ctx, input) {
       }
     }
 
-    // Behavioral rules (user-preference concept + always-inject) are already
-    // injected once by session-start.js via /api/context/inject.
-    // Do NOT re-inject them here — it wastes ~4K tokens per prompt.
-    // Only technical observations go into <relevant-memory> below.
+    // Behavioral rules: inject compact titles only (not full narrative).
+    // Session-start injects full rules once. After compaction, those may be lost.
+    // This lightweight reminder (~300-500 tokens) ensures rules survive compaction.
+    const allBehaviorRules = [...alwaysInjectRules, ...behaviorRules];
+    const seenRuleIds = new Set();
+    const uniqueRules = [];
+    for (const rule of allBehaviorRules) {
+      const ruleId = rule && typeof rule.id === 'number' ? rule.id : null;
+      if (ruleId !== null && seenRuleIds.has(ruleId)) continue;
+      if (ruleId !== null) seenRuleIds.add(ruleId);
+      uniqueRules.push(rule);
+    }
+
+    let behaviorRulesBlock = '';
+    if (uniqueRules.length > 0) {
+      behaviorRulesBlock = '<behavioral-rules>\n';
+      for (const rule of uniqueRules.slice(0, 20)) {
+        const title = escapeXmlTags(asString(rule.title));
+        // Compact format: title + first sentence of narrative (~1-1.5K total vs ~4K full)
+        const narrative = asString(rule.narrative);
+        const firstSentence = narrative.split(/\.\s/)[0];
+        const compact = firstSentence && firstSentence.length > 10 && firstSentence.length < 200
+          ? `: ${escapeXmlTags(firstSentence)}.`
+          : '';
+        behaviorRulesBlock += `- ${title}${compact}\n`;
+      }
+      behaviorRulesBlock += '</behavioral-rules>\n';
+    }
 
     // Filter out observations with negligible similarity (noise from global scope leak).
     // Preserve observations without a similarity score (e.g., always-inject tagged).
@@ -306,10 +330,11 @@ async function handleUserPrompt(ctx, input) {
       console.error(`[user-prompt] Failed to notify session start: ${error.message}`);
     });
 
-  // Only technical observations — behavioral rules already injected by session-start.
-  if (contextToInject) {
-    console.error(`[engram] Injecting: ${observationCount} observations`);
-    return contextToInject;
+  // Combine: compact behavioral rule titles + technical observations
+  const output = behaviorRulesBlock + contextToInject;
+  if (output) {
+    console.error(`[engram] Injecting: ${behaviorRulesBlock ? uniqueRules.length + ' rules + ' : ''}${observationCount} observations`);
+    return output;
   }
 
   return '';
