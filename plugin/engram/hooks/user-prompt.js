@@ -32,6 +32,8 @@ async function handleUserPrompt(ctx, input) {
   }
 
   let contextToInject = '';
+  let behaviorRulesBlock = '';
+  let injectedRulesCount = 0;
   let observationCount = 0;
   let matchedCount = 0;
   const searchIds = [];
@@ -109,8 +111,8 @@ async function handleUserPrompt(ctx, input) {
       lib.incrementSessionSignals(ctx.SessionID, { compacted: -(signals.compacted || 0) });
     }
 
-    let behaviorRulesBlock = '';
-    if (uniqueRules.length > 0) {
+    injectedRulesCount = uniqueRules.length;
+    if (injectedRulesCount > 0) {
       if (wasCompacted) {
         // Full rules after compaction (title + narrative, ~2-3K tokens)
         behaviorRulesBlock = '<user-behavior-rules>\n';
@@ -358,7 +360,7 @@ async function handleUserPrompt(ctx, input) {
   // Combine: compact behavioral rule titles + technical observations
   const output = behaviorRulesBlock + contextToInject;
   if (output) {
-    console.error(`[engram] Injecting: ${behaviorRulesBlock ? uniqueRules.length + ' rules + ' : ''}${observationCount} observations`);
+    console.error(`[engram] Injecting: ${behaviorRulesBlock ? injectedRulesCount + ' rules + ' : ''}${observationCount} observations`);
     return output;
   }
 
