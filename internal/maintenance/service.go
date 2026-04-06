@@ -471,6 +471,17 @@ func (s *Service) runMaintenance(ctx context.Context) {
 		}
 	}
 
+	// Task 21: Entity extraction from recent observations (synthesize-wiki-layer FR-1)
+	// LLM extracts structured entities + relations from observations, stores as type=entity.
+	if s.llmClient != nil && s.config.EntityExtractionEnabled {
+		extracted, err := s.extractEntities(ctx)
+		if err != nil {
+			s.log.Warn().Err(err).Msg("Entity extraction failed")
+		} else if extracted > 0 {
+			s.log.Info().Int("entities", extracted).Msg("Extracted entities from observations")
+		}
+	}
+
 	// Update metrics
 	s.mu.Lock()
 	s.lastRunTime = time.Now()
