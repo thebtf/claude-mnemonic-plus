@@ -2,6 +2,7 @@
 'use strict';
 
 const crypto = require('crypto');
+const fs = require('fs');
 const path = require('path');
 
 function getServerURL() {
@@ -118,14 +119,31 @@ function readAllStdin() {
   });
 }
 
+// Claude Code validates hookSpecificOutput as a discriminated union by hookEventName.
+// Only PreToolUse, UserPromptSubmit, PostToolUse have defined schemas with hookEventName.
+// Other hooks (PostCompact, SessionStart, etc.) must omit hookEventName entirely
+// and send only { additionalContext } to pass validation.
+const HOOKS_WITH_EVENT_NAME = new Set([
+  'PreToolUse',
+  'UserPromptSubmit',
+  'PostToolUse',
+]);
+
 function writeResponse(hookName, additionalContext) {
   try {
     const response = { continue: true };
     if (typeof additionalContext === 'string' && additionalContext !== '') {
-      response.hookSpecificOutput = {
-        hookEventName: hookName,
-        additionalContext,
-      };
+      if (HOOKS_WITH_EVENT_NAME.has(hookName)) {
+        response.hookSpecificOutput = {
+          hookEventName: hookName,
+          additionalContext,
+        };
+      }
+      // Non-union hooks (PostCompact, PreCompact, Stop, etc.):
+      // hookSpecificOutput is NOT valid — CC rejects any object that
+      // doesn't match the discriminated union.  Context must be
+      // delivered through an alternative channel (e.g. session signals
+      // consumed by UserPromptSubmit on the next turn).
     }
 
     process.stdout.write(`${JSON.stringify(response)}\n`);
@@ -309,6 +327,71 @@ async function requestUpload(endpoint, content, timeoutMs = 15000) {
   }
 }
 
+// ──────────────────────────────────────────────────────────────
+// Session signal store — persists per-session counters to a temp
+// file so post-tool-use.js and stop.js can share state across
+// separate process invocations (hooks run as independent procs).
+// ──────────────────────────────────────────────────────────────
+
+function _signalPath(sessionID) {
+  const safe = String(sessionID).replace(/[^a-zA-Z0-9_-]/g, '_');
+  const tmpDir = require('os').tmpdir();
+  return path.join(tmpDir, `engram-signals-${safe}.json`);
+}
+
+/**
+ * Increment one or more signal counters for the given session.
+ * @param {string} sessionID - Claude session ID
+ * @param {Object} increments - e.g. { commits: 1 }
+ */
+function incrementSessionSignals(sessionID, increments) {
+  if (!sessionID || !increments) return;
+  try {
+    const p = _signalPath(sessionID);
+    let current = {};
+    try {
+      current = JSON.parse(fs.readFileSync(p, 'utf8'));
+    } catch {
+      // File doesn't exist yet — start fresh
+    }
+    for (const [key, delta] of Object.entries(increments)) {
+      current[key] = (current[key] || 0) + (Number(delta) || 0);
+    }
+    fs.writeFileSync(p, JSON.stringify(current), 'utf8');
+  } catch {
+    // Signal tracking is best-effort; never throw
+  }
+}
+
+/**
+ * Read accumulated signal counters for the given session.
+ * Returns an empty object when no signals have been recorded.
+ * @param {string} sessionID - Claude session ID
+ * @returns {Object}
+ */
+function getSessionSignals(sessionID) {
+  if (!sessionID) return {};
+  try {
+    const p = _signalPath(sessionID);
+    return JSON.parse(fs.readFileSync(p, 'utf8'));
+  } catch {
+    return {};
+  }
+}
+
+/**
+ * Delete the signal file for the given session (call after stop).
+ * @param {string} sessionID - Claude session ID
+ */
+function clearSessionSignals(sessionID) {
+  if (!sessionID) return;
+  try {
+    fs.unlinkSync(_signalPath(sessionID));
+  } catch {
+    // File may not exist — ignore
+  }
+}
+
 module.exports = {
   getServerURL,
   ProjectIDWithName,
@@ -320,4 +403,7 @@ module.exports = {
   RunHook,
   RunStatuslineHook,
   writeResponse,
+  incrementSessionSignals,
+  getSessionSignals,
+  clearSessionSignals,
 };
