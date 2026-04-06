@@ -85,6 +85,12 @@ async function handleUserPrompt(ctx, input) {
     // Behavioral rules: inject compact titles only (not full narrative).
     // Session-start injects full rules once. After compaction, those may be lost.
     // This lightweight reminder (~300-500 tokens) ensures rules survive compaction.
+    //
+    // Exception: when PostCompact sets a "compacted" signal, we inject FULL rules
+    // (title + narrative) instead of compact titles. PostCompact cannot inject
+    // context directly (hookSpecificOutput is a discriminated union that rejects
+    // non-PreToolUse/UserPromptSubmit/PostToolUse hooks), so it delegates to us
+    // via session signals.
     const allBehaviorRules = [...alwaysInjectRules, ...behaviorRules];
     const seenRuleIds = new Set();
     const uniqueRules = [];
@@ -95,13 +101,39 @@ async function handleUserPrompt(ctx, input) {
       uniqueRules.push(rule);
     }
 
+    // Check if PostCompact signaled that context was compacted
+    const signals = lib.getSessionSignals(ctx.SessionID);
+    const wasCompacted = signals && signals.compacted > 0;
+    if (wasCompacted) {
+      // Reset compacted signal so subsequent prompts use compact format
+      lib.incrementSessionSignals(ctx.SessionID, { compacted: -(signals.compacted || 0) });
+    }
+
     let behaviorRulesBlock = '';
     if (uniqueRules.length > 0) {
-      behaviorRulesBlock = '<behavioral-rules>\n';
-      for (const rule of uniqueRules.slice(0, 20)) {
-        behaviorRulesBlock += `- ${escapeXmlTags(asString(rule.title))}\n`;
+      if (wasCompacted) {
+        // Full rules after compaction (title + narrative, ~2-3K tokens)
+        behaviorRulesBlock = '<user-behavior-rules>\n';
+        behaviorRulesBlock += '# Behavioral Rules (Re-injected After Compaction)\n';
+        behaviorRulesBlock += 'These rules were originally injected at session start. Re-injected because context was compacted.\n\n';
+        for (const rule of uniqueRules.slice(0, 20)) {
+          if (!rule || typeof rule !== 'object') continue;
+          behaviorRulesBlock += `## ${escapeXmlTags(asString(rule.title))}\n`;
+          const narrative = escapeXmlTags(asString(rule.narrative));
+          if (narrative !== '') {
+            behaviorRulesBlock += `${narrative}\n`;
+          }
+          behaviorRulesBlock += '\n';
+        }
+        behaviorRulesBlock += '</user-behavior-rules>\n';
+      } else {
+        // Compact titles for regular prompts (~300-500 tokens)
+        behaviorRulesBlock = '<behavioral-rules>\n';
+        for (const rule of uniqueRules.slice(0, 20)) {
+          behaviorRulesBlock += `- ${escapeXmlTags(asString(rule.title))}\n`;
+        }
+        behaviorRulesBlock += '</behavioral-rules>\n';
       }
-      behaviorRulesBlock += '</behavioral-rules>\n';
     }
 
     // Filter out observations with negligible similarity (noise from global scope leak).

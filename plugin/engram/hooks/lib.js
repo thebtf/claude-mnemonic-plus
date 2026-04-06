@@ -138,12 +138,12 @@ function writeResponse(hookName, additionalContext) {
           hookEventName: hookName,
           additionalContext,
         };
-      } else {
-        // Hooks outside the discriminated union: omit hookEventName.
-        response.hookSpecificOutput = {
-          additionalContext,
-        };
       }
+      // Non-union hooks (PostCompact, PreCompact, Stop, etc.):
+      // hookSpecificOutput is NOT valid — CC rejects any object that
+      // doesn't match the discriminated union.  Context must be
+      // delivered through an alternative channel (e.g. session signals
+      // consumed by UserPromptSubmit on the next turn).
     }
 
     process.stdout.write(`${JSON.stringify(response)}\n`);
