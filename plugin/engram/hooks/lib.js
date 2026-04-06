@@ -119,14 +119,31 @@ function readAllStdin() {
   });
 }
 
+// Claude Code validates hookSpecificOutput as a discriminated union by hookEventName.
+// Only PreToolUse, UserPromptSubmit, PostToolUse have defined schemas with hookEventName.
+// Other hooks (PostCompact, SessionStart, etc.) must omit hookEventName entirely
+// and send only { additionalContext } to pass validation.
+const HOOKS_WITH_EVENT_NAME = new Set([
+  'PreToolUse',
+  'UserPromptSubmit',
+  'PostToolUse',
+]);
+
 function writeResponse(hookName, additionalContext) {
   try {
     const response = { continue: true };
     if (typeof additionalContext === 'string' && additionalContext !== '') {
-      response.hookSpecificOutput = {
-        hookEventName: hookName,
-        additionalContext,
-      };
+      if (HOOKS_WITH_EVENT_NAME.has(hookName)) {
+        response.hookSpecificOutput = {
+          hookEventName: hookName,
+          additionalContext,
+        };
+      } else {
+        // Hooks outside the discriminated union: omit hookEventName.
+        response.hookSpecificOutput = {
+          additionalContext,
+        };
+      }
     }
 
     process.stdout.write(`${JSON.stringify(response)}\n`);
