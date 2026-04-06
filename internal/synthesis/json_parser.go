@@ -89,7 +89,7 @@ func validateExtractionResult(result *ExtractionResult) (*ExtractionResult, erro
 			continue
 		}
 		if !entityNames[strings.ToLower(from)] && !entityNames[strings.ToLower(to)] {
-			continue // skip relations where neither endpoint is a known entity
+			continue // skip relations where NEITHER endpoint is a known entity (at least one must be)
 		}
 		validRels = append(validRels, Relation{
 			From:    from,

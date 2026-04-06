@@ -10,11 +10,16 @@ import (
 	"github.com/thebtf/engram/pkg/strutil"
 )
 
+// maxObservationsPerBatch is the maximum number of observations sent to the LLM in a single
+// extraction call. This is separate from config.EntityExtractionLimit, which controls how
+// many observations are fetched per maintenance cycle.
+const maxObservationsPerBatch = 10
+
 // EntityExtractor extracts structured entities from observations via LLM.
 type EntityExtractor struct{}
 
 // Extract processes a batch of observations and returns extracted entities and relations.
-// Observations are capped at 10 per call, with narrative truncated to 200 chars.
+// Observations are capped at maxObservationsPerBatch per call, with narrative truncated to 200 chars.
 func (e *EntityExtractor) Extract(ctx context.Context, llm learning.LLMClient, observations []*models.Observation) (*ExtractionResult, error) {
 	if llm == nil {
 		return nil, fmt.Errorf("LLM client not available")
@@ -24,8 +29,8 @@ func (e *EntityExtractor) Extract(ctx context.Context, llm learning.LLMClient, o
 	}
 
 	limit := len(observations)
-	if limit > 10 {
-		limit = 10
+	if limit > maxObservationsPerBatch {
+		limit = maxObservationsPerBatch
 	}
 
 	var sb strings.Builder

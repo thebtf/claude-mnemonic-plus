@@ -25,8 +25,8 @@ type ExtractionResult struct {
 
 // WikiResult holds the LLM wiki generation output.
 type WikiResult struct {
-	EntityName string
-	Content    string
+	EntityName string `json:"entity_name"`
+	Content    string `json:"content"`
 }
 
 // EntityMetadata is the JSONB metadata stored on entity-type observations.
@@ -55,8 +55,8 @@ type WikiMetadata struct {
 
 // WikiIndexEntry represents one entry in the wiki index.md file.
 type WikiIndexEntry struct {
-	EntityName string
-	EntityType string
-	Slug       string
-	SourceCount int
+	EntityName  string `json:"entity_name"`
+	EntityType  string `json:"entity_type"`
+	Slug        string `json:"slug"`
+	SourceCount int    `json:"source_count"`
 }

@@ -75,8 +75,8 @@ func (s *Service) generateWikiPages(ctx context.Context) (int, error) {
 		_ = db.WithContext(ctx).
 			Table("observations").
 			Select("id, COALESCE(narrative, '') as narrative").
-			Where("type = 'wiki' AND LOWER(title) = ? AND project = ? AND is_superseded = 0",
-				fmt.Sprintf("wiki: %s", lower(entity.Title)), entity.Project).
+			Where("type = 'wiki' AND LOWER(title) = LOWER(?) AND project = ? AND is_superseded = 0",
+				fmt.Sprintf("Wiki: %s", entity.Title), entity.Project).
 			Row().Scan(&existingWikiID, &existingNarrative)
 
 		if existingWikiID > 0 {
@@ -188,15 +188,3 @@ func (s *Service) getSourceObservations(ctx context.Context, ids []int64) ([]*mo
 	return s.observationStore.GetObservationsByIDs(ctx, ids, "created_at_epoch DESC", 10)
 }
 
-// lower returns the lowercase version of a string.
-func lower(s string) string {
-	result := make([]byte, len(s))
-	for i := 0; i < len(s); i++ {
-		c := s[i]
-		if c >= 'A' && c <= 'Z' {
-			c += 'a' - 'A'
-		}
-		result[i] = c
-	}
-	return string(result)
-}

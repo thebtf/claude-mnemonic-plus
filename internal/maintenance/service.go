@@ -485,6 +485,8 @@ func (s *Service) runMaintenance(ctx context.Context) {
 	// Task 22: Wiki generation for entities with sufficient sources (synthesize-wiki-layer FR-2)
 	// Generates LLM wiki summaries, stores as type=wiki, writes markdown to disk.
 	// Runs AFTER Task 21 so newly created entities can be considered.
+	// Note: Gated by EntityExtractionEnabled because wiki pages are derived from entities;
+	// disabling entity extraction also disables wiki generation to keep the pipeline consistent.
 	if s.llmClient != nil && s.config.EntityExtractionEnabled {
 		wikiGenerated, err := s.generateWikiPages(ctx)
 		if err != nil {

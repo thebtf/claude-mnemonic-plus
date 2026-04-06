@@ -28,9 +28,8 @@ func (w *WikiGenerator) Generate(ctx context.Context, llm learning.LLMClient, en
 		entityName = entity.Title.String
 	}
 	entityDesc := ""
-	if entity.Narrative.Valid {
-		// Narrative contains EntityMetadata JSON — extract entity_type for context
-		entityDesc = entity.Subtitle.String // subtitle has entity_type
+	if entity.Subtitle.Valid {
+		entityDesc = entity.Subtitle.String // subtitle stores entity_type (technology, concept, etc.)
 	}
 
 	if entityName == "" {

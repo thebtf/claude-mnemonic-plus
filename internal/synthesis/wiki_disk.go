@@ -17,8 +17,8 @@ func EntitySlug(name string) string {
 	slug := strings.ToLower(strings.TrimSpace(name))
 	slug = slugRE.ReplaceAllString(slug, "-")
 	slug = strings.Trim(slug, "-")
-	if len(slug) > 60 {
-		slug = slug[:60]
+	if runes := []rune(slug); len(runes) > 60 {
+		slug = string(runes[:60])
 	}
 	if slug == "" {
 		slug = "unknown"
@@ -26,9 +26,20 @@ func EntitySlug(name string) string {
 	return slug
 }
 
+// escapeMarkdownCell escapes characters that would break a markdown table cell.
+func escapeMarkdownCell(s string) string {
+	s = strings.ReplaceAll(s, "|", `\|`)
+	s = strings.ReplaceAll(s, "[", `\[`)
+	s = strings.ReplaceAll(s, "]", `\]`)
+	return s
+}
+
 // WriteWikiToDisk writes a wiki page as markdown to {dataDir}/wiki/{slug}.md.
 // Creates the wiki directory if it doesn't exist.
 func WriteWikiToDisk(dataDir, entityName, entityType, content string, sourceCount int) error {
+	if dataDir == "" {
+		return fmt.Errorf("dataDir cannot be empty")
+	}
 	wikiDir := filepath.Join(dataDir, "wiki")
 	if err := os.MkdirAll(wikiDir, 0755); err != nil {
 		return fmt.Errorf("create wiki directory: %w", err)
@@ -51,6 +62,9 @@ func WriteWikiToDisk(dataDir, entityName, entityType, content string, sourceCoun
 
 // UpdateWikiIndex regenerates the index.md file listing all wiki pages.
 func UpdateWikiIndex(dataDir string, entries []WikiIndexEntry) error {
+	if dataDir == "" {
+		return fmt.Errorf("dataDir cannot be empty")
+	}
 	wikiDir := filepath.Join(dataDir, "wiki")
 	if err := os.MkdirAll(wikiDir, 0755); err != nil {
 		return fmt.Errorf("create wiki directory: %w", err)
@@ -66,7 +80,7 @@ func UpdateWikiIndex(dataDir string, entries []WikiIndexEntry) error {
 	for _, e := range entries {
 		slug := EntitySlug(e.EntityName)
 		sb.WriteString(fmt.Sprintf("| %s | %s | %d | [%s.md](%s.md) |\n",
-			e.EntityName, e.EntityType, e.SourceCount, slug, slug))
+			escapeMarkdownCell(e.EntityName), escapeMarkdownCell(e.EntityType), e.SourceCount, slug, slug))
 	}
 
 	sb.WriteString("\n")

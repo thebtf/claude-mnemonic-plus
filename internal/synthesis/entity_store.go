@@ -64,7 +64,13 @@ func StoreEntities(ctx context.Context, p StoreEntitiesParams) (*StoreEntitiesRe
 		if err == nil && existingID > 0 {
 			// Update existing: merge metadata
 			var existingMeta EntityMetadata
-			_ = json.Unmarshal([]byte(existingNarrative), &existingMeta)
+			if unmarshalErr := json.Unmarshal([]byte(existingNarrative), &existingMeta); unmarshalErr != nil {
+				// Corrupted metadata: skip merge to avoid overwriting with zero values.
+				// The entity record will be left unchanged for this extraction cycle.
+				counts.Updated++
+				entityIDsByName[strings.ToLower(entity.Name)] = existingID
+				continue
+			}
 
 			existingMeta.ObservationCount += len(p.SourceIDs)
 			existingMeta.SourceObservationIDs = appendUnique(existingMeta.SourceObservationIDs, p.SourceIDs)
@@ -86,9 +92,10 @@ func StoreEntities(ctx context.Context, p StoreEntitiesParams) (*StoreEntitiesRe
 			nowEpoch := time.Now().UnixMilli()
 			conceptsJSON, _ := json.Marshal([]string{"entity", entity.Type})
 
-			result := p.DB.WithContext(ctx).Exec(
+			var newID int64
+			if err := p.DB.WithContext(ctx).Raw(
 				`INSERT INTO observations (project, scope, type, source_type, title, subtitle, narrative, concepts, created_at, created_at_epoch, is_superseded, is_archived)
-				 VALUES (?, ?, 'entity', 'llm_derived', ?, ?, ?, ?, ?, ?, 0, 0)`,
+				 VALUES (?, ?, 'entity', 'llm_derived', ?, ?, ?, ?, ?, ?, 0, 0) RETURNING id`,
 				p.Project,
 				models.DetermineScope([]string{"entity", entity.Type}),
 				entity.Name,
@@ -97,21 +104,10 @@ func StoreEntities(ctx context.Context, p StoreEntitiesParams) (*StoreEntitiesRe
 				string(conceptsJSON),
 				time.Now().Format(time.RFC3339),
 				nowEpoch,
-			)
-			if result.Error != nil {
-				return nil, fmt.Errorf("store entity %q: %w", entity.Name, result.Error)
+			).Scan(&newID).Error; err != nil {
+				return nil, fmt.Errorf("store entity %q: %w", entity.Name, err)
 			}
-
-			// Get the inserted ID
-			var newID int64
-			if err := p.DB.WithContext(ctx).
-				Table("observations").
-				Select("id").
-				Where("title = ? AND project = ? AND type = 'entity' AND created_at_epoch = ?",
-					entity.Name, p.Project, nowEpoch).
-				Row().Scan(&newID); err == nil {
-				entityIDsByName[strings.ToLower(entity.Name)] = newID
-			}
+			entityIDsByName[strings.ToLower(entity.Name)] = newID
 
 			counts.Created++
 		}

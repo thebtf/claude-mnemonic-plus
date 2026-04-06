@@ -8,6 +8,7 @@ import (
 
 	"github.com/thebtf/engram/internal/synthesis"
 	"github.com/thebtf/engram/pkg/models"
+	"gorm.io/gorm"
 )
 
 // extractEntities finds recent observations not yet processed for entity extraction,
@@ -45,7 +46,7 @@ func (s *Service) extractEntities(ctx context.Context) (int, error) {
 		Where("created_at_epoch >= ?", cutoff).
 		Where("type NOT IN ('entity', 'wiki', 'credential')").
 		Where("is_superseded = 0 AND is_archived = 0").
-		Where("COALESCE(subtitle, '') NOT LIKE '%entity_extracted%'").
+		Where("NOT (concepts @> '\"entity_extracted\"'::jsonb)").
 		Order("created_at_epoch DESC").
 		Limit(limit).
 		Find(&observations).Error
@@ -131,17 +132,19 @@ func (s *Service) extractEntities(ctx context.Context) (int, error) {
 	return totalEntities, nil
 }
 
-// markEntityExtracted marks observations as processed by appending to subtitle.
+// markEntityExtracted marks observations as processed by appending "entity_extracted"
+// to their concepts array. Uses JSONB append to avoid overwriting existing data.
 func (s *Service) markEntityExtracted(ctx context.Context, ids []int64) {
 	if len(ids) == 0 {
 		return
 	}
 	db := s.store.GetDB()
-	// Use subtitle field as a lightweight flag (avoids schema changes per NFR-5)
+	// Append "entity_extracted" concept via JSONB concatenation (no schema change per NFR-5).
+	// Avoids overwriting subtitle or other fields.
 	if err := db.WithContext(ctx).
 		Table("observations").
 		Where("id IN ?", ids).
-		Update("subtitle", fmt.Sprintf("entity_extracted:%d", time.Now().Unix())).Error; err != nil {
+		Update("concepts", gorm.Expr(`concepts || '["entity_extracted"]'::jsonb`)).Error; err != nil {
 		s.log.Warn().Err(err).Msg("Failed to mark observations as entity-extracted")
 	}
 }
