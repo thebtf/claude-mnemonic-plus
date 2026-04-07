@@ -49,10 +49,10 @@ type AssociationConfig struct {
 func DefaultAssociationConfig() AssociationConfig {
 	return AssociationConfig{
 		SampleSize:           50,
-		ThemeSimilarity:      0.7,
+		ThemeSimilarity:      0.55, // Lowered from 0.7 — matches ClusteringThreshold (if similar enough to cluster, similar enough to share theme)
 		ExplainSimilarity:    0.5,
-		ParallelMaxDays:      7,
-		ParallelMaxSim:       0.4,
+		ParallelMaxDays:      14,  // Widened from 7 — capture observations from same 2-week sprint
+		ParallelMaxSim:       0.5, // Widened from 0.4 — more temporal co-occurrence pairs
 		ContradictMaxSim:     0.3,
 		MinConfidence:        0.4,
 		ContradictConfidence: 0.6,
