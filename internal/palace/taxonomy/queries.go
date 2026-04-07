@@ -41,11 +41,10 @@ func GetTaxonomy(ctx context.Context, db *gorm.DB, project string) ([]TaxonomyNo
 
 // TaxonomyStats holds aggregate statistics for the taxonomy.
 type TaxonomyStats struct {
-	Projects           int `json:"projects"`
-	Types              int `json:"types"`
-	Concepts           int `json:"concepts"`
-	Tunnels            int `json:"tunnels"`
-	TotalObservations  int `json:"total_observations"`
+	Projects          int `json:"projects"`
+	Types             int `json:"types"`
+	Concepts          int `json:"concepts"`
+	TotalObservations int `json:"total_observations"`
 }
 
 // GetStats returns aggregate taxonomy statistics.

@@ -12,6 +12,7 @@ import (
 	"github.com/thebtf/engram/internal/palace/aaak"
 	"github.com/thebtf/engram/internal/palace/mining"
 	"github.com/thebtf/engram/internal/palace/taxonomy"
+	"github.com/thebtf/engram/internal/synthesis"
 	"github.com/thebtf/engram/pkg/models"
 )
 
@@ -190,7 +191,8 @@ func (s *Server) handleMine(ctx context.Context, args json.RawMessage) (string, 
 				Concepts:   r.Concepts,
 			}
 
-			_, _, storeErr := s.observationStore.StoreObservation(ctx, "", project, parsed, 0, 0)
+			mineSessionID := "mine-" + r.SourceHash[:12]
+			_, _, storeErr := s.observationStore.StoreObservation(ctx, mineSessionID, project, parsed, 0, 0)
 			if storeErr != nil {
 				log.Warn().Err(storeErr).Msg("mine: failed to store observation")
 				skipped++
@@ -399,26 +401,18 @@ func (s *Server) handleSetAAKCode(ctx context.Context, args json.RawMessage) (st
 		return "", fmt.Errorf("set_aaak_code: entity %q not found", entityName)
 	}
 
-	// Update narrative JSON with new aaak_code
+	// Parse narrative as EntityMetadata JSON, update aaak_code, re-marshal.
+	var meta synthesis.EntityMetadata
 	oldCode := ""
-	if idx := strings.Index(narrative, `"aaak_code":"`); idx >= 0 {
-		start := idx + len(`"aaak_code":"`)
-		end := strings.Index(narrative[start:], `"`)
-		if end > 0 {
-			oldCode = narrative[start : start+end]
-		}
+	if err := json.Unmarshal([]byte(narrative), &meta); err != nil {
+		// If narrative isn't valid EntityMetadata JSON, create minimal metadata
+		meta = synthesis.EntityMetadata{}
 	}
-
-	// Simple JSON field injection/replacement
+	oldCode = meta.AAKCode
 	newCode = strings.ToUpper(newCode)
-	if strings.Contains(narrative, `"aaak_code"`) {
-		// Replace existing
-		narrative = strings.Replace(narrative, fmt.Sprintf(`"aaak_code":"%s"`, oldCode), fmt.Sprintf(`"aaak_code":"%s"`, newCode), 1)
-	} else if strings.HasSuffix(strings.TrimSpace(narrative), "}") {
-		// Inject before closing brace
-		narrative = strings.TrimSpace(narrative)
-		narrative = narrative[:len(narrative)-1] + fmt.Sprintf(`,"aaak_code":"%s"}`, newCode)
-	}
+	meta.AAKCode = newCode
+	updatedJSON, _ := json.Marshal(meta)
+	narrative = string(updatedJSON)
 
 	if err := db.WithContext(ctx).
 		Table("observations").

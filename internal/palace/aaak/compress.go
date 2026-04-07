@@ -63,7 +63,7 @@ func extractEntityCodes(text string, codes map[string]string) []string {
 
 // extractKeyQuote finds the most information-dense sentence in the text.
 // Uses a simple heuristic: longest sentence with proper nouns or technical terms,
-// truncated to 80 chars.
+// truncated to 40 chars for token efficiency.
 func extractKeyQuote(text string) string {
 	sentences := strings.FieldsFunc(text, func(r rune) bool {
 		return r == '.' || r == '!' || r == '?'

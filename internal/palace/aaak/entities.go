@@ -3,7 +3,8 @@ package aaak
 import (
 	"context"
 	"fmt"
-	"math/rand"
+	cryptorand "crypto/rand"
+	"encoding/binary"
 	"strings"
 
 	"gorm.io/gorm"
@@ -49,12 +50,15 @@ func GenerateCode(name string, existing map[string]bool) string {
 		}
 	}
 
-	// Attempt 3: random 3-char uppercase codes
+	// Attempt 3: random 3-char uppercase codes (crypto/rand for uniqueness)
 	for i := 0; i < 100; i++ {
+		var buf [2]byte
+		_, _ = cryptorand.Read(buf[:])
+		n := binary.LittleEndian.Uint16(buf[:])
 		code := string([]byte{
-			byte('A' + rand.Intn(26)),
-			byte('A' + rand.Intn(26)),
-			byte('A' + rand.Intn(26)),
+			byte('A' + n%26),
+			byte('A' + (n/26)%26),
+			byte('A' + (n/676)%26),
 		})
 		if !existing[code] {
 			return code
