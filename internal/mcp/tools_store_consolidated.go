@@ -184,7 +184,9 @@ func (s *Server) handleExtractAndOperate(ctx context.Context, args json.RawMessa
 
 		// If UPDATE: supersede existing observation.
 		if dedupResult != nil && dedupResult.Action == dedup.ActionUpdate && dedupResult.ExistingID > 0 {
-			_ = s.observationStore.MarkAsSuperseded(ctx, dedupResult.ExistingID)
+			if supersErr := s.observationStore.MarkAsSuperseded(ctx, dedupResult.ExistingID); supersErr != nil {
+				log.Warn().Err(supersErr).Int64("id", dedupResult.ExistingID).Msg("extract: failed to mark superseded")
+			}
 			if s.relationStore != nil {
 				_, _ = s.relationStore.StoreRelation(ctx, &models.ObservationRelation{
 					SourceID:     obsID,
