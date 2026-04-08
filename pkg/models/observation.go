@@ -274,6 +274,7 @@ type ParsedObservation struct {
 	Narrative                string
 	Scope                    ObservationScope
 	AgentID                  string
+	AgentSource              AgentSource
 	Facts                    []string
 	Concepts                 []string
 	FilesRead                []string
@@ -300,6 +301,7 @@ func (p *ParsedObservation) ToStoredObservation() *Observation {
 		FilesModified: p.FilesModified,
 		FileMtimes:    p.FileMtimes,
 		AgentID:       p.AgentID,
+		AgentSource:   p.AgentSource,
 	}
 }
 
@@ -471,6 +473,7 @@ func NewObservation(sdkSessionID, project string, parsed *ParsedObservation, pro
 		Project:         project,
 		Scope:           scope,
 		AgentID:         parsed.AgentID,
+		AgentSource:     parsed.AgentSource,
 		Type:            parsed.Type,
 		MemoryType:      ClassifyMemoryType(parsed),
 		SourceType:      parsed.SourceType,
