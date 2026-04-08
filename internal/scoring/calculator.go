@@ -47,11 +47,16 @@ func (c *Calculator) CalculateComponents(obs *models.Observation, now time.Time)
 	typeWeight := models.TypeBaseScore(obs.Type)
 
 	// 2. Calculate recency decay: 0.5^(age_days / half_life_days)
+	// Source-aware: look up half-life by observation's source_type, fall back to global default.
 	ageDays := now.Sub(time.UnixMilli(obs.CreatedAtEpoch)).Hours() / 24.0
 	if ageDays < 0 {
 		ageDays = 0 // Handle future timestamps gracefully
 	}
-	recencyDecay := math.Pow(0.5, ageDays/c.config.RecencyHalfLifeDays)
+	halfLifeDays := c.config.RecencyHalfLifeDays // fallback
+	if hl, ok := c.config.SourceHalfLives[obs.SourceType]; ok {
+		halfLifeDays = hl
+	}
+	recencyDecay := math.Pow(0.5, ageDays/halfLifeDays)
 
 	// Core score = 1.0 × type_weight × recency_decay
 	coreScore := 1.0 * typeWeight * recencyDecay
