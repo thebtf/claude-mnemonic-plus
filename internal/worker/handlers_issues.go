@@ -158,16 +158,28 @@ func (s *Service) handleUpdateIssue(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if req.Status != "" {
-		if req.Status != "resolved" {
-			http.Error(w, `{"error": "status can only be set to 'resolved' via update"}`, http.StatusBadRequest)
-			return
-		}
-		if err := s.issueStore.UpdateIssueStatus(r.Context(), id, req.Status); err != nil {
-			if strings.Contains(err.Error(), "not found") {
-				http.Error(w, `{"error": "issue not found"}`, http.StatusNotFound)
+		switch req.Status {
+		case "resolved":
+			if err := s.issueStore.UpdateIssueStatus(r.Context(), id, req.Status); err != nil {
+				if strings.Contains(err.Error(), "not found") {
+					http.Error(w, `{"error": "issue not found"}`, http.StatusNotFound)
+					return
+				}
+				http.Error(w, fmt.Sprintf(`{"error": %q}`, err.Error()), http.StatusInternalServerError)
 				return
 			}
-			http.Error(w, fmt.Sprintf(`{"error": %q}`, err.Error()), http.StatusInternalServerError)
+		case "reopened":
+			if err := s.issueStore.ReopenIssue(r.Context(), id, req.Comment, req.SourceProject, req.SourceAgent); err != nil {
+				if strings.Contains(err.Error(), "not found") {
+					http.Error(w, `{"error": "issue not found"}`, http.StatusNotFound)
+					return
+				}
+				http.Error(w, fmt.Sprintf(`{"error": %q}`, err.Error()), http.StatusInternalServerError)
+				return
+			}
+			req.Comment = "" // ReopenIssue already adds comment
+		default:
+			http.Error(w, `{"error": "status must be 'resolved' or 'reopened'"}`, http.StatusBadRequest)
 			return
 		}
 	}

@@ -74,7 +74,8 @@
     "memory_store",
     "memory_forget",
     "memory_get",
-    "memory_migrate"
+    "memory_migrate",
+    "engram_issues"
   ],
   "commands": [
     "memory",

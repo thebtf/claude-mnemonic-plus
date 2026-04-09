@@ -343,26 +343,43 @@ Engram is your permanent memory store. Memories saved here persist across ALL se
 
 **Steps 4-6 are NOT optional.** Every completed task produces knowledge. Store it or it is lost forever.
 
-## 7 Tools
+## 8 Tools
 
 | Tool | Purpose | Key Actions |
 |------|---------|-------------|
 | ` + "`recall`" + ` | **Search & retrieve** memories | search (default), preset, by_file, by_concept, by_type, similar, timeline, related, patterns, get, sessions, explain, reasoning |
 | ` + "`store`" + ` | **Save** memories, edit, merge, extract | create (default), edit, merge, import, extract |
 | ` + "`feedback`" + ` | **Rate** quality, suppress, record outcomes | rate, suppress, outcome |
+| ` + "`issues`" + ` | **Cross-project issue tracking** between agents | create, list, get, update, comment, reopen |
 | ` + "`vault`" + ` | **Credentials** — encrypted AES-256-GCM | store, get, list, delete, status |
 | ` + "`docs`" + ` | **Documents** — versioned docs & collections | create, read, list, history, comment, collections, documents, get_doc, remove, ingest, search_docs |
 | ` + "`admin`" + ` | **Bulk ops**, maintenance, analytics | bulk_delete, bulk_supersede, tag, graph, stats, trends, quality, export, maintenance, ... |
 | ` + "`check_system_health`" + ` | **Health** check of all subsystems | (no params) |
 
+## Issues — Cross-Project Agent Coordination
+
+The ` + "`issues`" + ` tool is for tracking bugs, feature requests, and tasks between agents across projects.
+**Do NOT use ` + "`store`" + ` or ` + "`docs`" + ` for issues** — they lack lifecycle management (status, priority, comments).
+
+**Create an issue:** ` + "`issues(action=\"create\", title=\"...\", body=\"...\", priority=\"high\", target_project=\"other-project\")`" + `
+**List issues:** ` + "`issues(action=\"list\")`" + ` or ` + "`issues(action=\"list\", target_project=\"...\", status=\"open,acknowledged\")`" + `
+**Comment:** ` + "`issues(action=\"comment\", id=N, body=\"...\")`" + `
+**Resolve:** ` + "`issues(action=\"update\", id=N, status=\"resolved\", body=\"Fixed in commit abc123\")`" + `
+**Reopen:** ` + "`issues(action=\"reopen\", id=N, body=\"Still broken after fix\")`" + `
+
+Issues are automatically injected into sessions for agents working on the target project.
+Lifecycle: open → acknowledged (auto on injection) → resolved (explicit) ⟲ reopened.
+
 ## What to Store
 
 After completing work, store observations about:
 - **Decisions made** and WHY (architecture, library choices, trade-offs)
-- **Bugs found** and their root cause (prevents recurrence)
+- **Bugs found** in the CURRENT project and their root cause (prevents recurrence)
 - **Patterns discovered** (recurring code structures, project conventions)
 - **Lessons learned** (what worked, what failed, what to avoid)
 - **File knowledge** (what a file does, gotchas, non-obvious behavior)
+
+**Bugs/tasks for OTHER projects → use ` + "`issues`" + `**, not ` + "`store`" + `.** ` + "`store`" + ` is for knowledge. ` + "`issues`" + ` is for actionable work items.
 
 Use ` + "`store(action=\"extract\", content=\"...\")`" + ` to let the LLM extract structured observations from raw content automatically.
 
@@ -373,8 +390,14 @@ Use ` + "`store(action=\"extract\", content=\"...\")`" + ` to let the LLM extrac
 **After completing a feature:** ` + "`store(content=\"...\", title=\"...\", type=\"decision\")`" + ` — capture what was built and why.
 **After fixing a bug:** ` + "`store(content=\"...\", title=\"...\", type=\"discovery\")`" + ` — capture root cause and fix.
 **After research:** ` + "`store(content=\"...\", title=\"...\", type=\"insight\")`" + ` — capture findings.
+**Found a bug in another project:** ` + "`issues(action=\"create\", title=\"...\", target_project=\"...\", priority=\"high\")`" + ` — NOT store.
 **Debugging:** ` + "`recall(action=\"related\", id=N)`" + ` to trace cause chains.
 **Secrets:** ` + "`vault(action=\"store\")`" + ` for API keys. Never store secrets in observations.
+
+## Advanced: All Tools
+
+By default, engram exposes 9 consolidated tools (above). Each tool supports multiple actions.
+If you need the full expanded tool list (50+ individual tools), call ` + "`tools/list`" + ` with ` + "`include_all: true`" + `.
 
 `
 
@@ -500,6 +523,27 @@ func (s *Server) primaryTools() []Tool {
 					"remove":  map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "Tags to remove (for tag)"},
 					"pattern": map[string]any{"type": "string", "description": "Search pattern (for batch_tag)"},
 					"days":    map[string]any{"type": "number", "description": "Days to analyze (for trends)"},
+				},
+			},
+		},
+		{
+			Name:        "issues",
+			Description: "Cross-project issue tracking between agents. Use to report bugs, request features, or leave tasks for agents in other projects. Do NOT use store or docs for issues. Issues are automatically injected into target project sessions. Actions: create, list, get, update, comment, reopen.",
+			tier:        tierCore,
+			InputSchema: map[string]any{
+				"type":     "object",
+				"required": []string{"action"},
+				"properties": map[string]any{
+					"action":         map[string]any{"type": "string", "enum": []string{"create", "list", "get", "update", "comment", "reopen"}, "description": "Action to perform"},
+					"title":          map[string]any{"type": "string", "description": "Issue title (required for create)"},
+					"body":           map[string]any{"type": "string", "description": "Issue body or comment text"},
+					"priority":       map[string]any{"type": "string", "enum": []string{"critical", "high", "medium", "low"}, "default": "medium"},
+					"target_project": map[string]any{"type": "string", "description": "Target project slug (defaults to current project)"},
+					"labels":         map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "Labels (bug, feature, etc.)"},
+					"id":             map[string]any{"type": "integer", "description": "Issue ID (required for get/update/comment/reopen)"},
+					"status":         map[string]any{"type": "string", "enum": []string{"resolved"}, "description": "Set status (only 'resolved' via update)"},
+					"comment":        map[string]any{"type": "string", "description": "Comment to add with status change or reopen"},
+					"project":        map[string]any{"type": "string", "description": "Filter by project (for list action)"},
 				},
 			},
 		},
@@ -1476,8 +1520,22 @@ func (s *Server) handleToolsList(req *Request) *Response {
 		},
 	})
 
-	// Always return only the 7 primary tools. Legacy aliases are handled
-	// by callTool dispatch only — they don't appear in tools/list.
+	// include_all=true or cursor=all: return primary + all expanded secondary tools.
+	// Default: return only primary tools (9 consolidated). Legacy aliases are
+	// handled by callTool dispatch — they appear in tools/list only with include_all.
+	if listParams.IncludeAll || listParams.Cursor == "all" {
+		// Deduplicate: secondary tools list may contain names already in primary.
+		primaryNames := make(map[string]bool, len(primary))
+		for _, t := range primary {
+			primaryNames[t.Name] = true
+		}
+		for _, t := range tools {
+			if !primaryNames[t.Name] {
+				primary = append(primary, t)
+			}
+		}
+	}
+
 	return &Response{
 		JSONRPC: "2.0",
 		ID:      req.ID,

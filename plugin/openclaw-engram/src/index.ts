@@ -9,7 +9,7 @@
  *   - Transcript backfill on compaction / session end
  *   - Agent tools: engram_search, engram_remember, engram_decisions,
  *                  memory_search, memory_store, memory_forget, memory_get,
- *                  memory_migrate
+ *                  memory_migrate, engram_issues
  *   - Slash commands: /memory, /remember, /migrate
  *   - CLI: openclaw memory status|search|store|migrate
  */
@@ -48,6 +48,7 @@ import { createEngramFindByFileTool } from './tools/engram-find-by-file.js';
 import { createEngramTimelineTool } from './tools/engram-timeline.js';
 import { createEngramChangesTool, createEngramHowItWorksTool } from './tools/engram-presets.js';
 import { createEngramVaultStoreTool, createEngramVaultGetTool } from './tools/engram-vault.js';
+import { createEngramIssuesTool } from './tools/engram-issues.js';
 
 import { buildMemoryCommand } from './commands/memory.js';
 import { buildRememberCommand } from './commands/remember.js';
@@ -125,6 +126,7 @@ const plugin: OpenClawPluginDefinition = {
       createEngramHowItWorksTool(ctx, client, config),
       createEngramVaultStoreTool(ctx, client, config),
       createEngramVaultGetTool(ctx, client, config),
+      createEngramIssuesTool(ctx, client, config),
     ];
 
     api.registerTool(toolFactory, {

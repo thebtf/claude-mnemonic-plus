@@ -90,6 +90,68 @@ export interface DecisionSearchResponse {
 }
 
 // ---------------------------------------------------------------------------
+// Issue types
+// ---------------------------------------------------------------------------
+
+export interface Issue {
+  id: number;
+  title: string;
+  body: string;
+  status: string;
+  priority: string;
+  source_project: string;
+  target_project: string;
+  source_agent: string;
+  labels: string[];
+  comment_count?: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface IssueComment {
+  id: number;
+  issue_id: number;
+  author_project: string;
+  author_agent: string;
+  body: string;
+  created_at: string;
+}
+
+export interface IssueListResponse {
+  issues: Issue[];
+  total: number;
+}
+
+export interface IssueDetailResponse {
+  issue: Issue;
+  comments: IssueComment[];
+  comment_count: number;
+}
+
+export interface CreateIssueRequest {
+  title: string;
+  body?: string;
+  priority?: string;
+  source_project?: string;
+  target_project: string;
+  source_agent?: string;
+  created_by_session?: string;
+  labels?: string[];
+}
+
+export interface CreateIssueResponse {
+  id: number;
+  message: string;
+}
+
+export interface UpdateIssueRequest {
+  status?: string;
+  comment?: string;
+  source_project?: string;
+  source_agent?: string;
+}
+
+// ---------------------------------------------------------------------------
 // Client
 // ---------------------------------------------------------------------------
 
@@ -391,6 +453,37 @@ export class EngramRestClient {
    */
   async getCredential(name: string): Promise<{ name: string; value: string } | null> {
     return this.get<{ name: string; value: string }>(`/api/vault/credentials/${encodeURIComponent(name)}`);
+  }
+
+  // ---------------------------------------------------------------------------
+  // Issues — cross-project agent issue tracking
+  // ---------------------------------------------------------------------------
+
+  async listIssues(params: {
+    project?: string;
+    status?: string;
+    limit?: number;
+    offset?: number;
+  }): Promise<IssueListResponse | null> {
+    const qs = new URLSearchParams();
+    if (params.project) qs.set('project', params.project);
+    if (params.status) qs.set('status', params.status);
+    if (params.limit) qs.set('limit', String(params.limit));
+    if (params.offset) qs.set('offset', String(params.offset));
+    const query = qs.toString();
+    return this.get<IssueListResponse>(`/api/issues${query ? `?${query}` : ''}`);
+  }
+
+  async getIssue(id: number): Promise<IssueDetailResponse | null> {
+    return this.get<IssueDetailResponse>(`/api/issues/${id}`);
+  }
+
+  async createIssue(body: CreateIssueRequest): Promise<CreateIssueResponse | null> {
+    return this.post<CreateIssueResponse>('/api/issues', body);
+  }
+
+  async updateIssue(id: number, body: UpdateIssueRequest): Promise<{ message: string } | null> {
+    return this.request<{ message: string }>('PATCH', `/api/issues/${id}`, body);
   }
 
   /** Returns true if the server is currently considered reachable. */

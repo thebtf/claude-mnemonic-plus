@@ -413,7 +413,7 @@ func TestHandleToolsList(t *testing.T) {
 
 	// Primary consolidated tools must be present
 	primaryTools := []string{
-		"recall", "store", "feedback", "vault", "docs", "admin", "check_system_health",
+		"recall", "store", "feedback", "vault", "docs", "admin", "issues", "check_system_health",
 	}
 	for _, name := range primaryTools {
 		assert.True(t, toolNames[name], "expected primary tool %s to be present", name)
@@ -430,6 +430,27 @@ func TestHandleToolsList(t *testing.T) {
 	}
 
 	// No nextCursor — only primary tools returned, no pagination needed
+
+	// include_all=true should return primary + secondary tools
+	reqAll := &Request{
+		JSONRPC: "2.0",
+		ID:      2,
+		Method:  "tools/list",
+		Params:  json.RawMessage(`{"include_all": true}`),
+	}
+	respAll := server.handleToolsList(reqAll)
+	resultAll := respAll.Result.(map[string]any)
+	allTools := resultAll["tools"].([]Tool)
+	assert.Greater(t, len(allTools), len(primaryTools), "include_all should return more tools than primary")
+
+	allToolNames := make(map[string]bool)
+	for _, tool := range allTools {
+		allToolNames[tool.Name] = true
+	}
+	// Legacy tools should now be present
+	for _, name := range legacyTools {
+		assert.True(t, allToolNames[name], "legacy tool %s should be present with include_all=true", name)
+	}
 }
 
 // TestHandleRequest tests request routing.

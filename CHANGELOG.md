@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.4.1] - 2026-04-10
+
+### Fixed
+
+- **Issues tool not discoverable**: `issues` tool was registered in secondary tools list but not in `primaryTools()`, so `tools/list` never returned it. Agents could not see or use the issues tool. Now included in primary tools (9 consolidated tools).
+- **MCP instructions missing issues**: `buildInstructions()` described "7 Tools" without mentioning issues. Updated to "8 Tools" with dedicated Issues section, workflow examples, and anti-pattern guidance ("Do NOT use store or docs for issues").
+- **PATCH /api/issues/{id} missing reopen support**: Handler only accepted `status=resolved`. Added `status=reopened` which calls `ReopenIssue` — needed for openclaw-engram REST-based reopen.
+
+### Added
+
+- **`include_all` parameter for tools/list**: `tools/list` with `include_all: true` or `cursor=all` returns all 50+ expanded tools alongside primary tools. Default remains primary-only for context efficiency.
+- **openclaw-engram issues tool**: New `engram_issues` tool with 6 actions (create, list, get, update, comment, reopen) via REST API. Includes client methods, Zod validation, TypeBox schema.
+- **Plugin memory skill updated**: Issues section added to `plugin/engram/skills/memory/SKILL.md` with when-to-use guidance.
+
 ## [3.0.0] - 2026-04-06
 
 ### Added
