@@ -382,7 +382,7 @@ func (s *Server) primaryTools() []Tool {
 			InputSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"action":         map[string]any{"type": "string", "enum": []string{"search", "preset", "by_file", "by_concept", "by_type", "similar", "timeline", "related", "patterns", "get", "sessions", "explain", "reasoning"}, "default": "search", "description": "Action to perform"},
+					"action":         map[string]any{"type": "string", "enum": []string{"search", "preset", "by_file", "by_concept", "by_type", "similar", "timeline", "related", "patterns", "get", "sessions", "explain", "reasoning", "hit_rate"}, "default": "search", "description": "Action to perform"},
 					"query":          map[string]any{"type": "string", "description": "Search query (for search, preset, similar, timeline:query, sessions, explain)"},
 					"preset":         map[string]any{"type": "string", "enum": []string{"decisions", "changes", "how_it_works"}, "description": "Search preset (for action=preset)"},
 					"files":          map[string]any{"type": "string", "description": "File paths (for action=by_file)"},
@@ -1124,6 +1124,7 @@ func (s *Server) handleToolsList(req *Request) *Response {
 						"project":    map[string]any{"type": "string", "description": "Project ID (defaults to current)"},
 						"ttl_days":       map[string]any{"type": "integer", "minimum": 1, "description": "TTL in days for verified facts. Auto-computed from tags if not provided. Only applies to observations with 'verified' tag."},
 						"always_inject":  map[string]any{"type": "boolean", "description": "If true, this memory will be injected into every agent context regardless of query relevance. Use for behavioral rules that must always be present."},
+						"agent_source":   map[string]any{"type": "string", "enum": []string{"claude-code", "codex", "gemini", "other", "unknown"}, "description": "Which AI tool created this observation"},
 					},
 				},
 			},

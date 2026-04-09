@@ -6,6 +6,7 @@ import (
 	"database/sql/driver"
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"strings"
 	"time"
 )
@@ -24,6 +25,9 @@ const (
 	ObsTypeCredential  ObservationType = "credential"
 	ObsTypeEntity      ObservationType = "entity"
 	ObsTypeWiki        ObservationType = "wiki"
+	ObsTypePitfall     ObservationType = "pitfall"
+	ObsTypeOperational ObservationType = "operational"
+	ObsTypeTimeline    ObservationType = "timeline"
 )
 
 // MemoryType represents the classification for memory storage and retrieval.
@@ -64,7 +68,38 @@ const (
 	SourceBackfill         SourceType = "backfill"
 	SourceUnknown          SourceType = "unknown"
 	SourceManual           SourceType = "manual"
+	SourceCrossModel       SourceType = "cross_model"
 )
+
+// AgentSource represents which AI tool created an observation.
+type AgentSource string
+
+const (
+	AgentClaude  AgentSource = "claude-code"
+	AgentCodex   AgentSource = "codex"
+	AgentGemini  AgentSource = "gemini"
+	AgentOther   AgentSource = "other"
+	AgentUnknown AgentSource = "unknown"
+)
+
+// ValidAgentSources contains all valid agent source values for validation.
+var ValidAgentSources = []AgentSource{
+	AgentClaude,
+	AgentCodex,
+	AgentGemini,
+	AgentOther,
+	AgentUnknown,
+}
+
+// IsValidAgentSource checks if a string is a recognized agent source value.
+func IsValidAgentSource(s string) bool {
+	for _, v := range ValidAgentSources {
+		if string(v) == s {
+			return true
+		}
+	}
+	return false
+}
 
 // ClassifySourceType maps a Claude Code tool name to its source type.
 func ClassifySourceType(toolName string) SourceType {
@@ -190,6 +225,7 @@ type Observation struct {
 	Project         string           `db:"project" json:"project"`
 	Scope           ObservationScope `db:"scope" json:"scope"`
 	AgentID         string           `db:"agent_id" json:"agent_id,omitempty"`
+	AgentSource     AgentSource      `db:"agent_source" json:"agent_source,omitempty"`
 	Type            ObservationType  `db:"type" json:"type"`
 	MemoryType      MemoryType       `db:"memory_type" json:"memory_type"`
 	SourceType      SourceType       `db:"source_type" json:"source_type,omitempty"`
@@ -239,6 +275,7 @@ type ParsedObservation struct {
 	Narrative                string
 	Scope                    ObservationScope
 	AgentID                  string
+	AgentSource              AgentSource
 	Facts                    []string
 	Concepts                 []string
 	FilesRead                []string
@@ -265,6 +302,7 @@ func (p *ParsedObservation) ToStoredObservation() *Observation {
 		FilesModified: p.FilesModified,
 		FileMtimes:    p.FileMtimes,
 		AgentID:       p.AgentID,
+		AgentSource:   p.AgentSource,
 	}
 }
 
@@ -279,6 +317,45 @@ func DetermineScope(concepts []string) ObservationScope {
 		}
 	}
 	return ScopeProject
+}
+
+// scopePatterns maps regex patterns to scope tags for file path classification.
+var scopePatterns = []struct {
+	pattern *regexp.Regexp
+	scope   string
+}{
+	{regexp.MustCompile(`(?i)\.(tsx|jsx|vue|svelte|css|scss|less)$`), "scope:frontend"},
+	{regexp.MustCompile(`(?i)^(internal|cmd|pkg)/`), "scope:backend"},
+	{regexp.MustCompile(`(?i)(prompt|generation)`), "scope:prompts"},
+	{regexp.MustCompile(`(?i)(_test\.go|\.test\.[jt]sx?|_test\.py)$`), "scope:tests"},
+	{regexp.MustCompile(`(?i)(\.md$|^docs/)`), "scope:docs"},
+	{regexp.MustCompile(`(?i)\.(yaml|yml|toml)$`), "scope:config"},
+	{regexp.MustCompile(`(?i)(migration|migrate)`), "scope:migrations"},
+	{regexp.MustCompile(`(?i)(/api/|[/_]api[/_.]|handler|route)`), "scope:api"},
+	{regexp.MustCompile(`(?i)(/auth/|[/_]auth[/_.]|jwt|oauth)`), "scope:auth"},
+}
+
+// classifyFileScopes analyzes file paths and returns matching scope tags.
+func classifyFileScopes(filePaths []string) []string {
+	if len(filePaths) == 0 {
+		return nil
+	}
+	seen := make(map[string]struct{})
+	var scopes []string
+	for _, fp := range filePaths {
+		if fp == "" {
+			continue
+		}
+		for _, sp := range scopePatterns {
+			if sp.pattern.MatchString(fp) {
+				if _, ok := seen[sp.scope]; !ok {
+					seen[sp.scope] = struct{}{}
+					scopes = append(scopes, sp.scope)
+				}
+			}
+		}
+	}
+	return scopes
 }
 
 // ClassifyMemoryType classifies an observation into a memory bucket.
@@ -314,6 +391,7 @@ type ObservationJSON struct {
 	SDKSessionID    string           `json:"sdk_session_id"`
 	Scope           ObservationScope `json:"scope"`
 	AgentID         string           `json:"agent_id,omitempty"`
+	AgentSource     string           `json:"agent_source,omitempty"`
 	Type            ObservationType  `json:"type"`
 	MemoryType      string           `json:"memory_type"`
 	SourceType      string           `json:"source_type,omitempty"`
@@ -358,6 +436,7 @@ func (o *Observation) MarshalJSON() ([]byte, error) {
 		Project:         o.Project,
 		Scope:           o.Scope,
 		AgentID:         o.AgentID,
+		AgentSource:     string(o.AgentSource),
 		Type:            o.Type,
 		MemoryType:      string(o.MemoryType),
 		SourceType:      string(o.SourceType),
@@ -429,11 +508,27 @@ func NewObservation(sdkSessionID, project string, parsed *ParsedObservation, pro
 		scope = DetermineScope(parsed.Concepts)
 	}
 
+	// Auto-add diff-scope tags based on file paths (gstack-insights FR-7)
+	concepts := parsed.Concepts
+	allFiles := append(append([]string{}, parsed.FilesRead...), parsed.FilesModified...)
+	if scopeTags := classifyFileScopes(allFiles); len(scopeTags) > 0 {
+		seen := make(map[string]struct{}, len(concepts))
+		for _, c := range concepts {
+			seen[c] = struct{}{}
+		}
+		for _, tag := range scopeTags {
+			if _, exists := seen[tag]; !exists {
+				concepts = append(concepts, tag)
+			}
+		}
+	}
+
 	return &Observation{
 		SDKSessionID:    sdkSessionID,
 		Project:         project,
 		Scope:           scope,
 		AgentID:         parsed.AgentID,
+		AgentSource:     parsed.AgentSource,
 		Type:            parsed.Type,
 		MemoryType:      ClassifyMemoryType(parsed),
 		SourceType:      parsed.SourceType,
@@ -442,7 +537,7 @@ func NewObservation(sdkSessionID, project string, parsed *ParsedObservation, pro
 		Facts:           parsed.Facts,
 		Rejected:        parsed.Rejected,
 		Narrative:       sql.NullString{String: parsed.Narrative, Valid: parsed.Narrative != ""},
-		Concepts:        parsed.Concepts,
+		Concepts:        concepts,
 		FilesRead:       parsed.FilesRead,
 		FilesModified:   parsed.FilesModified,
 		FileMtimes:      parsed.FileMtimes,
