@@ -5,11 +5,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 
 	gormdb "github.com/thebtf/engram/internal/db/gorm"
 )
 
-// handleIssues dispatches issue actions: create, list, get, update, comment, reopen.
+// handleIssues dispatches issue actions: create, list, get, update, comment, reopen, close.
 func (s *Server) handleIssues(ctx context.Context, args json.RawMessage) (string, error) {
 	if s.issueStore == nil {
 		return "", fmt.Errorf("issue store not available")
@@ -35,8 +36,10 @@ func (s *Server) handleIssues(ctx context.Context, args json.RawMessage) (string
 		return s.handleIssueComment(ctx, m)
 	case "reopen":
 		return s.handleIssueReopen(ctx, m)
+	case "close":
+		return s.handleIssueClose(ctx, m)
 	default:
-		return "", fmt.Errorf("unknown issues action: %q (valid: create, list, get, update, comment, reopen)", action)
+		return "", fmt.Errorf("unknown issues action: %q (valid: create, list, get, update, comment, reopen, close)", action)
 	}
 }
 
@@ -82,8 +85,10 @@ func (s *Server) handleIssueCreate(ctx context.Context, m map[string]any) (strin
 
 func (s *Server) handleIssueList(ctx context.Context, m map[string]any) (string, error) {
 	project := coerceString(m["project"], "")
+	sourceProject := coerceString(m["source_project"], "")
 	statusParam := coerceString(m["status"], "open,reopened")
 	limit := coerceInt(m["limit"], 20)
+	resolvedSinceMs := int64(coerceInt(m["resolved_since"], 0))
 
 	var statuses []string
 	for _, s := range strings.Split(statusParam, ",") {
@@ -93,7 +98,18 @@ func (s *Server) handleIssueList(ctx context.Context, m map[string]any) (string,
 		}
 	}
 
-	issues, total, err := s.issueStore.ListIssues(ctx, project, statuses, limit, 0)
+	params := gormdb.IssueListParams{
+		TargetProject: project,
+		SourceProject: sourceProject,
+		Statuses:      statuses,
+		Limit:         limit,
+	}
+	if resolvedSinceMs > 0 {
+		t := time.Unix(0, resolvedSinceMs*int64(time.Millisecond))
+		params.ResolvedSince = &t
+	}
+
+	issues, total, err := s.issueStore.ListIssuesEx(ctx, params)
 	if err != nil {
 		return "", fmt.Errorf("list issues: %w", err)
 	}
@@ -234,4 +250,19 @@ func (s *Server) handleIssueReopen(ctx context.Context, m map[string]any) (strin
 	}
 
 	return fmt.Sprintf("Issue #%d reopened.", id), nil
+}
+
+func (s *Server) handleIssueClose(ctx context.Context, m map[string]any) (string, error) {
+	id := int64(coerceInt(m["id"], 0))
+	if id <= 0 {
+		return "", fmt.Errorf("id is required for issues close")
+	}
+
+	sourceProject := coerceString(m["project"], "")
+
+	if err := s.issueStore.CloseIssue(ctx, id, sourceProject); err != nil {
+		return "", err
+	}
+
+	return fmt.Sprintf("Issue #%d closed. The issue will no longer appear in any session injection.", id), nil
 }

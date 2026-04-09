@@ -48,7 +48,7 @@ func (s *IssueStore) CreateIssue(ctx context.Context, issue *Issue) (int64, erro
 	}
 
 	// Validate status and priority before INSERT (avoid cryptic CHECK constraint errors)
-	validStatuses := map[string]bool{"open": true, "acknowledged": true, "resolved": true, "reopened": true}
+	validStatuses := map[string]bool{"open": true, "acknowledged": true, "resolved": true, "reopened": true, "closed": true, "rejected": true}
 	if !validStatuses[created.Status] {
 		return 0, fmt.Errorf("invalid status %q: must be one of open, acknowledged, resolved, reopened", created.Status)
 	}
@@ -63,20 +63,46 @@ func (s *IssueStore) CreateIssue(ctx context.Context, issue *Issue) (int64, erro
 	return created.ID, nil
 }
 
-// ListIssues returns issues matching the filters with comment counts and total count.
-// If targetProject is empty, returns issues across all projects.
+// IssueListParams holds optional filters for ListIssues.
+type IssueListParams struct {
+	TargetProject string
+	SourceProject string
+	Statuses      []string
+	ResolvedSince *time.Time
+	Limit         int
+	Offset        int
+}
+
+// ListIssues returns issues matching the filters with comment counts, stale_days, and total count.
 // Ordered by priority (critical first) then newest first.
 func (s *IssueStore) ListIssues(ctx context.Context, targetProject string, statuses []string, limit, offset int) ([]IssueWithCount, int64, error) {
+	return s.ListIssuesEx(ctx, IssueListParams{
+		TargetProject: targetProject,
+		Statuses:      statuses,
+		Limit:         limit,
+		Offset:        offset,
+	})
+}
+
+// ListIssuesEx returns issues with extended filtering (source_project, resolved_since, stale_days).
+func (s *IssueStore) ListIssuesEx(ctx context.Context, params IssueListParams) ([]IssueWithCount, int64, error) {
+	limit := params.Limit
 	if limit <= 0 {
 		limit = 50
 	}
 
 	query := s.db.WithContext(ctx).Table("issues")
-	if targetProject != "" {
-		query = query.Where("target_project = ?", targetProject)
+	if params.TargetProject != "" {
+		query = query.Where("target_project = ?", params.TargetProject)
 	}
-	if len(statuses) > 0 {
-		query = query.Where("status IN ?", statuses)
+	if params.SourceProject != "" {
+		query = query.Where("source_project = ?", params.SourceProject)
+	}
+	if len(params.Statuses) > 0 {
+		query = query.Where("status IN ?", params.Statuses)
+	}
+	if params.ResolvedSince != nil {
+		query = query.Where("resolved_at >= ?", *params.ResolvedSince)
 	}
 
 	var total int64
@@ -89,7 +115,7 @@ func (s *IssueStore) ListIssues(ctx context.Context, targetProject string, statu
 		Select("issues.*, (SELECT COUNT(*) FROM issue_comments WHERE issue_comments.issue_id = issues.id) AS comment_count").
 		Order("CASE priority WHEN 'critical' THEN 1 WHEN 'high' THEN 2 WHEN 'medium' THEN 3 WHEN 'low' THEN 4 END, created_at DESC").
 		Limit(limit).
-		Offset(offset).
+		Offset(params.Offset).
 		Find(&issues).Error
 	if err != nil {
 		return nil, 0, fmt.Errorf("list issues: %w", err)
@@ -134,6 +160,8 @@ func (s *IssueStore) UpdateIssueStatus(ctx context.Context, id int64, status str
 		updates["reopened_at"] = now
 	case "acknowledged":
 		updates["acknowledged_at"] = now
+	case "closed":
+		updates["closed_at"] = now
 	}
 
 	result := s.db.WithContext(ctx).Model(&Issue{}).Where("id = ?", id).Updates(updates)
@@ -244,4 +272,117 @@ func (s *IssueStore) ReopenIssue(ctx context.Context, id int64, comment, authorP
 
 		return nil
 	})
+}
+
+// CloseIssue transitions a resolved issue to closed state.
+// Only the source project (or anyone if source_project is empty) can close.
+func (s *IssueStore) CloseIssue(ctx context.Context, id int64, sourceProject string) error {
+	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var issue Issue
+		if err := tx.First(&issue, id).Error; err != nil {
+			if err == gorm.ErrRecordNotFound {
+				return fmt.Errorf("issue %d not found", id)
+			}
+			return err
+		}
+		if issue.Status != "resolved" {
+			return fmt.Errorf("issue %d is %s, not resolved — can only close resolved issues", id, issue.Status)
+		}
+		if issue.SourceProject != "" && issue.SourceProject != sourceProject {
+			return fmt.Errorf("only source project %q can close this issue", issue.SourceProject)
+		}
+
+		now := time.Now()
+		result := tx.Model(&Issue{}).Where("id = ? AND status = ?", id, "resolved").Updates(map[string]any{
+			"status":     "closed",
+			"closed_at":  now,
+			"updated_at": now,
+		})
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected == 0 {
+			return fmt.Errorf("issue %d is no longer resolved (concurrent modification)", id)
+		}
+		return nil
+	})
+}
+
+// RejectIssue transitions any issue to rejected state with a mandatory comment.
+// Intended for human operators (dashboard). No lifecycle validation.
+func (s *IssueStore) RejectIssue(ctx context.Context, id int64, comment, authorProject, authorAgent string) error {
+	if comment == "" {
+		return fmt.Errorf("comment is required when rejecting an issue")
+	}
+	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		now := time.Now()
+		result := tx.Model(&Issue{}).Where("id = ?", id).Updates(map[string]any{
+			"status":     "rejected",
+			"closed_at":  now,
+			"updated_at": now,
+		})
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected == 0 {
+			return fmt.Errorf("issue %d not found", id)
+		}
+		return tx.Create(&IssueComment{
+			IssueID:       id,
+			AuthorProject: authorProject,
+			AuthorAgent:   authorAgent,
+			Body:          "Rejected: " + comment,
+			CreatedAt:     now,
+		}).Error
+	})
+}
+
+// DeleteIssue hard-deletes an issue and all its comments.
+func (s *IssueStore) DeleteIssue(ctx context.Context, id int64) error {
+	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Where("issue_id = ?", id).Delete(&IssueComment{}).Error; err != nil {
+			return fmt.Errorf("delete issue comments: %w", err)
+		}
+		result := tx.Delete(&Issue{}, id)
+		if result.Error != nil {
+			return fmt.Errorf("delete issue: %w", result.Error)
+		}
+		if result.RowsAffected == 0 {
+			return fmt.Errorf("issue %d not found", id)
+		}
+		return nil
+	})
+}
+
+// UpdateIssueFields updates mutable fields (title, body, priority, labels) for dashboard editing.
+// Only non-zero-value fields are updated.
+func (s *IssueStore) UpdateIssueFields(ctx context.Context, id int64, title, body, priority string, labels []string) error {
+	updates := map[string]any{
+		"updated_at": time.Now(),
+	}
+	if title != "" {
+		updates["title"] = title
+	}
+	if body != "" {
+		updates["body"] = body
+	}
+	if priority != "" {
+		validPriorities := map[string]bool{"critical": true, "high": true, "medium": true, "low": true}
+		if !validPriorities[priority] {
+			return fmt.Errorf("invalid priority %q", priority)
+		}
+		updates["priority"] = priority
+	}
+	if labels != nil {
+		updates["labels"] = labels
+	}
+
+	result := s.db.WithContext(ctx).Model(&Issue{}).Where("id = ?", id).Updates(updates)
+	if result.Error != nil {
+		return fmt.Errorf("update issue fields: %w", result.Error)
+	}
+	if result.RowsAffected == 0 {
+		return fmt.Errorf("issue %d not found", id)
+	}
+	return nil
 }

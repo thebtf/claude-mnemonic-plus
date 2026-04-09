@@ -2143,6 +2143,25 @@ func runMigrations(db *gorm.DB, embeddingDims int) error {
 				return tx.Exec(`DROP TABLE IF EXISTS issues`).Error
 			},
 		},
+		{
+			ID: "071_issues_lifecycle_v2",
+			Migrate: func(tx *gorm.DB) error {
+				// Add closed_at column
+				if err := tx.Exec(`ALTER TABLE issues ADD COLUMN IF NOT EXISTS closed_at TIMESTAMPTZ`).Error; err != nil {
+					return err
+				}
+				// Update status CHECK constraint to include 'closed' and 'rejected'
+				if err := tx.Exec(`ALTER TABLE issues DROP CONSTRAINT IF EXISTS issues_status_check`).Error; err != nil {
+					return err
+				}
+				return tx.Exec(`ALTER TABLE issues ADD CONSTRAINT issues_status_check CHECK (status IN ('open', 'acknowledged', 'resolved', 'reopened', 'closed', 'rejected'))`).Error
+			},
+			Rollback: func(tx *gorm.DB) error {
+				tx.Exec(`ALTER TABLE issues DROP CONSTRAINT IF EXISTS issues_status_check`)
+				tx.Exec(`ALTER TABLE issues ADD CONSTRAINT issues_status_check CHECK (status IN ('open', 'acknowledged', 'resolved', 'reopened'))`)
+				return tx.Exec(`ALTER TABLE issues DROP COLUMN IF EXISTS closed_at`).Error
+			},
+		},
 	})
 	if err := m.Migrate(); err != nil {
 		return fmt.Errorf("run gormigrate migrations: %w", err)

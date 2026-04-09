@@ -508,20 +508,71 @@ function formatIssuesBlock(issues, project) {
     return new Date(b.created_at) - new Date(a.created_at);
   });
 
+  const staleDays = parseInt(process.env.ENGRAM_ISSUE_STALE_DAYS || '3', 10);
+  const nowMs = Date.now();
+
   let block = `<open-issues count="${sorted.length}" project="${project}">\n`;
+  block += `You are the TARGET agent. Your job: resolve these issues or comment with progress.\n`;
+  block += `Do NOT close issues — only the source agent (creator) can close after verifying your fix.\n\n`;
+
   for (const issue of sorted) {
     const prio = (issue.priority || 'medium').toUpperCase();
     const from = issue.source_project || 'unknown';
     const prefix = issue.status === 'reopened' ? `reopened by: ${from}` : `from: ${from}`;
-    block += `#${issue.id} [${prio}] [${prefix}] ${issue.title}\n`;
 
-    // Show latest comment preview if available
-    if (issue.comment_count > 0 && issue.updated_at) {
+    // Staleness calculation
+    let staleTag = '';
+    let actionDirective = '';
+    if (issue.acknowledged_at) {
+      const ackMs = new Date(issue.acknowledged_at).getTime();
+      const daysSinceAck = Math.floor((nowMs - ackMs) / 86400000);
+      if (daysSinceAck >= staleDays * 2) {
+        staleTag = ` [OVERDUE ${daysSinceAck}d]`;
+        actionDirective = `  └─ ACTION: OVERDUE — this issue requires immediate attention. Resolve or explain blocker.\n`;
+      } else if (daysSinceAck >= staleDays) {
+        staleTag = ` [STALE ${daysSinceAck}d]`;
+        actionDirective = `  └─ ACTION: This issue has been open for ${daysSinceAck} days. Resolve or comment with progress.\n`;
+      }
+    }
+
+    block += `#${issue.id} [${prio}] [${prefix}]${staleTag} ${issue.title}\n`;
+
+    if (actionDirective) {
+      block += actionDirective;
+    } else if (issue.comment_count > 0 && issue.updated_at) {
       const ago = _timeAgo(new Date(issue.updated_at));
       block += `  └─ ${issue.comment_count} comment(s), updated ${ago}\n`;
     }
   }
   block += '</open-issues>';
+  return block;
+}
+
+/**
+ * Format resolved issues into a <resolved-issues> block for source agent notification.
+ * @param {Array} issues - Array of resolved issue objects created by this project
+ * @param {string} project - Source project slug (the creator)
+ * @returns {string} Formatted XML block, or empty string if no issues
+ */
+function formatResolvedIssuesBlock(issues, project) {
+  if (!issues || !Array.isArray(issues) || issues.length === 0) return '';
+
+  let block = `<resolved-issues from-you count="${issues.length}" project="${project}">\n`;
+  block += `You CREATED these issues and they have been RESOLVED by the target agent.\n`;
+  block += `For each: verify the fix works, then close (confirms fix) or reopen (fix didn't work).\n`;
+  block += `Close: issues(action="close", id=N) | Reopen: issues(action="reopen", id=N, body="reason")\n\n`;
+
+  for (const issue of issues) {
+    const target = issue.target_project || 'unknown';
+    const resolvedAgo = issue.resolved_at ? _timeAgo(new Date(issue.resolved_at)) : 'recently';
+    block += `#${issue.id} [RESOLVED by ${target}] ${issue.title} (${resolvedAgo})\n`;
+
+    // Show latest comment as resolution summary
+    if (issue.comment_count > 0 && issue.updated_at) {
+      block += `  └─ ${issue.comment_count} comment(s), last updated ${_timeAgo(new Date(issue.updated_at))}\n`;
+    }
+  }
+  block += '</resolved-issues>';
   return block;
 }
 
@@ -560,4 +611,5 @@ module.exports = {
   deletePendingMarker,
   getStaleMarkers,
   formatIssuesBlock,
+  formatResolvedIssuesBlock,
 };

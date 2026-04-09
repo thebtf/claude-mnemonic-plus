@@ -108,12 +108,14 @@ async function handleSessionStart(ctx, input) {
     console.error(`[session-start] Injection strategy: ${result.strategy}`);
   }
 
-  // Fetch open issues for this project (agent-issues FR-5)
+  // Fetch open/acknowledged/reopened issues targeting this project (agent-issues FR-5)
   let issuesBlock = '';
+  let resolvedIssuesBlock = '';
   if (project) {
     try {
+      // Target issues: issues assigned to this project (open, acknowledged, reopened — NOT closed/rejected)
       const issuesResult = await lib.requestGet(
-        `/api/issues?project=${encodeURIComponent(project)}&status=open,reopened&limit=10`
+        `/api/issues?project=${encodeURIComponent(project)}&status=open,acknowledged,reopened&limit=10`
       );
       const issues = Array.isArray(issuesResult.issues) ? issuesResult.issues : [];
       if (issues.length > 0) {
@@ -126,6 +128,17 @@ async function handleSessionStart(ctx, input) {
           lib.requestPost('/api/issues/acknowledge', { ids: openIds }, 3000).catch(() => {});
         }
       }
+
+      // Source notification: issues created BY this project that were resolved (lifecycle-v2 FR-1)
+      const sevenDaysAgoMs = Date.now() - 7 * 24 * 60 * 60 * 1000;
+      const resolvedResult = await lib.requestGet(
+        `/api/issues?source_project=${encodeURIComponent(project)}&status=resolved&resolved_since=${sevenDaysAgoMs}&limit=5`
+      );
+      const resolvedIssues = Array.isArray(resolvedResult.issues) ? resolvedResult.issues : [];
+      if (resolvedIssues.length > 0) {
+        resolvedIssuesBlock = lib.formatResolvedIssuesBlock(resolvedIssues, project);
+        console.error(`[engram] Injecting ${resolvedIssues.length} resolved issues from ${project}`);
+      }
     } catch (err) {
       console.error(`[engram] Warning: issue fetch failed: ${err.message}`);
     }
@@ -135,9 +148,12 @@ async function handleSessionStart(ctx, input) {
   const alwaysInject = Array.isArray(result.always_inject) ? result.always_inject : [];
   let contextBuilder = '';
 
-  // Issues block comes first (before behavioral rules and memory)
+  // Issues blocks come first (before behavioral rules and memory)
   if (issuesBlock) {
     contextBuilder += issuesBlock + '\n';
+  }
+  if (resolvedIssuesBlock) {
+    contextBuilder += resolvedIssuesBlock + '\n';
   }
   if (alwaysInject.length > 0) {
     contextBuilder += '<user-behavior-rules>\n';

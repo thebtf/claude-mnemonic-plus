@@ -356,19 +356,45 @@ Engram is your permanent memory store. Memories saved here persist across ALL se
 | ` + "`admin`" + ` | **Bulk ops**, maintenance, analytics | bulk_delete, bulk_supersede, tag, graph, stats, trends, quality, export, maintenance, ... |
 | ` + "`check_system_health`" + ` | **Health** check of all subsystems | (no params) |
 
-## Issues — Cross-Project Agent Coordination
+## Issues — Cross-Project Agent Bug Tracker
 
-The ` + "`issues`" + ` tool is for tracking bugs, feature requests, and tasks between agents across projects.
-**Do NOT use ` + "`store`" + ` or ` + "`docs`" + ` for issues** — they lack lifecycle management (status, priority, comments).
+The ` + "`issues`" + ` tool tracks bugs, feature requests, and tasks between agents across projects.
+**Do NOT use ` + "`store`" + ` or ` + "`docs`" + ` for issues** — they lack lifecycle management.
 
-**Create an issue:** ` + "`issues(action=\"create\", title=\"...\", body=\"...\", priority=\"high\", target_project=\"other-project\")`" + `
-**List issues:** ` + "`issues(action=\"list\")`" + ` or ` + "`issues(action=\"list\", target_project=\"...\", status=\"open,acknowledged\")`" + `
+### Lifecycle
+` + "`open → acknowledged (auto) → resolved (target agent) → closed (source confirms) ⟲ reopened`" + `
+- **Target agent** (assignee): resolves issues or comments with progress. Cannot close.
+- **Source agent** (creator): verifies fix and closes, OR reopens if fix didn't work.
+- **Closed/rejected** issues disappear from all injections.
+
+### Your Role as TARGET Agent (issue assigned to your project)
+When you see ` + "`<open-issues>`" + ` in your session context:
+1. Read each issue carefully — understand what the source agent needs
+2. Work on it OR comment explaining timeline/blockers
+3. When fixed: ` + "`issues(action=\"update\", id=N, status=\"resolved\", comment=\"Fixed in commit abc123\")`" + `
+4. Do NOT close — only the source agent (or human operator) closes after verifying
+
+### Your Role as SOURCE Agent (you created the issue)
+When you see ` + "`<resolved-issues from-you>`" + ` in your session context:
+1. Read the resolution comment — understand what was done
+2. Verify the fix actually works (test, read code, check behavior)
+3. If fix works: ` + "`issues(action=\"close\", id=N)`" + ` — confirms fix, removes from all injections
+4. If fix doesn't work: ` + "`issues(action=\"reopen\", id=N, body=\"Still broken because...\")`" + `
+
+### Actions
+**Create:** ` + "`issues(action=\"create\", title=\"...\", body=\"...\", priority=\"high\", target_project=\"other-project\")`" + `
+**List yours:** ` + "`issues(action=\"list\", source_project=\"my-project\", status=\"resolved\")`" + ` — issues you created
+**List assigned:** ` + "`issues(action=\"list\")`" + ` — issues targeting your project
 **Comment:** ` + "`issues(action=\"comment\", id=N, body=\"...\")`" + `
-**Resolve:** ` + "`issues(action=\"update\", id=N, status=\"resolved\", body=\"Fixed in commit abc123\")`" + `
-**Reopen:** ` + "`issues(action=\"reopen\", id=N, body=\"Still broken after fix\")`" + `
+**Resolve:** ` + "`issues(action=\"update\", id=N, status=\"resolved\", comment=\"Fixed in...\")`" + `
+**Close:** ` + "`issues(action=\"close\", id=N)`" + ` — source confirms fix (only source project can close)
+**Reopen:** ` + "`issues(action=\"reopen\", id=N, body=\"Still broken...\")`" + `
 
-Issues are automatically injected into sessions for agents working on the target project.
-Lifecycle: open → acknowledged (auto on injection) → resolved (explicit) ⟲ reopened.
+### DO NOT
+- Close issues you didn't create (only source/operator can close)
+- Change issue status without reading the issue first
+- Reopen resolved issues without verifying the fix failed
+- Use store/docs for cross-project bugs — use issues
 
 ## What to Store
 
@@ -528,22 +554,24 @@ func (s *Server) primaryTools() []Tool {
 		},
 		{
 			Name:        "issues",
-			Description: "Cross-project issue tracking between agents. Use to report bugs, request features, or leave tasks for agents in other projects. Do NOT use store or docs for issues. Issues are automatically injected into target project sessions. Actions: create, list, get, update, comment, reopen.",
+			Description: "Cross-project issue tracking between agents. Use to report bugs, request features, or leave tasks for agents in other projects. Do NOT use store or docs for issues. Issues are automatically injected into target project sessions. Actions: create, list, get, update, comment, reopen, close. Close = source agent confirms fix works (only source project can close).",
 			tier:        tierCore,
 			InputSchema: map[string]any{
 				"type":     "object",
 				"required": []string{"action"},
 				"properties": map[string]any{
-					"action":         map[string]any{"type": "string", "enum": []string{"create", "list", "get", "update", "comment", "reopen"}, "description": "Action to perform"},
+					"action":         map[string]any{"type": "string", "enum": []string{"create", "list", "get", "update", "comment", "reopen", "close"}, "description": "Action to perform"},
 					"title":          map[string]any{"type": "string", "description": "Issue title (required for create)"},
 					"body":           map[string]any{"type": "string", "description": "Issue body or comment text"},
 					"priority":       map[string]any{"type": "string", "enum": []string{"critical", "high", "medium", "low"}, "default": "medium"},
 					"target_project": map[string]any{"type": "string", "description": "Target project slug (defaults to current project)"},
+					"source_project": map[string]any{"type": "string", "description": "Filter by source project (for list: issues YOU created)"},
 					"labels":         map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "Labels (bug, feature, etc.)"},
-					"id":             map[string]any{"type": "integer", "description": "Issue ID (required for get/update/comment/reopen)"},
+					"id":             map[string]any{"type": "integer", "description": "Issue ID (required for get/update/comment/reopen/close)"},
 					"status":         map[string]any{"type": "string", "enum": []string{"resolved"}, "description": "Set status (only 'resolved' via update)"},
 					"comment":        map[string]any{"type": "string", "description": "Comment to add with status change or reopen"},
-					"project":        map[string]any{"type": "string", "description": "Filter by project (for list action)"},
+					"project":        map[string]any{"type": "string", "description": "Current project context (auto-filled)"},
+					"resolved_since": map[string]any{"type": "integer", "description": "Filter: issues resolved after this epoch ms (for list)"},
 				},
 			},
 		},
@@ -1010,19 +1038,20 @@ func (s *Server) handleToolsList(req *Request) *Response {
 		},
 		{
 			Name:        "issues",
-			Description: "Create, track, and resolve cross-project issues between agents. Issues are automatically shown to agents working on the target project. Use to report bugs, request features, or leave notes for agents in other projects.",
+			Description: "Cross-project issue tracking between agents. Actions: create, list, get, update, comment, reopen, close.",
 			tier:        tierCore,
 			InputSchema: map[string]any{
 				"type":     "object",
 				"required": []string{"action"},
 				"properties": map[string]any{
-					"action":         map[string]any{"type": "string", "enum": []string{"create", "list", "get", "update", "comment", "reopen"}, "description": "Action to perform"},
+					"action":         map[string]any{"type": "string", "enum": []string{"create", "list", "get", "update", "comment", "reopen", "close"}, "description": "Action to perform"},
 					"title":          map[string]any{"type": "string", "description": "Issue title (required for create)"},
 					"body":           map[string]any{"type": "string", "description": "Issue body or comment text"},
 					"priority":       map[string]any{"type": "string", "enum": []string{"critical", "high", "medium", "low"}, "default": "medium"},
 					"target_project": map[string]any{"type": "string", "description": "Target project slug (defaults to current project)"},
+					"source_project": map[string]any{"type": "string", "description": "Filter by source project (for list)"},
 					"labels":         map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "Labels (bug, feature, etc.)"},
-					"id":             map[string]any{"type": "integer", "description": "Issue ID (required for get/update/comment/reopen)"},
+					"id":             map[string]any{"type": "integer", "description": "Issue ID (required for get/update/comment/reopen/close)"},
 					"status":         map[string]any{"type": "string", "enum": []string{"resolved"}, "description": "Set status (only 'resolved' via update)"},
 					"comment":        map[string]any{"type": "string", "description": "Comment to add with status change or reopen"},
 					"project":        map[string]any{"type": "string", "description": "Filter by project (for list action)"},

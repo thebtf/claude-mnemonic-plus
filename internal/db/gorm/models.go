@@ -437,6 +437,7 @@ type Issue struct {
 	AcknowledgedAt   *time.Time             `gorm:"type:timestamptz" json:"acknowledged_at"`
 	ResolvedAt       *time.Time             `gorm:"type:timestamptz" json:"resolved_at"`
 	ReopenedAt       *time.Time             `gorm:"type:timestamptz" json:"reopened_at"`
+	ClosedAt         *time.Time             `gorm:"type:timestamptz" json:"closed_at"`
 	CreatedAt        time.Time              `gorm:"type:timestamptz;not null;default:now()" json:"created_at"`
 	UpdatedAt        time.Time              `gorm:"type:timestamptz;not null;default:now()" json:"updated_at"`
 }

@@ -1934,6 +1934,7 @@ func (s *Service) setupRoutes() {
 		r.Post("/api/issues", s.handleCreateIssue)
 		r.Get("/api/issues/{id}", s.handleGetIssue)
 		r.Patch("/api/issues/{id}", s.handleUpdateIssue)
+		r.Delete("/api/issues/{id}", s.handleDeleteIssue)
 		r.Post("/api/issues/acknowledge", s.handleAcknowledgeIssues)
 
 		// Pattern routes

@@ -17,13 +17,19 @@ import (
 // handleListIssues handles GET /api/issues with optional filters.
 func (s *Service) handleListIssues(w http.ResponseWriter, r *http.Request) {
 	project := r.URL.Query().Get("project")
+	sourceProject := r.URL.Query().Get("source_project")
 	statusParam := r.URL.Query().Get("status")
 	limitStr := r.URL.Query().Get("limit")
 	offsetStr := r.URL.Query().Get("offset")
+	resolvedSinceStr := r.URL.Query().Get("resolved_since")
 
 	var statuses []string
 	if statusParam != "" {
-		statuses = strings.Split(statusParam, ",")
+		for _, s := range strings.Split(statusParam, ",") {
+			if s = strings.TrimSpace(s); s != "" {
+				statuses = append(statuses, s)
+			}
+		}
 	}
 
 	limit := 50
@@ -35,7 +41,21 @@ func (s *Service) handleListIssues(w http.ResponseWriter, r *http.Request) {
 		offset = v
 	}
 
-	issues, total, err := s.issueStore.ListIssues(r.Context(), project, statuses, limit, offset)
+	params := gormdb.IssueListParams{
+		TargetProject: project,
+		SourceProject: sourceProject,
+		Statuses:      statuses,
+		Limit:         limit,
+		Offset:        offset,
+	}
+	if resolvedSinceStr != "" {
+		if ms, err := strconv.ParseInt(resolvedSinceStr, 10, 64); err == nil {
+			t := time.UnixMilli(ms)
+			params.ResolvedSince = &t
+		}
+	}
+
+	issues, total, err := s.issueStore.ListIssuesEx(r.Context(), params)
 	if err != nil {
 		http.Error(w, fmt.Sprintf(`{"error": %q}`, err.Error()), http.StatusInternalServerError)
 		return
@@ -147,39 +167,59 @@ func (s *Service) handleUpdateIssue(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req struct {
-		Status        string `json:"status"`
-		Comment       string `json:"comment"`
-		SourceProject string `json:"source_project"`
-		SourceAgent   string `json:"source_agent"`
+		Status        string   `json:"status"`
+		Comment       string   `json:"comment"`
+		SourceProject string   `json:"source_project"`
+		SourceAgent   string   `json:"source_agent"`
+		Title         string   `json:"title"`
+		Body          string   `json:"body"`
+		Priority      string   `json:"priority"`
+		Labels        []string `json:"labels"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, `{"error": "invalid JSON body"}`, http.StatusBadRequest)
 		return
 	}
 
+	// Field edits (dashboard inline editing)
+	if req.Title != "" || req.Body != "" || req.Priority != "" || req.Labels != nil {
+		if err := s.issueStore.UpdateIssueFields(r.Context(), id, req.Title, req.Body, req.Priority, req.Labels); err != nil {
+			if strings.Contains(err.Error(), "not found") {
+				http.Error(w, `{"error": "issue not found"}`, http.StatusNotFound)
+				return
+			}
+			http.Error(w, fmt.Sprintf(`{"error": %q}`, err.Error()), http.StatusBadRequest)
+			return
+		}
+	}
+
+	// Status transitions
 	if req.Status != "" {
+		var statusErr error
 		switch req.Status {
 		case "resolved":
-			if err := s.issueStore.UpdateIssueStatus(r.Context(), id, req.Status); err != nil {
-				if strings.Contains(err.Error(), "not found") {
-					http.Error(w, `{"error": "issue not found"}`, http.StatusNotFound)
-					return
-				}
-				http.Error(w, fmt.Sprintf(`{"error": %q}`, err.Error()), http.StatusInternalServerError)
-				return
-			}
+			statusErr = s.issueStore.UpdateIssueStatus(r.Context(), id, req.Status)
 		case "reopened":
-			if err := s.issueStore.ReopenIssue(r.Context(), id, req.Comment, req.SourceProject, req.SourceAgent); err != nil {
-				if strings.Contains(err.Error(), "not found") {
-					http.Error(w, `{"error": "issue not found"}`, http.StatusNotFound)
-					return
-				}
-				http.Error(w, fmt.Sprintf(`{"error": %q}`, err.Error()), http.StatusInternalServerError)
+			statusErr = s.issueStore.ReopenIssue(r.Context(), id, req.Comment, req.SourceProject, req.SourceAgent)
+			req.Comment = "" // ReopenIssue already adds comment
+		case "closed":
+			statusErr = s.issueStore.CloseIssue(r.Context(), id, req.SourceProject)
+		case "rejected":
+			statusErr = s.issueStore.RejectIssue(r.Context(), id, req.Comment, req.SourceProject, req.SourceAgent)
+			req.Comment = "" // RejectIssue already adds comment
+		case "open", "acknowledged":
+			// Force status (operator override) — no lifecycle validation
+			statusErr = s.issueStore.UpdateIssueStatus(r.Context(), id, req.Status)
+		default:
+			http.Error(w, `{"error": "invalid status"}`, http.StatusBadRequest)
+			return
+		}
+		if statusErr != nil {
+			if strings.Contains(statusErr.Error(), "not found") {
+				http.Error(w, `{"error": "issue not found"}`, http.StatusNotFound)
 				return
 			}
-			req.Comment = "" // ReopenIssue already adds comment
-		default:
-			http.Error(w, `{"error": "status must be 'resolved' or 'reopened'"}`, http.StatusBadRequest)
+			http.Error(w, fmt.Sprintf(`{"error": %q}`, statusErr.Error()), http.StatusBadRequest)
 			return
 		}
 	}
@@ -197,7 +237,7 @@ func (s *Service) handleUpdateIssue(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	json.NewEncoder(w).Encode(map[string]any{
 		"message": "issue updated",
 	})
 }
@@ -222,6 +262,28 @@ func (s *Service) handleAcknowledgeIssues(w http.ResponseWriter, r *http.Request
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"acknowledged": acknowledged,
 	})
+}
+
+// handleDeleteIssue handles DELETE /api/issues/{id}. Hard delete — intended for dashboard operators.
+func (s *Service) handleDeleteIssue(w http.ResponseWriter, r *http.Request) {
+	idStr := chi.URLParam(r, "id")
+	id, err := strconv.ParseInt(idStr, 10, 64)
+	if err != nil {
+		http.Error(w, `{"error": "invalid issue id"}`, http.StatusBadRequest)
+		return
+	}
+
+	if err := s.issueStore.DeleteIssue(r.Context(), id); err != nil {
+		if strings.Contains(err.Error(), "not found") {
+			http.Error(w, `{"error": "issue not found"}`, http.StatusNotFound)
+			return
+		}
+		http.Error(w, fmt.Sprintf(`{"error": %q}`, err.Error()), http.StatusInternalServerError)
+		return
+	}
+
+	log.Info().Int64("issue_id", id).Msg("Issue deleted by operator")
+	w.WriteHeader(http.StatusNoContent)
 }
 
 // formatIssuesForInjection formats issues into the <open-issues> XML block for context injection.
