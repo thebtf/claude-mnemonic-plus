@@ -788,10 +788,16 @@ func (s *Service) handleGraphStats(w http.ResponseWriter, r *http.Request) {
 		nodeCount = 0
 	}
 
-	// Calculate average degree
+	// Calculate average degree (each edge contributes to 2 nodes)
 	var avgDegree float64
 	if nodeCount > 0 {
 		avgDegree = float64(edgeCount*2) / float64(nodeCount)
+	}
+
+	// Max degree from SQL
+	maxDegree, err := s.relationStore.GetMaxDegree(r.Context())
+	if err != nil {
+		maxDegree = 0
 	}
 
 	// Graph is enabled if we have any edges (relations)
@@ -802,7 +808,7 @@ func (s *Service) handleGraphStats(w http.ResponseWriter, r *http.Request) {
 		"nodeCount":    nodeCount,
 		"edgeCount":    edgeCount,
 		"avgDegree":    avgDegree,
-		"maxDegree":    0,
+		"maxDegree":    maxDegree,
 		"minDegree":    0,
 		"medianDegree": 0.0,
 		"edgeTypes":    edgeTypes,

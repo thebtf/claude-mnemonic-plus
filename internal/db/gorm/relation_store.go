@@ -397,6 +397,22 @@ func (s *RelationStore) GetDistinctNodeCount(ctx context.Context) (int, error) {
 	return int(count), err
 }
 
+// GetMaxDegree returns the maximum node degree (combined in+out edges) in the relation graph.
+func (s *RelationStore) GetMaxDegree(ctx context.Context) (int, error) {
+	var maxDeg int64
+	err := s.db.WithContext(ctx).Raw(`
+		SELECT COALESCE(MAX(degree), 0) FROM (
+			SELECT id, COUNT(*) AS degree FROM (
+				SELECT source_id AS id FROM observation_relations
+				UNION ALL
+				SELECT target_id AS id FROM observation_relations
+			) AS all_nodes
+			GROUP BY id
+		) AS degrees
+	`).Scan(&maxDeg).Error
+	return int(maxDeg), err
+}
+
 // GetHighConfidenceRelations retrieves relations with confidence above threshold.
 func (s *RelationStore) GetHighConfidenceRelations(ctx context.Context, minConfidence float64, limit int) ([]*models.ObservationRelation, error) {
 	var relations []ObservationRelation
