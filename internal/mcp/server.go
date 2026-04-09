@@ -395,6 +395,9 @@ When you see ` + "`<resolved-issues from-you>`" + ` in your session context:
 - Change issue status without reading the issue first
 - Reopen resolved issues without verifying the fix failed
 - Use store/docs for cross-project bugs — use issues
+- Create an issue without first checking for duplicates: ` + "`issues(action=\"list\", target_project=\"...\", status=\"\")`" + `
+- Decide that "your part is done, remaining work is another project's problem" — that is a scope decision for the operator, not the agent. Comment your analysis, but do not resolve and split into new issues without operator approval
+- Resolve an issue if the original requirement is only partially met — comment with progress instead
 
 ## What to Store
 
