@@ -2055,6 +2055,46 @@ func runMigrations(db *gorm.DB, embeddingDims int) error {
 			return tx.Exec(`ALTER TABLE observations ADD CONSTRAINT chk_observations_type CHECK (type IN ('decision', 'bugfix', 'feature', 'refactor', 'discovery', 'change', 'guidance'))`).Error
 		},
 	},
+		{
+			ID: "069_gstack_insights",
+			Migrate: func(tx *gorm.DB) error {
+				// Add agent_source column with default 'unknown' and CHECK constraint.
+				if err := tx.Exec(`ALTER TABLE observations ADD COLUMN IF NOT EXISTS agent_source TEXT NOT NULL DEFAULT 'unknown'`).Error; err != nil {
+					return err
+				}
+				if err := tx.Exec(`ALTER TABLE observations ADD CONSTRAINT chk_observations_agent_source CHECK (agent_source IN ('claude-code', 'codex', 'gemini', 'other', 'unknown'))`).Error; err != nil {
+					// Constraint may already exist — not fatal
+					log.Warn().Err(err).Msg("agent_source CHECK constraint (may already exist)")
+				}
+				// Index for agent_source filtering.
+				if err := tx.Exec(`CREATE INDEX IF NOT EXISTS idx_observations_agent_source ON observations (agent_source)`).Error; err != nil {
+					return err
+				}
+				// Expand type CHECK to include pitfall, operational, timeline.
+				if err := tx.Exec(`ALTER TABLE observations DROP CONSTRAINT IF EXISTS chk_observations_type`).Error; err != nil {
+					return err
+				}
+				if err := tx.Exec(`ALTER TABLE observations ADD CONSTRAINT chk_observations_type CHECK (type IN ('decision', 'bugfix', 'feature', 'refactor', 'discovery', 'change', 'guidance', 'credential', 'entity', 'wiki', 'pitfall', 'operational', 'timeline'))`).Error; err != nil {
+					return err
+				}
+				// Backfill: entity/wiki observations with unknown source_type → llm_derived.
+				return tx.Exec(`UPDATE observations SET source_type = 'llm_derived' WHERE type IN ('entity', 'wiki') AND source_type = 'unknown'`).Error
+			},
+			Rollback: func(tx *gorm.DB) error {
+				// Restore previous type CHECK constraint
+				if err := tx.Exec(`ALTER TABLE observations DROP CONSTRAINT IF EXISTS chk_observations_type`).Error; err != nil {
+					return err
+				}
+				if err := tx.Exec(`ALTER TABLE observations ADD CONSTRAINT chk_observations_type CHECK (type IN ('decision', 'bugfix', 'feature', 'refactor', 'discovery', 'change', 'guidance', 'credential', 'entity', 'wiki'))`).Error; err != nil {
+					return err
+				}
+				tx.Exec(`ALTER TABLE observations DROP CONSTRAINT IF EXISTS chk_observations_agent_source`)
+				tx.Exec(`DROP INDEX IF EXISTS idx_observations_agent_source`)
+				// Note: source_type backfill (entity/wiki → llm_derived) is intentionally not rolled back
+				// as llm_derived is more accurate than unknown for these types.
+				return tx.Exec(`ALTER TABLE observations DROP COLUMN IF EXISTS agent_source`).Error
+			},
+		},
 	})
 	if err := m.Migrate(); err != nil {
 		return fmt.Errorf("run gormigrate migrations: %w", err)

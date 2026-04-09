@@ -162,11 +162,18 @@ func (s *ObservationStore) StoreObservation(ctx context.Context, sdkSessionID, p
 		scope = models.DetermineScope(obs.Concepts)
 	}
 
+	// Validate and coerce agent_source to known value
+	agentSource := obs.AgentSource
+	if agentSource == "" || !models.IsValidAgentSource(string(agentSource)) {
+		agentSource = models.AgentUnknown
+	}
+
 	dbObs := &Observation{
 		SDKSessionID:    sdkSessionID,
 		Project:         project,
 		Scope:           scope,
 		AgentID:         obs.AgentID,
+		AgentSource:     agentSource,
 		Type:            obs.Type,
 		SourceType:      obs.SourceType,
 		Title:           nullString(obs.Title),
@@ -1484,6 +1491,7 @@ func toModelObservation(o *Observation) *models.Observation {
 		Project:         o.Project,
 		Scope:           o.Scope,
 		AgentID:         o.AgentID,
+		AgentSource:     o.AgentSource,
 		Type:            o.Type,
 		SourceType:      o.SourceType,
 		Title:           o.Title,
