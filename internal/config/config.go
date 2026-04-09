@@ -149,6 +149,13 @@ type Config struct {
 	WikiGenerationLimit     int    `json:"wiki_generation_limit"`     // ENGRAM_WIKI_GENERATION_LIMIT (default: 10)
 	WikiMinSources          int    `json:"wiki_min_sources"`          // ENGRAM_WIKI_MIN_SOURCES (default: 5)
 	WikiDataDir             string `json:"wiki_data_dir"`             // ENGRAM_WIKI_DATA_DIR (default: {DataDir}/wiki)
+
+	// Source-aware decay: per-source half-life overrides (gstack-insights spec FR-2)
+	HalfLifeManual     float64 `json:"halflife_manual"`      // ENGRAM_HALFLIFE_MANUAL (default: 30)
+	HalfLifeSDK        float64 `json:"halflife_sdk"`         // ENGRAM_HALFLIFE_SDK (default: 7)
+	HalfLifeLLM        float64 `json:"halflife_llm"`         // ENGRAM_HALFLIFE_LLM (default: 90)
+	HalfLifeAlgorithm  float64 `json:"halflife_algorithm"`   // ENGRAM_HALFLIFE_ALGORITHM (default: 14)
+	HalfLifeCrossModel float64 `json:"halflife_cross_model"` // ENGRAM_HALFLIFE_CROSS_MODEL (default: 60)
 }
 
 var (
@@ -307,6 +314,12 @@ func Default() *Config {
 			"test_passed":  0.5,
 			"error_streak": -0.5,
 		},
+		// Source-aware decay defaults (gstack-insights FR-2)
+		HalfLifeManual:     30.0,
+		HalfLifeSDK:         7.0,
+		HalfLifeLLM:        90.0,
+		HalfLifeAlgorithm:  14.0,
+		HalfLifeCrossModel: 60.0,
 	}
 }
 
@@ -677,6 +690,33 @@ func Load() (*Config, error) {
 	// Set WikiDataDir default relative to DataDir if not explicitly set
 	if cfg.WikiDataDir == "" {
 		cfg.WikiDataDir = filepath.Join(filepath.Dir(cfg.DBPath), "wiki")
+	}
+
+	// Source-aware decay: per-source half-life overrides (gstack-insights FR-2)
+	if v := strings.TrimSpace(os.Getenv("ENGRAM_HALFLIFE_MANUAL")); v != "" {
+		if f, err := strconv.ParseFloat(v, 64); err == nil && f > 0 {
+			cfg.HalfLifeManual = f
+		}
+	}
+	if v := strings.TrimSpace(os.Getenv("ENGRAM_HALFLIFE_SDK")); v != "" {
+		if f, err := strconv.ParseFloat(v, 64); err == nil && f > 0 {
+			cfg.HalfLifeSDK = f
+		}
+	}
+	if v := strings.TrimSpace(os.Getenv("ENGRAM_HALFLIFE_LLM")); v != "" {
+		if f, err := strconv.ParseFloat(v, 64); err == nil && f > 0 {
+			cfg.HalfLifeLLM = f
+		}
+	}
+	if v := strings.TrimSpace(os.Getenv("ENGRAM_HALFLIFE_ALGORITHM")); v != "" {
+		if f, err := strconv.ParseFloat(v, 64); err == nil && f > 0 {
+			cfg.HalfLifeAlgorithm = f
+		}
+	}
+	if v := strings.TrimSpace(os.Getenv("ENGRAM_HALFLIFE_CROSS_MODEL")); v != "" {
+		if f, err := strconv.ParseFloat(v, 64); err == nil && f > 0 {
+			cfg.HalfLifeCrossModel = f
+		}
 	}
 
 	return cfg, nil
