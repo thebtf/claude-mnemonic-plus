@@ -13,7 +13,7 @@
     {
       "name": "engram",
       "description": "Persistent memory with PostgreSQL+pgvector, hybrid search, and MCP tools",
-      "version": "3.4.1",
+      "version": "3.5.0",
       "author": {
         "name": "thebtf",
         "url": "https://github.com/thebtf"
@@ -23,25 +23,25 @@
       "license": "MIT",
       "homepage": "https://github.com/thebtf/engram",
       "releases": {
-        "latest": "3.4.1",
+        "latest": "3.5.0",
         "versions": {
-          "3.4.1": {
+          "3.5.0": {
             "releaseDate": "2026-04-09",
             "downloads": {
               "darwin-arm64": {
-                "url": "https://github.com/thebtf/engram/releases/download/v3.4.1/engram_3.4.1_darwin_arm64.tar.gz",
+                "url": "https://github.com/thebtf/engram/releases/download/v3.5.0/engram_3.5.0_darwin_arm64.tar.gz",
                 "format": "tar.gz",
-                "sha256": "3204ab59913bb28647b36d17d0d45c64481c5e3774f91ccaaf4041d1230d80ac"
+                "sha256": "23cf0cad9c72da98189fc112c1e225385d1329f579b6b836949e39258fdf22dd"
               },
               "linux-amd64": {
-                "url": "https://github.com/thebtf/engram/releases/download/v3.4.1/engram_3.4.1_linux_amd64.tar.gz",
+                "url": "https://github.com/thebtf/engram/releases/download/v3.5.0/engram_3.5.0_linux_amd64.tar.gz",
                 "format": "tar.gz",
-                "sha256": "3edd8d135151a45268fad4008610789022ab0251badf0b2e708402460134fb7c"
+                "sha256": "d706895fdea542da777bcf89f023a5c22376b46fedce7416e475c6211769acc5"
               },
               "windows-amd64": {
-                "url": "https://github.com/thebtf/engram/releases/download/v3.4.1/engram_3.4.1_windows_amd64.zip",
+                "url": "https://github.com/thebtf/engram/releases/download/v3.5.0/engram_3.5.0_windows_amd64.zip",
                 "format": "zip",
-                "sha256": "628e9c925af9a8db939680e3541f3e1f8e41a849035ed25bc60b7a5fa7bac11a"
+                "sha256": "7aeddfd6d04a6440701a802d76ee09b811b2e6951e5b42e5cf8775d44a250e97"
               }
             }
           }
