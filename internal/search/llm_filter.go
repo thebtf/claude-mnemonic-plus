@@ -73,10 +73,12 @@ func (f *LLMFilter) FilterByRelevance(ctx context.Context, candidates []*models.
 	}
 
 	if len(relevantIDs) == 0 {
+		// LLM explicitly returned empty set — honor it as "nothing relevant".
+		// This is the silence gate: do NOT fall back to top-N.
 		log.Debug().
 			Str("project", project).
 			Int("total", len(candidates)).
-			Msg("LLM filter silenced injection for project X (no relevant candidates)")
+			Msgf("LLM filter silenced injection for project %s (no relevant candidates)", project)
 		return []int64{}
 	}
 
