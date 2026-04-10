@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/rs/zerolog/log"
 	"github.com/thebtf/engram/internal/db/gorm"
 	"github.com/thebtf/engram/internal/reranking"
 	"github.com/thebtf/engram/internal/search"
@@ -18,7 +19,6 @@ import (
 	"github.com/thebtf/engram/internal/vector"
 	"github.com/thebtf/engram/internal/worker/sdk"
 	"github.com/thebtf/engram/pkg/models"
-	"github.com/rs/zerolog/log"
 )
 
 // agentEffectivenessThreshold is the minimum number of agent-specific injections required
@@ -521,7 +521,6 @@ func (s *Service) handleSearchByPrompt(w http.ResponseWriter, r *http.Request) {
 		relevantIDs := llmFilter.FilterByRelevance(r.Context(), candidates, project, query)
 		if len(relevantIDs) == 0 {
 			// LLM filter returned empty set — silence: inject nothing.
-			// This is distinguishable from a retrieval failure by the "silenced" message.
 			log.Info().
 				Str("project", project).
 				Int("total_considered", len(candidates)).
@@ -1524,7 +1523,7 @@ func (s *Service) handleContextInject(w http.ResponseWriter, r *http.Request) {
 		compactTokenEstimate := estimateTokensWithLimit(clusteredObservations, fullCount) +
 			estimateTokens(guidanceObservations)
 		writeJSON(w, map[string]any{
-			"strategy": selectedStrategy,
+			"strategy":           selectedStrategy,
 			"project":            project,
 			"observations":       compactObservationsWithLimit(clusteredObservations, fullCount),
 			"recent":             compactObservations(recentFresh),
