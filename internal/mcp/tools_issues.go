@@ -10,138 +10,74 @@ import (
 	gormdb "github.com/thebtf/engram/internal/db/gorm"
 )
 
-// issuesToolSchema builds the InputSchema for the issues tool using oneOf variants
-// per action, so MCP clients see EXACTLY which params are required for the chosen action.
-// This eliminates blind-poke errors: when action=create, clients see title and target_project
-// as required; when action=comment, they see id and body as required; etc.
+// issuesToolSchema returns the flat JSON Schema for the issues tool.
+// Anthropic API does NOT support oneOf/allOf/anyOf at the top level of input_schema,
+// so we use a flat schema with per-action requirements encoded in each property's
+// description (via REQUIRED_FOR: prefix) and enforced server-side by
+// validateIssueActionParams() with clear error messages showing the full signature.
 func issuesToolSchema() map[string]any {
-	actionProp := map[string]any{
-		"type":        "string",
-		"enum":        []string{"create", "list", "get", "update", "comment", "reopen", "close"},
-		"description": "Action to perform",
-	}
-	projectProp := map[string]any{"type": "string", "description": "YOUR current project slug (who is acting — audit trail)"}
-	titleProp := map[string]any{"type": "string", "description": "Issue title"}
-	targetProjectProp := map[string]any{"type": "string", "description": "Target project: which project the issue is FOR"}
-	bodyProp := map[string]any{"type": "string", "description": "Issue body or comment text"}
-	priorityProp := map[string]any{"type": "string", "enum": []string{"critical", "high", "medium", "low"}, "default": "medium"}
-	labelsProp := map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "Labels like bug/feature"}
-	idProp := map[string]any{"type": "integer", "description": "Issue ID"}
-	commentProp := map[string]any{"type": "string", "description": "Optional comment"}
-	sourceProjectProp := map[string]any{"type": "string", "description": "Filter by issues YOU created (for list)"}
-	statusFilterProp := map[string]any{"type": "string", "description": "Comma-separated status filter (for list), e.g. 'open,reopened'"}
-	resolvedSinceProp := map[string]any{"type": "integer", "description": "Filter: resolved after epoch ms (for list)"}
-	limitProp := map[string]any{"type": "integer", "description": "Max results (for list, default 20)"}
-
 	return map[string]any{
-		"type": "object",
-		"oneOf": []map[string]any{
-			{
-				"title":       "create — file a new issue",
-				"required":    []string{"action", "project", "title", "target_project"},
-				"description": "File a bug/feature/task targeting another project.",
-				"properties": map[string]any{
-					"action":         map[string]any{"const": "create"},
-					"project":        projectProp,
-					"title":          titleProp,
-					"target_project": targetProjectProp,
-					"body":           bodyProp,
-					"priority":       priorityProp,
-					"labels":         labelsProp,
-				},
-				"additionalProperties": false,
-			},
-			{
-				"title":       "list — browse issues",
-				"required":    []string{"action"},
-				"description": "List issues with optional filters. Read-only, no project required.",
-				"properties": map[string]any{
-					"action":         map[string]any{"const": "list"},
-					"project":        map[string]any{"type": "string", "description": "Filter by target_project"},
-					"source_project": sourceProjectProp,
-					"status":         statusFilterProp,
-					"resolved_since": resolvedSinceProp,
-					"limit":          limitProp,
-				},
-				"additionalProperties": false,
-			},
-			{
-				"title":       "get — fetch one issue with comments",
-				"required":    []string{"action", "id"},
-				"description": "Read a single issue and all its comments. No project required.",
-				"properties": map[string]any{
-					"action": map[string]any{"const": "get"},
-					"id":     idProp,
-				},
-				"additionalProperties": false,
-			},
-			{
-				"title":       "update — resolve an issue (target agent only)",
-				"required":    []string{"action", "project", "id", "status"},
-				"description": "Mark issue as resolved. Target agent uses this when fix is deployed.",
-				"properties": map[string]any{
-					"action":  map[string]any{"const": "update"},
-					"project": projectProp,
-					"id":      idProp,
-					"status":  map[string]any{"type": "string", "enum": []string{"resolved"}, "description": "Only 'resolved' via update"},
-					"comment": commentProp,
-				},
-				"additionalProperties": false,
-			},
-			{
-				"title":       "comment — add a comment",
-				"required":    []string{"action", "project", "id", "body"},
-				"description": "Add a comment with progress, questions, or analysis.",
-				"properties": map[string]any{
-					"action":  map[string]any{"const": "comment"},
-					"project": projectProp,
-					"id":      idProp,
-					"body":    map[string]any{"type": "string", "description": "Comment text"},
-				},
-				"additionalProperties": false,
-			},
-			{
-				"title":       "reopen — source agent rejects the fix",
-				"required":    []string{"action", "project", "id"},
-				"description": "Reopen after verifying fix doesn't work. body = reason.",
-				"properties": map[string]any{
-					"action":  map[string]any{"const": "reopen"},
-					"project": projectProp,
-					"id":      idProp,
-					"body":    map[string]any{"type": "string", "description": "Reason for reopening"},
-				},
-				"additionalProperties": false,
-			},
-			{
-				"title":       "close — source agent confirms fix (terminal)",
-				"required":    []string{"action", "project", "id"},
-				"description": "Close after verifying fix works. Only source project or operator.",
-				"properties": map[string]any{
-					"action":  map[string]any{"const": "close"},
-					"project": projectProp,
-					"id":      idProp,
-				},
-				"additionalProperties": false,
-			},
-		},
-		// Fallback "flat" properties for MCP clients that don't support oneOf discrimination.
-		// Clients that DO support oneOf will use the variants above for precise validation.
-		"properties": map[string]any{
-			"action":         actionProp,
-			"project":        projectProp,
-			"title":          titleProp,
-			"target_project": targetProjectProp,
-			"id":             idProp,
-			"body":           bodyProp,
-			"priority":       priorityProp,
-			"labels":         labelsProp,
-			"source_project": sourceProjectProp,
-			"status":         map[string]any{"type": "string", "enum": []string{"resolved"}},
-			"comment":        commentProp,
-			"resolved_since": resolvedSinceProp,
-			"limit":          limitProp,
-		},
+		"type":     "object",
 		"required": []string{"action"},
+		"properties": map[string]any{
+			"action": map[string]any{
+				"type":        "string",
+				"enum":        []string{"create", "list", "get", "update", "comment", "reopen", "close"},
+				"description": "Action to perform.",
+			},
+			"project": map[string]any{
+				"type":        "string",
+				"description": "REQUIRED_FOR: create|update|comment|reopen|close. YOUR current project slug (identifies who is acting — audit trail). For list: optional filter by target_project.",
+			},
+			"title": map[string]any{
+				"type":        "string",
+				"description": "REQUIRED_FOR: create. Short issue title.",
+			},
+			"target_project": map[string]any{
+				"type":        "string",
+				"description": "REQUIRED_FOR: create. Which project the issue is FOR (where it will be injected at session start).",
+			},
+			"id": map[string]any{
+				"type":        "integer",
+				"description": "REQUIRED_FOR: get|update|comment|reopen|close. Issue ID returned by create or list.",
+			},
+			"body": map[string]any{
+				"type":        "string",
+				"description": "REQUIRED_FOR: comment. Comment text. For create: optional body/description. For reopen: optional reason.",
+			},
+			"status": map[string]any{
+				"type":        "string",
+				"enum":        []string{"resolved"},
+				"description": "REQUIRED_FOR: update. Only 'resolved' is allowed. Use close/reopen actions for other transitions.",
+			},
+			"priority": map[string]any{
+				"type":        "string",
+				"enum":        []string{"critical", "high", "medium", "low"},
+				"default":     "medium",
+				"description": "OPTIONAL_FOR: create. Default: medium.",
+			},
+			"labels": map[string]any{
+				"type":        "array",
+				"items":       map[string]any{"type": "string"},
+				"description": "OPTIONAL_FOR: create. Tags like 'bug', 'feature', 'reliability'.",
+			},
+			"source_project": map[string]any{
+				"type":        "string",
+				"description": "OPTIONAL_FOR: list. Filter to show only issues YOU created.",
+			},
+			"comment": map[string]any{
+				"type":        "string",
+				"description": "OPTIONAL_FOR: update|reopen. Add a comment when changing status.",
+			},
+			"resolved_since": map[string]any{
+				"type":        "integer",
+				"description": "OPTIONAL_FOR: list. Filter to issues resolved after this epoch-ms timestamp.",
+			},
+			"limit": map[string]any{
+				"type":        "integer",
+				"description": "OPTIONAL_FOR: list. Max results (default 20).",
+			},
+		},
 	}
 }
 

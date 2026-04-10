@@ -451,6 +451,19 @@ func TestHandleToolsList(t *testing.T) {
 	for _, name := range legacyTools {
 		assert.True(t, allToolNames[name], "legacy tool %s should be present with include_all=true", name)
 	}
+
+	// Anthropic API rejects oneOf/allOf/anyOf at the top level of input_schema.
+	// Verify EVERY tool (primary + secondary) has a compliant top-level schema.
+	forbiddenKeys := []string{"oneOf", "allOf", "anyOf"}
+	for _, tool := range allTools {
+		schema := tool.InputSchema
+		for _, key := range forbiddenKeys {
+			_, present := schema[key]
+			assert.False(t, present,
+				"tool %q has forbidden top-level key %q — Anthropic API will reject with 400. Move into nested properties or use server-side validation.",
+				tool.Name, key)
+		}
+	}
 }
 
 // TestHandleRequest tests request routing.
