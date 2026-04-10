@@ -274,8 +274,9 @@ func (s *IssueStore) ReopenIssue(ctx context.Context, id int64, comment, authorP
 	})
 }
 
-// CloseIssue transitions a resolved issue to closed state.
+// CloseIssue transitions a resolved or reopened issue to closed state.
 // Only the source project (or anyone if source_project is empty) can close.
+// Dashboard operator (source_project="dashboard") can close from any state.
 func (s *IssueStore) CloseIssue(ctx context.Context, id int64, sourceProject string) error {
 	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var issue Issue
@@ -285,15 +286,30 @@ func (s *IssueStore) CloseIssue(ctx context.Context, id int64, sourceProject str
 			}
 			return err
 		}
-		if issue.Status != "resolved" {
-			return fmt.Errorf("issue %d is %s, not resolved — can only close resolved issues", id, issue.Status)
-		}
-		if issue.SourceProject != "" && issue.SourceProject != sourceProject {
+
+		// Source project authorization:
+		// - Dashboard operator can always close (bypass check)
+		// - If issue has a source_project, caller must match
+		// - If issue source_project is empty, anyone can close (backward compat)
+		isOperator := sourceProject == "dashboard"
+		if !isOperator && issue.SourceProject != "" && issue.SourceProject != sourceProject {
 			return fmt.Errorf("only source project %q can close this issue", issue.SourceProject)
 		}
 
+		// State validation:
+		// - resolved → closed: source confirms fix works
+		// - reopened → closed: source decided issue no longer needed
+		// - Operator can close from any non-terminal state
+		validFromStates := map[string]bool{"resolved": true, "reopened": true}
+		if !isOperator && !validFromStates[issue.Status] {
+			return fmt.Errorf("issue %d is %s — can only close from resolved or reopened state", id, issue.Status)
+		}
+		if issue.Status == "closed" {
+			return fmt.Errorf("issue %d is already closed", id)
+		}
+
 		now := time.Now()
-		result := tx.Model(&Issue{}).Where("id = ? AND status = ?", id, "resolved").Updates(map[string]any{
+		result := tx.Model(&Issue{}).Where("id = ? AND status = ?", id, issue.Status).Updates(map[string]any{
 			"status":     "closed",
 			"closed_at":  now,
 			"updated_at": now,
@@ -302,7 +318,7 @@ func (s *IssueStore) CloseIssue(ctx context.Context, id int64, sourceProject str
 			return result.Error
 		}
 		if result.RowsAffected == 0 {
-			return fmt.Errorf("issue %d is no longer resolved (concurrent modification)", id)
+			return fmt.Errorf("issue %d state changed concurrently", id)
 		}
 		return nil
 	})
