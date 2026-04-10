@@ -79,11 +79,17 @@ export function handleSessionEnd(
     if (!sessionId?.trim()) return;
 
     // 1. Backfill remaining conversation content (fire-and-forget)
-    //    Filter out heartbeats, SDK metadata, denials — these produce noise observations.
+    //    Filter in two layers: role-based (structural) + content-based (heuristic fallback).
+    //    OpenClaw marks SDK keepalives / tool events with role='system'|'tool', so role
+    //    filtering is the primary defense. classifyMessage catches edge cases where
+    //    denials or metadata leak into user/assistant messages.
     if (config.autoExtract && messages.length > 0) {
       const filtered = messages.filter((m) => {
+        // Primary filter: only keep real conversation roles.
+        if (m.role !== 'user' && m.role !== 'assistant') return false;
         const content = typeof m.content === 'string' ? m.content : '';
         if (!content.trim()) return false;
+        // Secondary filter: content classifier for embedded noise.
         return classifyMessage(content) === 'user_prompt';
       });
       const recent = filtered.slice(-MAX_MESSAGES);
