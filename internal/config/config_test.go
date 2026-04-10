@@ -55,6 +55,17 @@ func (s *ConfigSuite) TestDefault() {
 	s.True(cfg.ContextShowLastSummary)
 	s.Equal(DefaultObservationTypes, cfg.ContextObsTypes)
 	s.Equal(DefaultObservationConcepts, cfg.ContextObsConcepts)
+	// v4 default: injection floor disabled so the silence path is active (FR-1).
+	s.Equal(0, cfg.InjectionFloor)
+}
+
+// TestInjectionFloorEnvOverride verifies that ENGRAM_INJECTION_FLOOR=3 restores legacy fill behavior.
+func (s *ConfigSuite) TestInjectionFloorEnvOverride() {
+	os.Setenv("ENGRAM_INJECTION_FLOOR", "3")
+	defer os.Unsetenv("ENGRAM_INJECTION_FLOOR")
+	cfg, err := Load()
+	s.Require().NoError(err)
+	s.Equal(3, cfg.InjectionFloor)
 }
 
 // TestDataDir tests data directory path.

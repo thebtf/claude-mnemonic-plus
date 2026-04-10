@@ -127,7 +127,7 @@ type Config struct {
 	ConsolidationThreshold float64 `json:"consolidation_threshold"`  // ENGRAM_CONSOLIDATION_THRESHOLD (default: 0.95)
 	AlwaysInjectLimit      int     `json:"always_inject_limit"`       // ENGRAM_ALWAYS_INJECT_LIMIT (default: 20)
 	ProjectInjectLimit     int     `json:"project_inject_limit"`      // ENGRAM_PROJECT_INJECT_LIMIT (default: 15)
-	InjectionFloor         int     `json:"injection_floor"`           // ENGRAM_INJECTION_FLOOR (default: 3)
+	InjectionFloor         int     `json:"injection_floor"`           // ENGRAM_INJECTION_FLOOR (default: 0)
 	SessionBoost           float64 `json:"session_boost"`             // ENGRAM_SESSION_BOOST (default: 1.3)
 
 	// Injection strategy A/B testing (closed-loop learning FR-5)
@@ -297,7 +297,7 @@ func Default() *Config {
 		ConsolidationThreshold:      0.95,  // 95% similarity triggers maintenance-time merge
 		AlwaysInjectLimit:           20,    // Inject up to 20 always-inject observations per session
 		ProjectInjectLimit:          15,    // Inject up to 15 project-scoped observations per session
-		InjectionFloor:              3,     // Always inject at least 3 observations regardless of threshold
+		InjectionFloor:              0,     // Silence path: 0 = disabled (v4 default, FR-1). Operators can set ENGRAM_INJECTION_FLOOR=3 for legacy fill behavior.
 		SessionBoost:                1.3,   // Boost factor for observations from recently active sessions
 		InjectionStrategies:           []string{"baseline", "effectiveness-weighted", "recency-boosted", "diverse"},
 		InjectionStrategyMode:         "round-robin",
