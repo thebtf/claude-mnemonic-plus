@@ -536,7 +536,15 @@ func (s *Service) handleSearchByPrompt(w http.ResponseWriter, r *http.Request) {
 			candidates = candidates[:s.config.LLMFilterCandidates]
 		}
 		relevantIDs := llmFilter.FilterByRelevance(r.Context(), candidates, project, query)
-		if len(relevantIDs) > 0 && len(relevantIDs) < len(candidates) {
+		if len(relevantIDs) == 0 {
+			// LLM filter returned empty set — silence: inject nothing.
+			// This is distinguishable from a retrieval failure by the "silenced" message.
+			log.Info().
+				Str("project", project).
+				Int("total_considered", len(candidates)).
+				Msg("LLM filter silenced injection")
+			clusteredObservations = []*models.Observation{}
+		} else if len(relevantIDs) < len(candidates) {
 			// Build a fast lookup set
 			idSet := make(map[int64]struct{}, len(relevantIDs))
 			for _, id := range relevantIDs {
