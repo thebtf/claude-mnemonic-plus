@@ -2187,6 +2187,15 @@ WHERE utility_propagated_at IS NOT NULL`).Error
 				return tx.Exec(`DROP INDEX IF EXISTS idx_sdk_sessions_utility_propagated_at`).Error
 			},
 		},
+		{
+			ID: "074_observations_commands_run",
+			Migrate: func(tx *gorm.DB) error {
+				return tx.Exec(`ALTER TABLE observations ADD COLUMN IF NOT EXISTS commands_run JSONB NOT NULL DEFAULT '[]'::jsonb`).Error
+			},
+			Rollback: func(tx *gorm.DB) error {
+				return tx.Exec(`ALTER TABLE observations DROP COLUMN IF EXISTS commands_run`).Error
+			},
+		},
 	})
 	if err := m.Migrate(); err != nil {
 		return fmt.Errorf("run gormigrate migrations: %w", err)
