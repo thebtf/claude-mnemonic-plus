@@ -137,3 +137,40 @@ func (s *Service) loadRecentUserPromptsByProject(ctx context.Context, project st
 	}
 	return s.promptStore.GetRecentUserPromptsByProject(ctx, project, limit)
 }
+
+// loadLastUserPromptBySession returns the most recent user prompt for the given session.
+// When sessionID is non-empty, the result is scoped to that session: only prompts whose
+// claude_session_id matches sessionID are considered. When sessionID is empty, it falls
+// back to the most recent prompt across the entire project (cold-start path).
+// This ensures that inject-query derivation is session-scoped so that session A cannot
+// be seeded by session B's last prompt.
+func (s *Service) loadLastUserPromptBySession(ctx context.Context, project, sessionID string, projectLimit int) (*models.UserPromptWithSession, error) {
+	if sessionID != "" {
+		// Hook path: allows tests to inject session-specific behaviour.
+		if s.retrievalHooks != nil && s.retrievalHooks.getLastPromptBySession != nil {
+			return s.retrievalHooks.getLastPromptBySession(ctx, project, sessionID)
+		}
+		// DB path: fetch recent prompts for the project, then return the first one
+		// that belongs to this session. The DB query already orders by created_at DESC,
+		// so the first matching entry is the most-recent prompt for the session.
+		prompts, err := s.loadRecentUserPromptsByProject(ctx, project, projectLimit)
+		if err != nil {
+			return nil, err
+		}
+		for _, p := range prompts {
+			if p.UserPrompt.ClaudeSessionID == sessionID {
+				return p, nil
+			}
+		}
+		// No prompt found for this session — fall through to project-wide fallback below.
+	}
+	// Cold-start or no session: return the most-recent prompt for the project.
+	prompts, err := s.loadRecentUserPromptsByProject(ctx, project, 1)
+	if err != nil {
+		return nil, err
+	}
+	if len(prompts) == 0 {
+		return nil, nil
+	}
+	return prompts[0], nil
+}

@@ -57,6 +57,9 @@ type retrievalHooks struct {
 	getTopImportanceObservations  func(ctx context.Context, project string, limit int) ([]*models.Observation, error)
 	filterByRelevance             func(ctx context.Context, candidates []*models.Observation, project, taskContext string) []int64
 	getRecentUserPromptsByProject func(ctx context.Context, project string, limit int) ([]*models.UserPromptWithSession, error)
+	// getLastPromptBySession returns the most recent user prompt for a specific session.
+	// When nil, loadLastUserPromptBySession falls back to project-wide lookup.
+	getLastPromptBySession func(ctx context.Context, project, sessionID string) (*models.UserPromptWithSession, error)
 }
 
 func withRetrievalRequest(ctx context.Context, agentID, cwd string, metadata *retrievalMetadata) context.Context {

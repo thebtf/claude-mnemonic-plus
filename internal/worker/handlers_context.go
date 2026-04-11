@@ -893,18 +893,18 @@ func (s *Service) handleContextInject(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// --- Relevant section: unified hybrid search via RetrieveRelevant (FR-3) ---
-	// Query is derived from the last user prompt for this session when available,
-	// falling back to the project name. Uses the same pipeline as prompt-search.
+	// Query is derived from the last user prompt for this specific session (session-scoped),
+	// so session A is never seeded by session B's last prompt. Falls back to the most-recent
+	// project-wide prompt when session_id is empty (cold-start), and ultimately to the project
+	// name when no prompt history exists. Uses the same pipeline as prompt-search.
 	// When InjectUnified=false (ENGRAM_INJECT_UNIFIED=false), the legacy path is used instead.
 	var relevantObservations []*models.Observation
 	if s.config == nil || s.config.InjectUnified {
-		// Unified path: derive query from last user prompt, fall back to project name.
+		// Unified path: derive query from the last user prompt for this session.
 		injectQuery := project
-		if sessionID != "" {
-			if prompts, pErr := s.loadRecentUserPromptsByProject(ctx, project, 1); pErr == nil && len(prompts) > 0 {
-				if prompts[0].PromptText != "" {
-					injectQuery = prompts[0].PromptText
-				}
+		if prompt, pErr := s.loadLastUserPromptBySession(ctx, project, sessionID, 20); pErr == nil && prompt != nil {
+			if prompt.PromptText != "" {
+				injectQuery = prompt.PromptText
 			}
 		}
 		opts := RetrievalOptions{MaxResults: 10, SessionID: sessionID}
