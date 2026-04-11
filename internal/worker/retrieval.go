@@ -16,10 +16,17 @@ import (
 	"github.com/thebtf/engram/pkg/models"
 )
 
-// NoiseFloorScore is the minimum composite score an observation must exceed to count as a
-// genuine semantic match. In high-dimensional embedding spaces, nearly all observations pass
-// the raw vector similarity threshold; only scores above 0.05 indicate meaningful relevance.
-const NoiseFloorScore = 0.05
+const (
+	// NoiseFloorScore is the minimum composite score an observation must exceed to count as a
+	// genuine semantic match. In high-dimensional embedding spaces, nearly all observations pass
+	// the raw vector similarity threshold; only scores above 0.05 indicate meaningful relevance.
+	NoiseFloorScore = 0.05
+
+	// vectorPreFilterFactor widens the vector similarity filter by 10% below the project threshold.
+	// This preserves borderline-relevant observations so the reranker can re-evaluate them before
+	// they are discarded. A value < 1.0 means "start filtering slightly below the threshold".
+	vectorPreFilterFactor = 0.9
+)
 
 // RetrievalOptions configures shared semantic retrieval.
 type RetrievalOptions struct {
@@ -121,7 +128,7 @@ func (s *Service) RetrieveRelevant(ctx context.Context, project, query string, o
 			log.Warn().Int("errors", vectorErrors).Str("project", project).Msg("All vector queries failed, falling back to FTS")
 		}
 		if len(allVectorResults) > 0 {
-			filteredResults := vector.FilterByThreshold(allVectorResults, threshold*0.9, 0)
+			filteredResults := vector.FilterByThreshold(allVectorResults, threshold*vectorPreFilterFactor, 0)
 			for _, result := range filteredResults {
 				id := vector.ExtractRowID(result.Metadata)
 				if existingScore, exists := similarityScores[id]; !exists || result.Similarity > existingScore {
@@ -159,6 +166,8 @@ func (s *Service) RetrieveRelevant(ctx context.Context, project, query string, o
 		freshObservations = s.applyReranking(query, freshObservations, similarityScores)
 	}
 
+	// Default 0.9: observations with cosine similarity >= 0.9 are considered duplicates
+	// and collapsed into a single cluster. Overridable via config.ClusteringThreshold.
 	clusteringThreshold := 0.9
 	if s.config != nil && s.config.ClusteringThreshold > 0 {
 		clusteringThreshold = s.config.ClusteringThreshold
