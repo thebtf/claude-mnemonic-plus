@@ -260,6 +260,46 @@ func (s *SessionStore) UpdateSessionOutcome(ctx context.Context, claudeSessionID
 	return nil
 }
 
+// UpdateUtilityPropagatedAt records when utility propagation was last triggered for a session.
+func (s *SessionStore) UpdateUtilityPropagatedAt(ctx context.Context, claudeSessionID string) error {
+	result := s.db.WithContext(ctx).
+		Model(&SDKSession{}).
+		Where("claude_session_id = ?", claudeSessionID).
+		Update("utility_propagated_at", time.Now().UTC())
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return fmt.Errorf("session not found: %s", claudeSessionID)
+	}
+	return nil
+}
+
+// UpdateUtilityPropagatedAtIfStale atomically claims the propagation slot for a session.
+// Returns (true, nil) if the claim succeeded (session was not propagated within the last minute),
+// or (false, nil) if the session is rate-limited (propagated within the last minute).
+// This is the TOCTOU-free replacement for the read-then-write pattern.
+func (s *SessionStore) UpdateUtilityPropagatedAtIfStale(ctx context.Context, claudeSessionID string) (bool, error) {
+	result := s.db.WithContext(ctx).Exec(`
+		UPDATE sdk_sessions
+		SET utility_propagated_at = NOW()
+		WHERE claude_session_id = ?
+		  AND (utility_propagated_at IS NULL OR utility_propagated_at < NOW() - INTERVAL '1 minute')
+	`, claudeSessionID)
+	if result.Error != nil {
+		return false, result.Error
+	}
+	return result.RowsAffected > 0, nil
+}
+
+// ClearUtilityPropagatedAt resets the propagation timestamp to NULL for a session.
+// Called when a background propagation goroutine fails, to allow the next caller to retry.
+func (s *SessionStore) ClearUtilityPropagatedAt(ctx context.Context, claudeSessionID string) error {
+	return s.db.WithContext(ctx).Exec(`
+		UPDATE sdk_sessions SET utility_propagated_at = NULL WHERE claude_session_id = ?
+	`, claudeSessionID).Error
+}
+
 // StrategyStatRow holds aggregated stats for a single injection strategy.
 type StrategyStatRow struct {
 	Strategy  string
@@ -377,6 +417,7 @@ func (s *SessionStore) GetSessionsWithPendingOutcome(ctx context.Context) ([]Pen
 			WHERE oi.session_id = s.claude_session_id
 			AND oi.injected_at > NOW() - INTERVAL '10 minutes'
 		)
+		AND (s.utility_propagated_at IS NULL OR s.utility_propagated_at < NOW() - INTERVAL '2 hours')
 	`).Scan(&rows).Error
 	if err != nil {
 		return nil, err
@@ -417,9 +458,10 @@ func toModelSDKSession(sess *SDKSession) *models.SDKSession {
 		StartedAtEpoch:   sess.StartedAtEpoch,
 		CompletedAt:       sess.CompletedAt,
 		CompletedAtEpoch:  sess.CompletedAtEpoch,
-		Outcome:           sess.Outcome,
-		OutcomeReason:     sess.OutcomeReason,
-		OutcomeRecordedAt: sess.OutcomeRecordedAt,
-		InjectionStrategy: sess.InjectionStrategy,
+		Outcome:             sess.Outcome,
+		OutcomeReason:       sess.OutcomeReason,
+		OutcomeRecordedAt:   sess.OutcomeRecordedAt,
+		UtilityPropagatedAt: sess.UtilityPropagatedAt,
+		InjectionStrategy:   sess.InjectionStrategy,
 	}
 }

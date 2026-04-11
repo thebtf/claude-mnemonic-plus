@@ -55,6 +55,31 @@ func (s *ConfigSuite) TestDefault() {
 	s.True(cfg.ContextShowLastSummary)
 	s.Equal(DefaultObservationTypes, cfg.ContextObsTypes)
 	s.Equal(DefaultObservationConcepts, cfg.ContextObsConcepts)
+	// v4 default: injection floor disabled so the silence path is active (FR-1).
+	s.Equal(0, cfg.InjectionFloor)
+}
+
+// TestInjectionFloorEnvOverride verifies that ENGRAM_INJECTION_FLOOR=3 restores legacy fill behavior.
+func (s *ConfigSuite) TestInjectionFloorEnvOverride() {
+	s.T().Setenv("ENGRAM_INJECTION_FLOOR", "3")
+	cfg, err := Load()
+	s.Require().NoError(err)
+	s.Equal(3, cfg.InjectionFloor)
+}
+
+// TestInjectUnifiedDefaultTrue verifies that ENGRAM_INJECT_UNIFIED defaults to true (FR-3).
+func (s *ConfigSuite) TestInjectUnifiedDefaultTrue() {
+	cfg, err := Load()
+	s.Require().NoError(err)
+	s.True(cfg.InjectUnified, "InjectUnified must default to true so the unified inject path is active")
+}
+
+// TestInjectUnifiedEnvOverride verifies that ENGRAM_INJECT_UNIFIED=false enables the emergency rollback path.
+func (s *ConfigSuite) TestInjectUnifiedEnvOverride() {
+	s.T().Setenv("ENGRAM_INJECT_UNIFIED", "false")
+	cfg, err := Load()
+	s.Require().NoError(err)
+	s.False(cfg.InjectUnified, "ENGRAM_INJECT_UNIFIED=false must activate the legacy inject path")
 }
 
 // TestDataDir tests data directory path.

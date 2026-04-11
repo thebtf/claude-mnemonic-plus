@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"time"
 
+	"github.com/rs/zerolog/log"
 	"github.com/thebtf/engram/internal/learning"
 )
 
@@ -39,6 +41,29 @@ func (s *Server) handleSetSessionOutcomeMCP(ctx context.Context, args json.RawMe
 
 	if err := s.sessionStore.UpdateSessionOutcome(ctx, sessionID, outcomeStr, reason); err != nil {
 		return "", fmt.Errorf("failed to update session outcome: %w", err)
+	}
+
+	if s.injectionStore != nil && s.observationStore != nil {
+		capturedSessionID := sessionID
+		capturedOutcome := outcome
+		capturedInjStore := s.injectionStore
+		capturedObsStore := s.observationStore
+		capturedSessionStore := s.sessionStore
+		go func() {
+			bgCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
+			if _, err := learning.PropagateOutcome(bgCtx, capturedInjStore, capturedObsStore, capturedSessionID, capturedOutcome); err != nil {
+				log.Warn().Err(err).Str("session", capturedSessionID).Msg("MCP set_session_outcome: outcome propagation failed")
+				return
+			}
+			// Update utility_propagated_at so the maintenance guard sees this propagation
+			// and does not double-run for this session.
+			if capturedSessionStore != nil {
+				if err := capturedSessionStore.UpdateUtilityPropagatedAt(bgCtx, capturedSessionID); err != nil {
+					log.Warn().Err(err).Str("session", capturedSessionID).Msg("MCP set_session_outcome: failed to update utility_propagated_at")
+				}
+			}
+		}()
 	}
 
 	return fmt.Sprintf("Session outcome recorded: %s (session: %s)", outcomeStr, sessionID), nil

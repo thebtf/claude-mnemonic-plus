@@ -6,12 +6,13 @@ import (
 	"encoding/json"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/rs/zerolog/log"
+	gormstorage "github.com/thebtf/engram/internal/db/gorm"
 	"github.com/thebtf/engram/internal/learning"
 	"github.com/thebtf/engram/internal/scoring"
-	gormstorage "github.com/thebtf/engram/internal/db/gorm"
 )
 
 // handleGetEffectivenessDistribution godoc
@@ -125,7 +126,8 @@ func (s *Service) handleSetSessionOutcome(w http.ResponseWriter, r *http.Request
 		}
 
 		go func() {
-			bgCtx := context.Background()
+			bgCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
 
 			// Propagate global effectiveness scores.
 			if _, err := learning.PropagateOutcome(bgCtx, injStore, obsStore, capturedSessionID, capturedOutcome); err != nil {
@@ -145,6 +147,81 @@ func (s *Service) handleSetSessionOutcome(w http.ResponseWriter, r *http.Request
 		"session_id":            sessionID,
 		"outcome":               req.Outcome,
 		"observations_affected": injectedCount,
+	})
+}
+
+func (s *Service) handlePropagateOutcome(w http.ResponseWriter, r *http.Request) {
+	sessionID := chi.URLParam(r, "sessionId")
+	if sessionID == "" {
+		http.Error(w, "session id required", http.StatusBadRequest)
+		return
+	}
+
+	s.initMu.RLock()
+	sessionStore := s.sessionStore
+	injStore := s.injectionStore
+	obsStore := s.observationStore
+	s.initMu.RUnlock()
+
+	if sessionStore == nil || injStore == nil || obsStore == nil {
+		http.Error(w, "service not ready", http.StatusServiceUnavailable)
+		return
+	}
+
+	sess, err := sessionStore.FindAnySDKSession(r.Context(), sessionID)
+	if err != nil {
+		http.Error(w, "failed to load session: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if sess == nil {
+		http.Error(w, "session not found", http.StatusNotFound)
+		return
+	}
+
+	outcome := learning.Outcome(sess.Outcome.String)
+	if !sess.Outcome.Valid || !learning.IsValidOutcome(outcome) {
+		http.Error(w, "session outcome not recorded", http.StatusBadRequest)
+		return
+	}
+
+	// Atomically claim the propagation slot. This is TOCTOU-free: the WHERE clause
+	// ensures only one concurrent caller wins the slot; others see zero rows affected.
+	claimed, err := sessionStore.UpdateUtilityPropagatedAtIfStale(r.Context(), sessionID)
+	if err != nil {
+		http.Error(w, "failed to claim propagation slot: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if !claimed {
+		w.WriteHeader(http.StatusConflict)
+		writeJSON(w, map[string]interface{}{
+			"error":   "rate_limited",
+			"message": "propagation already triggered within the last 60 seconds",
+		})
+		return
+	}
+
+	capturedSessionID := sessionID
+	capturedOutcome := outcome
+	capturedSessionStore := sessionStore
+	capturedInjStore := injStore
+	capturedObsStore := obsStore
+	go func() {
+		bgCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		if _, err := learning.PropagateOutcome(bgCtx, capturedInjStore, capturedObsStore, capturedSessionID, capturedOutcome); err != nil {
+			log.Warn().Err(err).Str("session", capturedSessionID).Msg("manual outcome propagation failed")
+			// Revert the timestamp claim so the next caller can retry.
+			if clearErr := capturedSessionStore.ClearUtilityPropagatedAt(context.Background(), capturedSessionID); clearErr != nil {
+				log.Warn().Err(clearErr).Str("session", capturedSessionID).Msg("failed to clear utility_propagated_at after propagation failure")
+			}
+		}
+	}()
+
+	// Return 202 Accepted: propagation is dispatched asynchronously.
+	w.WriteHeader(http.StatusAccepted)
+	writeJSON(w, map[string]interface{}{
+		"session_id": sessionID,
+		"status":     "accepted",
 	})
 }
 
@@ -471,17 +548,17 @@ func (s *Service) handleGetSessionInjections(w http.ResponseWriter, r *http.Requ
 	}
 
 	writeJSON(w, map[string]any{
-		"session_id":  sessionID,
-		"injections":  details,
-		"total":       totalInjections,
-		"sections":    sections,
+		"session_id": sessionID,
+		"injections": details,
+		"total":      totalInjections,
+		"sections":   sections,
 		"summary": map[string]any{
-			"high_effectiveness":    highEff,
-			"medium_effectiveness":  medEff,
-			"low_effectiveness":     lowEff,
-			"insufficient_data":     noData,
-			"avg_effectiveness":     avgEffectiveness,
-			"evaluated":             evaluated,
+			"high_effectiveness":   highEff,
+			"medium_effectiveness": medEff,
+			"low_effectiveness":    lowEff,
+			"insufficient_data":    noData,
+			"avg_effectiveness":    avgEffectiveness,
+			"evaluated":            evaluated,
 		},
 	})
 }
