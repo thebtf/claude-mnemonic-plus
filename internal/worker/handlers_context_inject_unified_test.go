@@ -22,40 +22,38 @@ func newInjectTestService(injectUnified bool) *Service {
 }
 
 // TestInjectRelevant_UnifiedPath_UsesLastUserPrompt verifies that when InjectUnified=true and a
-// session has a recent user prompt, the relevant section is populated using that prompt as the query.
+// session has a recent user prompt, the relevant section is populated using that session's prompt
+// as the retrieval query — not a prompt from another session.
 func TestInjectRelevant_UnifiedPath_UsesLastUserPrompt(t *testing.T) {
 	svc := newInjectTestService(true)
 
-	// Mock: last user prompt for this project returns "auth bug fix"
-	svc.retrievalHooks.getRecentUserPromptsByProject = func(_ context.Context, project string, limit int) ([]*models.UserPromptWithSession, error) {
-		return []*models.UserPromptWithSession{
-			{Project: project, UserPrompt: models.UserPrompt{PromptText: "auth bug fix"}},
-		}, nil
+	// Wire the session-scoped hook: returns "auth bug fix" only when the correct sessionID is supplied.
+	const wantSessionID = "session-abc"
+	svc.retrievalHooks.getLastPromptBySession = func(_ context.Context, _ string, sessionID string) (*models.UserPromptWithSession, error) {
+		if sessionID == wantSessionID {
+			return &models.UserPromptWithSession{UserPrompt: models.UserPrompt{PromptText: "auth bug fix"}}, nil
+		}
+		return nil, nil
 	}
 
-	// Mock: RetrieveRelevant captures the query passed to it
+	// Capture the query passed to RetrieveRelevant.
 	var capturedQuery string
 	svc.retrievalHooks.retrieveRelevant = func(_ context.Context, _ string, query string, _ RetrievalOptions) ([]*models.Observation, map[int64]float64, error) {
 		capturedQuery = query
 		return []*models.Observation{newObservation(42, "Auth fix")}, map[int64]float64{42: 0.9}, nil
 	}
 
-	// Simulate the relevant-section logic directly (the handler logic is in handleContextInject;
-	// we replicate the inject-query derivation here to keep the test pure and fast).
 	project := "engram"
-	sessionID := "session-abc"
 	recentIDs := map[int64]struct{}{}
 
 	injectQuery := project
-	if sessionID != "" {
-		if prompts, pErr := svc.loadRecentUserPromptsByProject(context.Background(), project, 1); pErr == nil && len(prompts) > 0 {
-			if prompts[0].PromptText != "" {
-				injectQuery = prompts[0].PromptText
-			}
+	if prompt, pErr := svc.loadLastUserPromptBySession(context.Background(), project, wantSessionID, 20); pErr == nil && prompt != nil {
+		if prompt.PromptText != "" {
+			injectQuery = prompt.PromptText
 		}
 	}
 
-	opts := RetrievalOptions{MaxResults: 10, SessionID: sessionID}
+	opts := RetrievalOptions{MaxResults: 10, SessionID: wantSessionID}
 	retrieved, _, err := svc.RetrieveRelevant(context.Background(), project, injectQuery, opts)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -77,12 +75,16 @@ func TestInjectRelevant_UnifiedPath_UsesLastUserPrompt(t *testing.T) {
 	}
 }
 
-// TestInjectRelevant_UnifiedPath_FallsBackToProjectName verifies that when no user prompt is found,
-// the inject query falls back to the project name.
+// TestInjectRelevant_UnifiedPath_FallsBackToProjectName verifies that when no user prompt is found
+// for the session (or session_id is empty), the inject query falls back to the project name.
 func TestInjectRelevant_UnifiedPath_FallsBackToProjectName(t *testing.T) {
 	svc := newInjectTestService(true)
 
-	// Mock: no prompts for this project
+	// No session-scoped prompt — getLastPromptBySession returns nil.
+	svc.retrievalHooks.getLastPromptBySession = func(_ context.Context, _ string, _ string) (*models.UserPromptWithSession, error) {
+		return nil, nil
+	}
+	// Also ensure project-wide fallback returns nothing (cold-start).
 	svc.retrievalHooks.getRecentUserPromptsByProject = func(_ context.Context, _ string, _ int) ([]*models.UserPromptWithSession, error) {
 		return nil, nil
 	}
@@ -97,11 +99,9 @@ func TestInjectRelevant_UnifiedPath_FallsBackToProjectName(t *testing.T) {
 	sessionID := "some-session"
 
 	injectQuery := project
-	if sessionID != "" {
-		if prompts, pErr := svc.loadRecentUserPromptsByProject(context.Background(), project, 1); pErr == nil && len(prompts) > 0 {
-			if prompts[0].PromptText != "" {
-				injectQuery = prompts[0].PromptText
-			}
+	if prompt, pErr := svc.loadLastUserPromptBySession(context.Background(), project, sessionID, 20); pErr == nil && prompt != nil {
+		if prompt.PromptText != "" {
+			injectQuery = prompt.PromptText
 		}
 	}
 
@@ -116,15 +116,21 @@ func TestInjectRelevant_UnifiedPath_FallsBackToProjectName(t *testing.T) {
 	}
 }
 
-// TestInjectRelevant_TwoSessionsDifferentPrompts verifies the anti-stub requirement:
-// two sessions with different last prompts produce different queries (swap body → identical queries).
+// TestInjectRelevant_TwoSessionsDifferentPrompts is the anti-stub test.
+// Two sessions with different last prompts must produce different inject queries.
+//
+// Anti-stub guarantee: if loadLastUserPromptBySession is replaced with the old project-wide
+// loadRecentUserPromptsByProject, then BOTH calls would return the same prompt (the most
+// recent project-wide entry), causing q1 == q2 and THIS test to fail.
 func TestInjectRelevant_TwoSessionsDifferentPrompts(t *testing.T) {
-	makeService := func(lastPrompt string) (string, error) {
+	runSession := func(sessionID, lastPrompt string) (string, error) {
 		svc := newInjectTestService(true)
-		svc.retrievalHooks.getRecentUserPromptsByProject = func(_ context.Context, _ string, _ int) ([]*models.UserPromptWithSession, error) {
-			return []*models.UserPromptWithSession{
-				{UserPrompt: models.UserPrompt{PromptText: lastPrompt}},
-			}, nil
+		// Session-scoped hook: returns different prompts for different session IDs.
+		svc.retrievalHooks.getLastPromptBySession = func(_ context.Context, _ string, sid string) (*models.UserPromptWithSession, error) {
+			if sid == sessionID {
+				return &models.UserPromptWithSession{UserPrompt: models.UserPrompt{PromptText: lastPrompt}}, nil
+			}
+			return nil, nil
 		}
 		var captured string
 		svc.retrievalHooks.retrieveRelevant = func(_ context.Context, _ string, q string, _ RetrievalOptions) ([]*models.Observation, map[int64]float64, error) {
@@ -133,26 +139,71 @@ func TestInjectRelevant_TwoSessionsDifferentPrompts(t *testing.T) {
 		}
 
 		project := "proj"
-		sessionID := "s1"
 		injectQuery := project
-		if sessionID != "" {
-			if prompts, pErr := svc.loadRecentUserPromptsByProject(context.Background(), project, 1); pErr == nil && len(prompts) > 0 {
-				if prompts[0].PromptText != "" {
-					injectQuery = prompts[0].PromptText
-				}
+		if prompt, pErr := svc.loadLastUserPromptBySession(context.Background(), project, sessionID, 20); pErr == nil && prompt != nil {
+			if prompt.PromptText != "" {
+				injectQuery = prompt.PromptText
 			}
 		}
 		_, _, err := svc.RetrieveRelevant(context.Background(), project, injectQuery, RetrievalOptions{MaxResults: 10})
 		return captured, err
 	}
 
-	q1, err1 := makeService("fix authentication token")
-	q2, err2 := makeService("refactor database layer")
+	q1, err1 := runSession("s1", "fix authentication token")
+	q2, err2 := runSession("s2", "refactor database layer")
 	if err1 != nil || err2 != nil {
 		t.Fatalf("unexpected errors: %v / %v", err1, err2)
 	}
 	if q1 == q2 {
-		t.Errorf("expected different queries for different prompts, both returned %q", q1)
+		t.Errorf("expected different queries for different sessions, both returned %q", q1)
+	}
+}
+
+// TestInjectRelevant_SessionScoped_IgnoresOtherSessionPrompts verifies that the session-scoped
+// lookup returns the correct prompt for each session ID and does not bleed prompts across sessions.
+func TestInjectRelevant_SessionScoped_IgnoresOtherSessionPrompts(t *testing.T) {
+	svc := newInjectTestService(true)
+
+	// Wire a hook that returns different prompts for different session IDs.
+	svc.retrievalHooks.getLastPromptBySession = func(_ context.Context, _ string, sessionID string) (*models.UserPromptWithSession, error) {
+		switch sessionID {
+		case "session-auth":
+			return &models.UserPromptWithSession{UserPrompt: models.UserPrompt{PromptText: "how does auth work"}}, nil
+		case "session-db":
+			return &models.UserPromptWithSession{UserPrompt: models.UserPrompt{PromptText: "add a migration"}}, nil
+		default:
+			return nil, nil
+		}
+	}
+
+	captureQuery := func(sessionID string) string {
+		var captured string
+		svc.retrievalHooks.retrieveRelevant = func(_ context.Context, _ string, q string, _ RetrievalOptions) ([]*models.Observation, map[int64]float64, error) {
+			captured = q
+			return nil, nil, nil
+		}
+		project := "proj"
+		injectQuery := project
+		if prompt, pErr := svc.loadLastUserPromptBySession(context.Background(), project, sessionID, 20); pErr == nil && prompt != nil {
+			if prompt.PromptText != "" {
+				injectQuery = prompt.PromptText
+			}
+		}
+		_, _, _ = svc.RetrieveRelevant(context.Background(), project, injectQuery, RetrievalOptions{MaxResults: 10})
+		return captured
+	}
+
+	qAuth := captureQuery("session-auth")
+	qDB := captureQuery("session-db")
+
+	if qAuth != "how does auth work" {
+		t.Errorf("session-auth: expected query 'how does auth work', got %q", qAuth)
+	}
+	if qDB != "add a migration" {
+		t.Errorf("session-db: expected query 'add a migration', got %q", qDB)
+	}
+	if qAuth == qDB {
+		t.Errorf("session-auth and session-db produced the same query %q — sessions are not isolated", qAuth)
 	}
 }
 
