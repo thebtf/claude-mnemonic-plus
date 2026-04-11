@@ -140,16 +140,18 @@ func (s *Service) handleSearchByPrompt(w http.ResponseWriter, r *http.Request) {
 	query := r.URL.Query().Get("query")
 	cwd := r.URL.Query().Get("cwd")
 	agentID := r.URL.Query().Get("agent_id")
+	filesBeingEdited := r.URL.Query()["files_being_edited"]
 
 	// For POST requests, allow JSON body to override query params.
 	var obsTypeFilter string
 	if r.Method == http.MethodPost && r.Body != nil {
 		var body struct {
-			Project string `json:"project"`
-			Query   string `json:"query"`
-			Cwd     string `json:"cwd"`
-			AgentID string `json:"agent_id"`
-			ObsType string `json:"obs_type"`
+			Project         string `json:"project"`
+			Query           string `json:"query"`
+			Cwd             string `json:"cwd"`
+			AgentID         string `json:"agent_id"`
+			ObsType         string `json:"obs_type"`
+			FilesBeingEdited []string `json:"files_being_edited"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&body); err == nil {
 			if body.Project != "" {
@@ -166,6 +168,9 @@ func (s *Service) handleSearchByPrompt(w http.ResponseWriter, r *http.Request) {
 			}
 			if body.ObsType != "" {
 				obsTypeFilter = body.ObsType
+			}
+			if len(body.FilesBeingEdited) > 0 {
+				filesBeingEdited = body.FilesBeingEdited
 			}
 			// agent_id acts as project scope for OpenClaw agents without filesystem context
 			if project == "" && agentID != "" {
@@ -204,8 +209,9 @@ func (s *Service) handleSearchByPrompt(w http.ResponseWriter, r *http.Request) {
 	retrievalMeta := &retrievalMetadata{}
 	retrievalCtx := withRetrievalRequest(r.Context(), agentID, cwd, retrievalMeta)
 	clusteredObservations, similarityScores, err := s.RetrieveRelevant(retrievalCtx, project, query, RetrievalOptions{
-		MaxResults:   maxResults,
-		UseLLMFilter: s.config.LLMFilterEnabled,
+		MaxResults:    maxResults,
+		UseLLMFilter:  s.config.LLMFilterEnabled,
+		FilePaths:     filesBeingEdited,
 	})
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -405,7 +411,7 @@ func (s *Service) handleFileContext(w http.ResponseWriter, r *http.Request) {
 			// Build search query from file path
 			query := buildFileQuery(file)
 
-			where := vector.BuildWhereFilter(vector.DocTypeObservation, project, false)
+			where := vector.BuildWhereFilter(vector.DocTypeObservation, project, false, nil)
 			vectorResults, vecErr := s.vectorClient.Query(ctx, query, limit*2, where)
 			if vecErr != nil {
 				log.Warn().Err(vecErr).Str("file", file).Msg("Vector search failed for file context")
@@ -618,6 +624,16 @@ func compactObservations(observations []*models.Observation) []map[string]any {
 	return compactObservationsWithLimit(observations, -1)
 }
 
+func projectBriefingNarrative(enabled bool, briefing *models.Observation) any {
+	if !enabled {
+		return nil
+	}
+	if briefing == nil || !briefing.Narrative.Valid || strings.TrimSpace(briefing.Narrative.String) == "" {
+		return nil
+	}
+	return briefing.Narrative.String
+}
+
 // compactObservationsWithLimit converts observations to compact format.
 // First `fullCount` observations get full detail (narrative + facts).
 // Remaining observations get condensed format (title + subtitle only).
@@ -775,16 +791,18 @@ func formatStructured(obs *models.Observation) string {
 // @Router /api/context/inject [get]
 func (s *Service) handleContextInject(w http.ResponseWriter, r *http.Request) {
 	var project, agentID, cwd, legacyProject, gitRemote, relativePath, sessionID string
+	var filesBeingEdited []string
 
 	if r.Method == http.MethodPost {
 		var req struct {
-			Project       string `json:"project"`
-			AgentID       string `json:"agent_id"`
-			Cwd           string `json:"cwd"`
-			LegacyProject string `json:"legacy_project"`
-			GitRemote     string `json:"git_remote"`
-			RelativePath  string `json:"relative_path"`
-			SessionID     string `json:"session_id"`
+			Project          string   `json:"project"`
+			AgentID          string   `json:"agent_id"`
+			Cwd              string   `json:"cwd"`
+			LegacyProject    string   `json:"legacy_project"`
+			GitRemote        string   `json:"git_remote"`
+			RelativePath     string   `json:"relative_path"`
+			SessionID        string   `json:"session_id"`
+			FilesBeingEdited []string `json:"files_being_edited"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			http.Error(w, "Invalid JSON: "+err.Error(), http.StatusBadRequest)
@@ -797,6 +815,7 @@ func (s *Service) handleContextInject(w http.ResponseWriter, r *http.Request) {
 		gitRemote = req.GitRemote
 		relativePath = req.RelativePath
 		sessionID = req.SessionID
+		filesBeingEdited = req.FilesBeingEdited
 	} else {
 		// GET (deprecated — use POST)
 		project = r.URL.Query().Get("project")
@@ -806,6 +825,7 @@ func (s *Service) handleContextInject(w http.ResponseWriter, r *http.Request) {
 		gitRemote = r.URL.Query().Get("git_remote")
 		relativePath = r.URL.Query().Get("relative_path")
 		sessionID = r.URL.Query().Get("session_id")
+		filesBeingEdited = r.URL.Query()["files_being_edited"]
 	}
 
 	// Fall back to agent_id as session proxy when no explicit session_id provided
@@ -907,7 +927,7 @@ func (s *Service) handleContextInject(w http.ResponseWriter, r *http.Request) {
 				injectQuery = prompt.PromptText
 			}
 		}
-		opts := RetrievalOptions{MaxResults: 10, SessionID: sessionID}
+		opts := RetrievalOptions{MaxResults: 10, SessionID: sessionID, FilePaths: filesBeingEdited}
 		retrieved, _, retrieveErr := s.RetrieveRelevant(ctx, project, injectQuery, opts)
 		if retrieveErr != nil {
 			log.Debug().Err(retrieveErr).Str("project", project).Msg("RetrieveRelevant failed for context inject relevant section")
@@ -923,7 +943,7 @@ func (s *Service) handleContextInject(w http.ResponseWriter, r *http.Request) {
 		// Uses hardcoded query with position-rank + temporal boost instead of hybrid search.
 		if s.vectorClient != nil && s.vectorClient.IsConnected() {
 			legacyQuery := project + " code development"
-			where := vector.BuildWhereFilter(vector.DocTypeObservation, project, false)
+			where := vector.BuildWhereFilter(vector.DocTypeObservation, project, false, nil)
 
 			vectorResults, vecErr := s.vectorClient.Query(ctx, legacyQuery, 20, where)
 			if vecErr != nil {
@@ -996,6 +1016,17 @@ func (s *Service) handleContextInject(w http.ResponseWriter, r *http.Request) {
 	// Add guidance IDs to recent dedup set
 	for _, obs := range guidanceObservations {
 		recentIDs[obs.ID] = struct{}{}
+	}
+
+	// --- Project briefing section: optional synthesized per-project digest (FR-6) ---
+	var projectBriefing *models.Observation
+	if s.config.ProjectBriefingEnabled && s.observationStore != nil {
+		briefingObs, briefingErr := s.observationStore.GetProjectBriefingObservation(ctx, project)
+		if briefingErr != nil {
+			log.Debug().Err(briefingErr).Str("project", project).Msg("Failed to fetch project briefing observation")
+		} else {
+			projectBriefing = briefingObs
+		}
 	}
 
 	// --- Always-inject section: observations tagged with "always-inject" concept (FR-1, FR-6) ---
@@ -1230,6 +1261,7 @@ func (s *Service) handleContextInject(w http.ResponseWriter, r *http.Request) {
 			"relevant":           compactObservations(relevantObservations),
 			"guidance":           compactObservations(guidanceObservations),
 			"always_inject":      compactObservations(alwaysInjectObservations),
+			"project_briefing":   projectBriefingNarrative(s.config.ProjectBriefingEnabled, projectBriefing),
 			"full_count":         fullCount,
 			"stale_excluded":     staleCount,
 			"duplicates_removed": duplicatesRemoved,
@@ -1245,6 +1277,7 @@ func (s *Service) handleContextInject(w http.ResponseWriter, r *http.Request) {
 			"relevant":           relevantObservations,
 			"guidance":           guidanceObservations,
 			"always_inject":      alwaysInjectObservations,
+			"project_briefing":   projectBriefingNarrative(s.config.ProjectBriefingEnabled, projectBriefing),
 			"full_count":         fullCount,
 			"stale_excluded":     staleCount,
 			"duplicates_removed": duplicatesRemoved,

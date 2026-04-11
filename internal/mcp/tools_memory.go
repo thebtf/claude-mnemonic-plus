@@ -18,6 +18,27 @@ import (
 	"github.com/thebtf/engram/pkg/models"
 )
 
+func isValidStoreObservationType(obsType models.ObservationType) bool {
+	switch obsType {
+	case models.ObsTypeDecision,
+		models.ObsTypeBugfix,
+		models.ObsTypeFeature,
+		models.ObsTypeRefactor,
+		models.ObsTypeDiscovery,
+		models.ObsTypeChange,
+		models.ObsTypeGuidance,
+		models.ObsTypeCredential,
+		models.ObsTypeEntity,
+		models.ObsTypeWiki,
+		models.ObsTypePitfall,
+		models.ObsTypeOperational,
+		models.ObsTypeTimeline:
+		return true
+	default:
+		return false
+	}
+}
+
 // handleStoreMemory explicitly stores a memory/observation.
 func (s *Server) handleStoreMemory(ctx context.Context, args json.RawMessage) (string, error) {
 	if s.observationStore == nil {
@@ -81,6 +102,7 @@ func (s *Server) handleStoreMemory(ctx context.Context, args json.RawMessage) (s
 	if dedupThreshold <= 0 {
 		dedupThreshold = 0.92
 	}
+	storePathSupersessionEnabled := cfg.StorePathSupersessionEnabled
 
 	if utf8.RuneCountInString(params.Content) > hardLimit {
 		return "", fmt.Errorf("content exceeds maximum length of %d characters", hardLimit)
@@ -116,6 +138,9 @@ func (s *Server) handleStoreMemory(ctx context.Context, args json.RawMessage) (s
 		}
 	}
 	obsType := models.ObservationType(obsTypeStr)
+	if !isValidStoreObservationType(obsType) {
+		return "", fmt.Errorf("invalid type %q: must be one of decision, bugfix, feature, refactor, discovery, change, guidance, credential, entity, wiki, pitfall, operational, timeline", obsTypeStr)
+	}
 
 	// Expand hierarchical tags: "lang:go:concurrency" -> ["lang", "lang:go", "lang:go:concurrency"]
 	seen := make(map[string]bool)
@@ -171,11 +196,19 @@ func (s *Server) handleStoreMemory(ctx context.Context, args json.RawMessage) (s
 			return string(out), nil
 		}
 		if dedupResult.Action == dedup.ActionUpdate {
-			supersededID = dedupResult.ExistingID
-			log.Info().
-				Int64("superseded_id", dedupResult.ExistingID).
-				Float64("similarity", dedupResult.Similarity).
-				Msg("store_memory: superseding existing observation (contradiction zone)")
+			if storePathSupersessionEnabled {
+				supersededID = dedupResult.ExistingID
+				log.Info().
+					Int64("superseded_id", dedupResult.ExistingID).
+					Float64("similarity", dedupResult.Similarity).
+					Msg("store_memory: superseding existing observation (contradiction zone)")
+			} else {
+				contradictionAction = "ADD"
+				log.Info().
+					Int64("existing_id", dedupResult.ExistingID).
+					Float64("similarity", dedupResult.Similarity).
+					Msg("store_memory: store-path supersession disabled; keeping existing observation active")
+			}
 		}
 	}
 	if contradictionAction == "" {
@@ -250,7 +283,7 @@ func (s *Server) handleStoreMemory(ctx context.Context, args json.RawMessage) (s
 		if threshold <= 0 {
 			threshold = 0.9
 		}
-		where := vector.BuildWhereFilter(vector.DocTypeObservation, params.Project, false)
+		where := vector.BuildWhereFilter(vector.DocTypeObservation, params.Project, false, nil)
 		similar, err := s.vectorClient.Query(ctx, params.Content, 3, where)
 		if err == nil {
 			for _, result := range similar {
@@ -328,7 +361,7 @@ func computeTTLDays(explicit *int, concepts []string) int {
 		"api": 7, "endpoint": 7,
 		"library": 30, "framework": 30,
 		"language-feature": 90,
-		"architecture": 180, "pattern": 180,
+		"architecture":     180, "pattern": 180,
 	}
 	minTTL := 0
 	for _, c := range concepts {
@@ -498,6 +531,15 @@ func (s *Server) handleRateMemory(ctx context.Context, args json.RawMessage) (st
 
 	id := coerceInt64(m["id"], 0)
 	rating := coerceString(m["rating"], "")
+	if rating == "" {
+		if usefulRaw, ok := m["useful"]; ok && usefulRaw != nil {
+			if coerceBool(usefulRaw, false) {
+				rating = "useful"
+			} else {
+				rating = "not_useful"
+			}
+		}
+	}
 
 	if id == 0 {
 		return "", fmt.Errorf("id required")

@@ -365,14 +365,47 @@ export class EngramRestClient {
 
   /**
    * Rate an observation as useful or not useful.
-   * POST /api/observations/{id}/feedback { feedback: 1 or -1 }
+   * MCP uses feedback(action="rate", id, rating="useful"|"not_useful").
    */
-  async rateObservation(id: number, useful: boolean): Promise<boolean> {
-    const resp = await this.post<{ success: boolean }>(
-      `/api/observations/${id}/feedback`,
-      { feedback: useful ? 1 : -1 },
+  async rateObservation(id: number, rating: 'useful' | 'not_useful'): Promise<boolean> {
+    const resp = await this.post<{
+      result?: { content?: Array<{ type?: string; text?: string }>; isError?: boolean };
+      error?: { code?: number; message?: string };
+    }>(
+      '/mcp',
+      {
+        jsonrpc: '2.0',
+        id: 1,
+        method: 'tools/call',
+        params: {
+          name: 'feedback',
+          arguments: {
+            action: 'rate',
+            id,
+            rating,
+          },
+        },
+      },
     );
-    return resp != null;
+
+    if (!resp) return false;
+
+    if (resp.error) {
+      console.error(`[engram] rateObservation failed: ${resp.error.message ?? 'unknown error'}`);
+      return false;
+    }
+
+    if (resp.result?.isError) {
+      console.error('[engram] rateObservation failed: MCP tool result flagged as error');
+      return false;
+    }
+
+    const content = resp.result?.content;
+    if (!Array.isArray(content) || content.length === 0) {
+      return false;
+    }
+
+    return content.some((item) => typeof item?.text === 'string' && item.text.trim().length > 0);
   }
 
   /**
@@ -461,12 +494,14 @@ export class EngramRestClient {
 
   async listIssues(params: {
     project?: string;
+    source_project?: string;
     status?: string;
     limit?: number;
     offset?: number;
   }): Promise<IssueListResponse | null> {
     const qs = new URLSearchParams();
     if (params.project) qs.set('project', params.project);
+    if (params.source_project) qs.set('source_project', params.source_project);
     if (params.status) qs.set('status', params.status);
     if (params.limit) qs.set('limit', String(params.limit));
     if (params.offset) qs.set('offset', String(params.offset));

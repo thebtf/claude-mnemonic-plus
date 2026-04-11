@@ -355,17 +355,55 @@ function incrementSessionSignals(sessionID, increments) {
     } catch {
       // File doesn't exist yet — start fresh
     }
+
+    const next = { ...current };
     for (const [key, delta] of Object.entries(increments)) {
-      current[key] = (current[key] || 0) + (Number(delta) || 0);
+      next[key] = (next[key] || 0) + (Number(delta) || 0);
     }
-    fs.writeFileSync(p, JSON.stringify(current), 'utf8');
+    fs.writeFileSync(p, JSON.stringify(next), 'utf8');
   } catch {
     // Signal tracking is best-effort; never throw
   }
 }
 
 /**
- * Read accumulated signal counters for the given session.
+ * Track up to 10 recently touched files for the given session, with dedupe.
+ * Keeps insertion order and evicts the oldest file when exceeding the limit.
+ * Stores data under the `files` key, alongside numeric counters.
+ * @param {string} sessionID - Claude session ID
+ * @param {string} filePath - Absolute or relative file path
+ */
+function appendSessionFile(sessionID, filePath) {
+  if (!sessionID || !filePath) return;
+  try {
+    const p = _signalPath(sessionID);
+    let current = {};
+    try {
+      current = JSON.parse(fs.readFileSync(p, 'utf8'));
+    } catch {
+      // File doesn't exist yet — start fresh
+    }
+
+    const file = String(filePath);
+    const priorFiles = Array.isArray(current.files)
+      ? current.files.filter((entry) => typeof entry === 'string')
+      : [];
+    const nextFiles = priorFiles.filter((entry) => entry !== file);
+    nextFiles.push(file);
+
+    if (nextFiles.length > 10) {
+      nextFiles.splice(0, nextFiles.length - 10);
+    }
+
+    const next = { ...current, files: nextFiles };
+    fs.writeFileSync(p, JSON.stringify(next), 'utf8');
+  } catch {
+    // Signal tracking is best-effort; never throw
+  }
+}
+
+/**
+ * Read accumulated signal counters and file history for the given session.
  * Returns an empty object when no signals have been recorded.
  * @param {string} sessionID - Claude session ID
  * @returns {Object}
@@ -377,6 +415,23 @@ function getSessionSignals(sessionID) {
     return JSON.parse(fs.readFileSync(p, 'utf8'));
   } catch {
     return {};
+  }
+}
+
+/**
+ * Read file history for the given session.
+ * Returns an empty array when no files have been recorded.
+ * @param {string} sessionID - Claude session ID
+ * @returns {string[]}
+ */
+function getSessionFiles(sessionID) {
+  if (!sessionID) return [];
+  try {
+    const current = getSessionSignals(sessionID);
+    const files = Array.isArray(current.files) ? current.files : [];
+    return files.filter((entry) => typeof entry === 'string');
+  } catch {
+    return [];
   }
 }
 
@@ -513,11 +568,12 @@ function formatIssuesBlock(issues, project) {
   const nowMs = Date.now();
 
   let block = `<open-issues count="${sorted.length}" project="${project}" action-required="true">\n`;
-  block += `ACTION REQUIRED: ${sorted.length} open issue(s) assigned to this project.\n`;
+  block += `ACTION REQUIRED: ${sorted.length} active issue(s) assigned to this project (statuses: open, acknowledged, reopened).\n`;
   block += `Before starting new work, you MUST triage these. Run /engram:issue for the full workflow, or at minimum:\n`;
   block += `  1. Read each with issues(action="get", id=N, project="${project}")\n`;
-  block += `  2. Resolve, comment with progress, or explain blocker\n`;
-  block += `  3. Do NOT close — only the source agent closes after verifying your fix\n`;
+  block += `  2. Treat them as YOUR project's inbox and direct work orders — study, investigate, test, implement, comment, resolve, or reject with evidence\n`;
+  block += `  3. acknowledged means delivered and accepted into YOUR active backlog, not done\n`;
+  block += `  4. Do NOT close — only the source agent closes after verifying your fix\n`;
   block += `Ignoring this block means real work from another agent is blocked on you.\n\n`;
 
   for (const issue of sorted) {
@@ -565,10 +621,11 @@ function formatResolvedIssuesBlock(issues, project) {
   let block = `<resolved-issues from-you count="${issues.length}" project="${project}" action-required="true">\n`;
   block += `ACTION REQUIRED: ${issues.length} issue(s) you filed were RESOLVED by target agents. You must verify.\n`;
   block += `Run /engram:issue for the full workflow, or at minimum for each issue:\n`;
-  block += `  1. issues(action="get", id=N) — read the resolution comment\n`;
-  block += `  2. Actually verify the fix works (test, read code, check deployed version)\n`;
-  block += `  3. If it works: issues(action="close", id=N, project="${project}")\n`;
-  block += `  4. If it doesn't: issues(action="reopen", id=N, project="${project}", body="<concrete evidence>")\n`;
+  block += `  1. issues(action="get", id=N) — read the resolution comment and understand what the other project claims to have fixed or added\n`;
+  block += `  2. Treat this as YOUR follow-up inbox for cross-project dialogue: inspect status, read comments/reports, test, verify, and judge result quality\n`;
+  block += `  3. If it works and you're satisfied: issues(action="close", id=N, project="${project}")\n`;
+  block += `  4. If it is incomplete, wrong, misunderstood, or unsatisfactory: issues(action="reopen", id=N, project="${project}", body="<concrete evidence>")\n`;
+  block += `  5. If more discussion is needed before reopen/close: comment with precise feedback and what still needs verification\n`;
   block += `Leaving these unverified means false-positive 'fixed' claims stay in the system.\n\n`;
 
   for (const issue of issues) {
@@ -613,7 +670,9 @@ module.exports = {
   RunStatuslineHook,
   writeResponse,
   incrementSessionSignals,
+  appendSessionFile,
   getSessionSignals,
+  getSessionFiles,
   clearSessionSignals,
   diffScope,
   createPendingMarker,

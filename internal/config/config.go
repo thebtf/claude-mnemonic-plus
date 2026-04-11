@@ -36,100 +36,166 @@ var CriticalConcepts = []string{
 	"gotcha", "pattern", "problem-solution", "trade-off",
 }
 
+// SearchLaneConfig defines retrieval policy overrides for typed search lanes.
+// Duplicated in config package to avoid an import cycle with internal/search.
+type SearchLaneConfig struct {
+	MinScore       float64 `json:"min_score"`
+	TopK           int     `json:"top_k"`
+	RerankerWeight float64 `json:"reranker_weight"`
+}
+
+// DefaultTypeSearchLanes is the canonical default typed-lane map for config loading.
+// Values mirror internal/search/DefaultSearchLanes but live here to avoid package cycles.
+var DefaultTypeSearchLanes = map[string]SearchLaneConfig{
+	"guidance": {MinScore: 0.20, TopK: 5, RerankerWeight: 1.5},
+	"pitfall":  {MinScore: 0.20, TopK: 5, RerankerWeight: 1.5},
+	"decision": {MinScore: 0.55, TopK: 3, RerankerWeight: 1.0},
+	"wiki":     {MinScore: 0.65, TopK: 2, RerankerWeight: 0.8},
+	"entity":   {MinScore: 0.65, TopK: 2, RerankerWeight: 0.8},
+	"pattern":  {MinScore: 0.40, TopK: 5, RerankerWeight: 1.2},
+	"bugfix":   {MinScore: 0.40, TopK: 5, RerankerWeight: 1.2},
+	"feature":  {MinScore: 0.40, TopK: 5, RerankerWeight: 1.2},
+	"default":  {MinScore: 0.35, TopK: 10, RerankerWeight: 1.0},
+}
+
+func cloneTypeSearchLanes(src map[string]SearchLaneConfig) map[string]SearchLaneConfig {
+	if len(src) == 0 {
+		return map[string]SearchLaneConfig{}
+	}
+	cloned := make(map[string]SearchLaneConfig, len(src))
+	for key, value := range src {
+		cloned[key] = value
+	}
+	return cloned
+}
+
+func mergeTypeSearchLanes(base map[string]SearchLaneConfig, raw any) map[string]SearchLaneConfig {
+	merged := cloneTypeSearchLanes(base)
+	rawMap, ok := raw.(map[string]any)
+	if !ok {
+		return merged
+	}
+	for laneName, laneRaw := range rawMap {
+		laneMap, ok := laneRaw.(map[string]any)
+		if !ok {
+			continue
+		}
+		cfg := merged[laneName]
+		if v, ok := laneMap["min_score"].(float64); ok {
+			cfg.MinScore = v
+		}
+		if v, ok := laneMap["top_k"].(float64); ok && v > 0 {
+			cfg.TopK = int(v)
+		}
+		if v, ok := laneMap["reranker_weight"].(float64); ok && v >= 0 {
+			cfg.RerankerWeight = v
+		}
+		merged[laneName] = cfg
+	}
+	return merged
+}
+
 // Config holds the application configuration.
 // Field order optimized for memory alignment (fieldalignment).
 type Config struct {
-	ContextFullField          string `json:"context_full_field"`
-	DBPath                    string `json:"db_path"`
-	Model                     string `json:"model"`
-	EmbeddingModel            string `json:"embedding_model"`
-	VectorStorageStrategy     string `json:"vector_storage_strategy"`
-	EmbeddingProvider         string `json:"embedding_provider"`
-	EmbeddingBaseURL          string `json:"embedding_base_url"`
-	EmbeddingModelName        string `json:"embedding_model_name"`
-	EmbeddingDimensions       int    `json:"embedding_dimensions"`
-	EmbeddingAPIKey           string
-	DatabaseDSN               string   `json:"-"`                  // env-only: DATABASE_DSN (contains password, never JSON)
-	DatabaseMaxConns          int      `json:"database_max_conns"` // PostgreSQL pool size (default: 10)
-	ContextObsConcepts        []string `json:"context_obs_concepts"`
-	ContextObsTypes           []string `json:"context_obs_types"`
-	ContextFullCount          int      `json:"context_full_count"`
-	GraphBranchFactor         int      `json:"graph_branch_factor"`
-	GraphEdgeWeight           float64  `json:"graph_edge_weight"`
-	ContextRelevanceThreshold float64  `json:"context_relevance_threshold"`
-	RerankingCandidates       int      `json:"reranking_candidates"`
-	WorkerPort                int      `json:"worker_port"`
-	RerankingMinImprovement   float64  `json:"reranking_min_improvement"`
-	ContextObservations       int      `json:"context_observations"`
-	ContextMaxPromptResults   int      `json:"context_max_prompt_results"`
-	ContextSessionCount       int      `json:"context_session_count"`
-	MaxConns                  int      `json:"max_conns"`
-	RerankingAlpha            float64  `json:"reranking_alpha"`
-	GraphMaxHops              int      `json:"graph_max_hops"`
-	RerankingResults          int      `json:"reranking_results"`
-	GraphRebuildIntervalMin   int      `json:"graph_rebuild_interval_min"`
-	HubThreshold              int      `json:"hub_threshold"`
-	ObservationRetentionDays  int      `json:"observation_retention_days"`
-	MaintenanceIntervalHours  int      `json:"maintenance_interval_hours"`
-	ContextShowWorkTokens     bool     `json:"context_show_work_tokens"`
-	ContextShowReadTokens     bool     `json:"context_show_read_tokens"`
-	RerankingPureMode         bool     `json:"reranking_pure_mode"`
-	GraphEnabled              bool     `json:"graph_enabled"`
-	MaintenanceEnabled        bool     `json:"maintenance_enabled"`
-	RerankingEnabled          bool     `json:"reranking_enabled"`
-	ContextShowLastSummary    bool     `json:"context_show_last_summary"`
-	CleanupStaleObservations  bool     `json:"cleanup_stale_observations"`
-	RerankingProvider         string   `json:"reranking_provider"`
-	RerankingAPIBaseURL       string   `json:"reranking_api_base_url"` // Full rerank endpoint URL (e.g. http://host:port/v1/rerank)
-	RerankingAPIModel         string   `json:"reranking_api_model"`    // default: "rerank-english-v3.0"
-	RerankingTimeoutMS        int      `json:"reranking_timeout_ms"`   // default: 500
-	RerankingBatchSize        int      `json:"reranking_batch_size"`   // default: 32
-	RerankingAPIKey           string   // env-only: ENGRAM_RERANKING_API_KEY
-	ContextMaxTokens          int      `json:"context_max_tokens"` // Token budget for context injection (default: 8000, 0=unlimited)
-	HyDEEnabled               bool     `json:"hyde_enabled"`       // Enable HyDE query expansion (default: false)
-	HyDEAPIURL                string   `json:"hyde_api_url"`       // OpenAI-compatible chat API URL
-	HyDEModel                 string   `json:"hyde_model"`         // LLM model (default: "gpt-4o-mini")
-	HyDEMaxTokens             int      `json:"hyde_max_tokens"`    // Max tokens for LLM response (default: 150)
-	HyDETimeoutMS             int      `json:"hyde_timeout_ms"`    // Timeout in ms (default: 800)
-	HyDEAPIKey                string   // env-only: ENGRAM_HYDE_API_KEY
-	WorkerHost                string   // env-only
-	WorkerToken               string   // env-only
-	CollectionConfigPath      string   // env-only
-	WorkstationID             string   // env-only: WORKSTATION_ID
-	GraphProvider             string   `json:"graph_provider"`      // "falkordb" or "" (disabled)
-	FalkorDBAddr              string   // env-only: ENGRAM_FALKORDB_ADDR
-	FalkorDBPassword          string   // env-only: ENGRAM_FALKORDB_PASSWORD
-	FalkorDBGraphName         string   `json:"falkordb_graph_name"` // default: "engram"
-	GraphSearchExpansion      bool     `json:"graph_search_expansion"` // expand search via graph (default: true when graph provider set)
-	TelemetryEnabled          bool     `json:"telemetry_enabled"`
-	SmartGCEnabled              bool     `json:"smart_gc_enabled"`
-	SmartGCThreshold            float64  `json:"smart_gc_threshold"`
-	SmartGCMinAgeDays           int      `json:"smart_gc_min_age_days"`
-	LogBufferSize               int      `json:"log_buffer_size"`               // Ring buffer capacity for /api/logs (default: 10000)
-	QueryExpansionTimeoutMS     int      `json:"query_expansion_timeout_ms"`    // Timeout for query expansion (default: 3000ms)
-	DedupSimilarityThreshold    float64  `json:"dedup_similarity_threshold"`    // Cosine similarity threshold for dedup clustering (default: 0.7)
-	DedupWindowSize             int      `json:"dedup_window_size"`             // Max observations considered for dedup (default: 200)
-	ClusteringThreshold         float64  `json:"clustering_threshold"`          // Similarity threshold for result clustering (default: 0.55)
-	StoreMemoryHardLimit        int      `json:"store_memory_hard_limit"`       // Max chars for store_memory content (default: 10000)
-	StoreMemorySoftLimit        int      `json:"store_memory_soft_limit"`       // Chars above which content is truncated (default: 1000)
-	StoreMemoryDedupThreshold   float64  `json:"store_memory_dedup_threshold"`  // Cosine similarity for dedup (default: 0.92)
-	StoreMemorySummarize        bool     `json:"store_memory_summarize"`        // Use LLM to summarize long content (default: false)
-	EncryptionKeyFile      string `json:"-"` // env-only: ENGRAM_ENCRYPTION_KEY_FILE (path to vault.key)
-	EncryptionKey          string `json:"-"` // env-only: ENGRAM_ENCRYPTION_KEY (hex-encoded 256-bit key)
-	LLMMaxTokens           int    `json:"llm_max_tokens"`        // ENGRAM_LLM_MAX_TOKENS (default: 4096)
-	LLMFilterEnabled       bool   `json:"llm_filter_enabled"`    // ENGRAM_LLM_FILTER_ENABLED (default: false)
-	LLMFilterModel         string `json:"llm_filter_model"`      // ENGRAM_LLM_FILTER_MODEL (default: same as ENGRAM_LLM_MODEL)
-	LLMFilterTimeoutMS     int    `json:"llm_filter_timeout_ms"` // ENGRAM_LLM_FILTER_TIMEOUT_MS (default: 3000)
-	LLMFilterCandidates    int    `json:"llm_filter_candidates"` // ENGRAM_LLM_FILTER_CANDIDATES (default: 15)
-	ConsolidationEnabled   bool    `json:"consolidation_enabled"`    // ENGRAM_CONSOLIDATION_ENABLED (default: false)
-	SupersessionEnabled    bool    `json:"supersession_enabled"`     // ENGRAM_SUPERSESSION_ENABLED (default: true)
-	SupersessionThreshold  float64 `json:"supersession_threshold"`   // ENGRAM_SUPERSESSION_THRESHOLD (default: 0.9)
-	ConsolidationThreshold float64 `json:"consolidation_threshold"`  // ENGRAM_CONSOLIDATION_THRESHOLD (default: 0.95)
-	AlwaysInjectLimit      int     `json:"always_inject_limit"`       // ENGRAM_ALWAYS_INJECT_LIMIT (default: 20)
-	ProjectInjectLimit     int     `json:"project_inject_limit"`      // ENGRAM_PROJECT_INJECT_LIMIT (default: 15)
-	InjectionFloor         int     `json:"injection_floor"`           // ENGRAM_INJECTION_FLOOR (default: 0)
-	InjectUnified          bool    `json:"inject_unified"`            // ENGRAM_INJECT_UNIFIED (default: true) — emergency rollback flag; removed after two release cycles
-	SessionBoost           float64 `json:"session_boost"`             // ENGRAM_SESSION_BOOST (default: 1.3)
+	ContextFullField             string `json:"context_full_field"`
+	DBPath                       string `json:"db_path"`
+	Model                        string `json:"model"`
+	EmbeddingModel               string `json:"embedding_model"`
+	VectorStorageStrategy        string `json:"vector_storage_strategy"`
+	EmbeddingProvider            string `json:"embedding_provider"`
+	EmbeddingBaseURL             string `json:"embedding_base_url"`
+	EmbeddingModelName           string `json:"embedding_model_name"`
+	EmbeddingDimensions          int    `json:"embedding_dimensions"`
+	EmbeddingAPIKey              string
+	DatabaseDSN                  string   `json:"-"`                  // env-only: DATABASE_DSN (contains password, never JSON)
+	DatabaseMaxConns             int      `json:"database_max_conns"` // PostgreSQL pool size (default: 10)
+	ContextObsConcepts           []string `json:"context_obs_concepts"`
+	ContextObsTypes              []string `json:"context_obs_types"`
+	ContextFullCount             int      `json:"context_full_count"`
+	GraphBranchFactor            int      `json:"graph_branch_factor"`
+	GraphEdgeWeight              float64  `json:"graph_edge_weight"`
+	ContextRelevanceThreshold    float64  `json:"context_relevance_threshold"`
+	RerankingCandidates          int      `json:"reranking_candidates"`
+	WorkerPort                   int      `json:"worker_port"`
+	RerankingMinImprovement      float64  `json:"reranking_min_improvement"`
+	ContextObservations          int      `json:"context_observations"`
+	ContextMaxPromptResults      int      `json:"context_max_prompt_results"`
+	ContextSessionCount          int      `json:"context_session_count"`
+	MaxConns                     int      `json:"max_conns"`
+	RerankingAlpha               float64  `json:"reranking_alpha"`
+	GraphMaxHops                 int      `json:"graph_max_hops"`
+	RerankingResults             int      `json:"reranking_results"`
+	GraphRebuildIntervalMin      int      `json:"graph_rebuild_interval_min"`
+	HubThreshold                 int      `json:"hub_threshold"`
+	ObservationRetentionDays     int      `json:"observation_retention_days"`
+	MaintenanceIntervalHours     int      `json:"maintenance_interval_hours"`
+	ContextShowWorkTokens        bool     `json:"context_show_work_tokens"`
+	ContextShowReadTokens        bool     `json:"context_show_read_tokens"`
+	RerankingPureMode            bool     `json:"reranking_pure_mode"`
+	GraphEnabled                 bool     `json:"graph_enabled"`
+	MaintenanceEnabled           bool     `json:"maintenance_enabled"`
+	RerankingEnabled             bool     `json:"reranking_enabled"`
+	ContextShowLastSummary       bool     `json:"context_show_last_summary"`
+	CleanupStaleObservations     bool     `json:"cleanup_stale_observations"`
+	RerankingProvider            string   `json:"reranking_provider"`
+	RerankingAPIBaseURL          string   `json:"reranking_api_base_url"` // Full rerank endpoint URL (e.g. http://host:port/v1/rerank)
+	RerankingAPIModel            string   `json:"reranking_api_model"`    // default: "rerank-english-v3.0"
+	RerankingTimeoutMS           int      `json:"reranking_timeout_ms"`   // default: 500
+	RerankingBatchSize           int      `json:"reranking_batch_size"`   // default: 32
+	RerankingAPIKey              string   // env-only: ENGRAM_RERANKING_API_KEY
+	ContextMaxTokens             int      `json:"context_max_tokens"` // Token budget for context injection (default: 8000, 0=unlimited)
+	HyDEEnabled                  bool     `json:"hyde_enabled"`       // Enable HyDE query expansion (default: false)
+	HyDEAPIURL                   string   `json:"hyde_api_url"`       // OpenAI-compatible chat API URL
+	HyDEModel                    string   `json:"hyde_model"`         // LLM model (default: "gpt-4o-mini")
+	HyDEMaxTokens                int      `json:"hyde_max_tokens"`    // Max tokens for LLM response (default: 150)
+	HyDETimeoutMS                int      `json:"hyde_timeout_ms"`    // Timeout in ms (default: 800)
+	HyDEAPIKey                   string   // env-only: ENGRAM_HYDE_API_KEY
+	WorkerHost                   string   // env-only
+	WorkerToken                  string   // env-only
+	CollectionConfigPath         string   // env-only
+	WorkstationID                string   // env-only: WORKSTATION_ID
+	GraphProvider                string   `json:"graph_provider"` // "falkordb" or "" (disabled)
+	FalkorDBAddr                 string   // env-only: ENGRAM_FALKORDB_ADDR
+	FalkorDBPassword             string   // env-only: ENGRAM_FALKORDB_PASSWORD
+	FalkorDBGraphName            string   `json:"falkordb_graph_name"`    // default: "engram"
+	GraphSearchExpansion         bool     `json:"graph_search_expansion"` // expand search via graph (default: true when graph provider set)
+	TelemetryEnabled             bool     `json:"telemetry_enabled"`
+	SmartGCEnabled               bool     `json:"smart_gc_enabled"`
+	SmartGCThreshold             float64  `json:"smart_gc_threshold"`
+	SmartGCMinAgeDays            int      `json:"smart_gc_min_age_days"`
+	LogBufferSize                int      `json:"log_buffer_size"`                 // Ring buffer capacity for /api/logs (default: 10000)
+	QueryExpansionTimeoutMS      int      `json:"query_expansion_timeout_ms"`      // Timeout for query expansion (default: 3000ms)
+	DedupSimilarityThreshold     float64  `json:"dedup_similarity_threshold"`      // Cosine similarity threshold for dedup clustering (default: 0.7)
+	DedupWindowSize              int      `json:"dedup_window_size"`               // Max observations considered for dedup (default: 200)
+	ClusteringThreshold          float64  `json:"clustering_threshold"`            // Similarity threshold for result clustering (default: 0.55)
+	StoreMemoryHardLimit         int      `json:"store_memory_hard_limit"`         // Max chars for store_memory content (default: 10000)
+	StoreMemorySoftLimit         int      `json:"store_memory_soft_limit"`         // Chars above which content is truncated (default: 1000)
+	StoreMemoryDedupThreshold    float64  `json:"store_memory_dedup_threshold"`    // Cosine similarity for dedup (default: 0.92)
+	StoreMemorySummarize         bool     `json:"store_memory_summarize"`          // Use LLM to summarize long content (default: false)
+	EncryptionKeyFile            string   `json:"-"`                               // env-only: ENGRAM_ENCRYPTION_KEY_FILE (path to vault.key)
+	EncryptionKey                string   `json:"-"`                               // env-only: ENGRAM_ENCRYPTION_KEY (hex-encoded 256-bit key)
+	LLMMaxTokens                 int      `json:"llm_max_tokens"`                  // ENGRAM_LLM_MAX_TOKENS (default: 4096)
+	LLMFilterEnabled             bool     `json:"llm_filter_enabled"`              // ENGRAM_LLM_FILTER_ENABLED (default: false)
+	LLMFilterModel               string   `json:"llm_filter_model"`                // ENGRAM_LLM_FILTER_MODEL (default: same as ENGRAM_LLM_MODEL)
+	LLMFilterTimeoutMS           int      `json:"llm_filter_timeout_ms"`           // ENGRAM_LLM_FILTER_TIMEOUT_MS (default: 3000)
+	LLMFilterCandidates          int      `json:"llm_filter_candidates"`           // ENGRAM_LLM_FILTER_CANDIDATES (default: 15)
+	ConsolidationEnabled         bool     `json:"consolidation_enabled"`           // ENGRAM_CONSOLIDATION_ENABLED (default: false)
+	SupersessionEnabled          bool     `json:"supersession_enabled"`            // ENGRAM_SUPERSESSION_ENABLED (default: true)
+	StorePathSupersessionEnabled bool     `json:"store_path_supersession_enabled"` // ENGRAM_STORE_PATH_SUPERSESSION_ENABLED (default: true)
+	SupersessionThreshold        float64  `json:"supersession_threshold"`          // ENGRAM_SUPERSESSION_THRESHOLD (default: 0.9)
+	ConsolidationThreshold       float64  `json:"consolidation_threshold"`         // ENGRAM_CONSOLIDATION_THRESHOLD (default: 0.95)
+	AlwaysInjectLimit            int      `json:"always_inject_limit"`             // ENGRAM_ALWAYS_INJECT_LIMIT (default: 20)
+	ProjectInjectLimit           int      `json:"project_inject_limit"`            // ENGRAM_PROJECT_INJECT_LIMIT (default: 15)
+	InjectionFloor               int      `json:"injection_floor"`                 // ENGRAM_INJECTION_FLOOR (default: 0)
+	InjectUnified                bool     `json:"inject_unified"`                  // ENGRAM_INJECT_UNIFIED (default: true) — emergency rollback flag; removed after two release cycles
+	TypeLanesEnabled             bool     `json:"type_lanes_enabled"`              // ENGRAM_TYPE_LANES_ENABLED (default: false)
+	ProjectBriefingEnabled       bool     `json:"project_briefing_enabled"`        // ENGRAM_PROJECT_BRIEFING_ENABLED (default: false)
+	WriteMergeEnabled             bool     `json:"write_merge_enabled"`              // ENGRAM_WRITE_MERGE_ENABLED (default: false)
+	ContradictionDetectionEnabled bool     `json:"contradiction_detection_enabled"`  // ENGRAM_CONTRADICTION_DETECTION_ENABLED (default: true)
+	InjectGraphBFSEnabled         bool     `json:"inject_graph_bfs_enabled"`         // ENGRAM_INJECT_GRAPH_BFS_ENABLED (default: false)
+	SessionBoost                  float64  `json:"session_boost"`                    // ENGRAM_SESSION_BOOST (default: 1.3)
+	TypeSearchLanes              map[string]SearchLaneConfig `json:"type_search_lanes"` // typed lane overrides; merged over DefaultTypeSearchLanes
 
 	// Injection strategy A/B testing (closed-loop learning FR-5)
 	InjectionStrategies   []string `json:"injection_strategies"`    // Available strategies
@@ -228,87 +294,94 @@ const DefaultEmbeddingModel = "bge-v1.5"
 // Default returns a Config with default values.
 func Default() *Config {
 	return &Config{
-		WorkerPort:                DefaultWorkerPort,
-		DBPath:                    DBPath(),
-		MaxConns:                  4,
-		Model:                     DefaultModel,
-		EmbeddingModel:            DefaultEmbeddingModel,
-		RerankingEnabled:          true,             // Enable by default for improved relevance
-		RerankingProvider:         "api",
-		RerankingAPIModel:         "rerank-english-v3.0", // Cohere Rerank v3
-		RerankingTimeoutMS:        500,              // 500ms hard timeout for search path
-		RerankingCandidates:       100,              // Retrieve top 100 candidates
-		RerankingResults:          10,               // Return top 10 after reranking
-		RerankingAlpha:            0.7,              // Favor cross-encoder score
-		RerankingMinImprovement:   0,                // Always apply reranking
-		GraphEnabled:              true,  // Enable graph-aware search by default
-		GraphMaxHops:              2,     // Two-hop traversal
-		GraphBranchFactor:         5,     // Expand top 5 neighbors per node
-		GraphEdgeWeight:           0.3,   // Minimum edge weight to follow
-		GraphRebuildIntervalMin:   60,    // Rebuild graph every 60 minutes
-		VectorStorageStrategy:     "hub", // Hub storage strategy (LEANN-inspired)
-		EmbeddingProvider:         "openai",
-		EmbeddingBaseURL:          "https://api.openai.com/v1",
-		EmbeddingModelName:        "text-embedding-3-small",
-		EmbeddingDimensions:       1536,
-		HubThreshold:              5, // Require 5+ accesses to store embedding
-		ContextObservations:       100,
-		ContextFullCount:          25,
-		ContextSessionCount:       10,
-		ContextShowReadTokens:     true,
-		ContextShowWorkTokens:     true,
-		ContextFullField:          "narrative",
-		ContextShowLastSummary:    true,
-		ContextObsTypes:           DefaultObservationTypes,
-		ContextObsConcepts:        DefaultObservationConcepts,
-		ContextRelevanceThreshold: 0.3,   // Minimum 30% similarity to include
-		ContextMaxPromptResults:   10,    // Cap at 10 results max (0 = no cap, threshold only)
-		MaintenanceEnabled:        true,  // Enable scheduled maintenance
-		MaintenanceIntervalHours:  6,     // Run every 6 hours
-		ObservationRetentionDays:  0,     // 0 = no age-based deletion (keep all)
-		CleanupStaleObservations:  false, // Don't auto-cleanup stale observations
-		ContextMaxTokens:          8000,               // ~8K tokens default budget for context injection
-		HyDEEnabled:               false,              // Opt-in: requires API configuration
-		HyDEModel:                 "gpt-4o-mini",      // Cost-efficient default
-		HyDEMaxTokens:             150,
-		HyDETimeoutMS:             800,                 // 800ms within 5s expansion budget
-		WorkerHost:                "127.0.0.1",
-		DatabaseMaxConns:          10,
-		FalkorDBGraphName:         "engram",
-		GraphSearchExpansion:      true,
-		TelemetryEnabled:          true,
-		SmartGCEnabled:              false, // Opt-in: archive low-value observations
-		SmartGCThreshold:            0.05,  // FinalScore below this = candidate for archival
-		SmartGCMinAgeDays:           14,    // Only consider observations older than 14 days
-		QueryExpansionTimeoutMS:     3000,  // 3s cap for HyDE + synonym expansion
-		DedupSimilarityThreshold:    0.7,   // 70% similarity threshold for deduplication (raised from 0.55 after pre-test T029)
-		DedupWindowSize:             200,   // Examine up to 200 candidates for dedup
-		ClusteringThreshold:         0.55,  // 55% similarity threshold for result clustering
-		StoreMemoryHardLimit:        10000,
-		StoreMemorySoftLimit:        1000,
-		StoreMemorySummarize:        false,
-		StoreMemoryDedupThreshold:   0.92,
-		LLMMaxTokens:                4096,  // Enough for thinking models (reasoning + content)
-		LLMFilterEnabled:            false, // Opt-in: requires LLM configuration
-		LLMFilterTimeoutMS:          3000,  // 3s timeout for LLM filter
-		LLMFilterCandidates:         15,    // Evaluate top 15 candidates
-		ConsolidationEnabled:        false, // Opt-in: near-duplicate merging during maintenance
-		SupersessionEnabled:         true,  // Enabled: mark old decisions superseded on new write
-		SupersessionThreshold:       0.9,   // 90% similarity triggers write-time supersession
-		ConsolidationThreshold:      0.95,  // 95% similarity triggers maintenance-time merge
-		AlwaysInjectLimit:           20,    // Inject up to 20 always-inject observations per session
-		ProjectInjectLimit:          15,    // Inject up to 15 project-scoped observations per session
-		InjectionFloor:              0,     // Silence path: 0 = disabled (v4 default, FR-1). Operators can set ENGRAM_INJECTION_FLOOR=3 for legacy fill behavior.
-		InjectUnified:               true,  // Use unified RetrieveRelevant path for inject (FR-3). Set ENGRAM_INJECT_UNIFIED=false for emergency rollback.
-		SessionBoost:                1.3,   // Boost factor for observations from recently active sessions
-		InjectionStrategies:           []string{"baseline", "effectiveness-weighted", "recency-boosted", "diverse"},
-		InjectionStrategyMode:         "round-robin",
-		DefaultStrategy:               "baseline",
+		WorkerPort:                     DefaultWorkerPort,
+		DBPath:                         DBPath(),
+		MaxConns:                       4,
+		Model:                          DefaultModel,
+		EmbeddingModel:                 DefaultEmbeddingModel,
+		RerankingEnabled:               true, // Enable by default for improved relevance
+		RerankingProvider:              "api",
+		RerankingAPIModel:              "rerank-english-v3.0", // Cohere Rerank v3
+		RerankingTimeoutMS:             500,                   // 500ms hard timeout for search path
+		RerankingCandidates:            100,                   // Retrieve top 100 candidates
+		RerankingResults:               10,                    // Return top 10 after reranking
+		RerankingAlpha:                 0.7,                   // Favor cross-encoder score
+		RerankingMinImprovement:        0,                     // Always apply reranking
+		GraphEnabled:                   true,                  // Enable graph-aware search by default
+		GraphMaxHops:                   2,                     // Two-hop traversal
+		GraphBranchFactor:              5,                     // Expand top 5 neighbors per node
+		GraphEdgeWeight:                0.3,                   // Minimum edge weight to follow
+		GraphRebuildIntervalMin:        60,                    // Rebuild graph every 60 minutes
+		VectorStorageStrategy:          "hub",                 // Hub storage strategy (LEANN-inspired)
+		EmbeddingProvider:              "openai",
+		EmbeddingBaseURL:               "https://api.openai.com/v1",
+		EmbeddingModelName:             "text-embedding-3-small",
+		EmbeddingDimensions:            1536,
+		HubThreshold:                   5, // Require 5+ accesses to store embedding
+		ContextObservations:            100,
+		ContextFullCount:               25,
+		ContextSessionCount:            10,
+		ContextShowReadTokens:          true,
+		ContextShowWorkTokens:          true,
+		ContextFullField:               "narrative",
+		ContextShowLastSummary:         true,
+		ContextObsTypes:                DefaultObservationTypes,
+		ContextObsConcepts:             DefaultObservationConcepts,
+		ContextRelevanceThreshold:      0.3,           // Minimum 30% similarity to include
+		ContextMaxPromptResults:        10,            // Cap at 10 results max (0 = no cap, threshold only)
+		MaintenanceEnabled:             true,          // Enable scheduled maintenance
+		MaintenanceIntervalHours:       6,             // Run every 6 hours
+		ObservationRetentionDays:       0,             // 0 = no age-based deletion (keep all)
+		CleanupStaleObservations:       false,         // Don't auto-cleanup stale observations
+		ContextMaxTokens:               8000,          // ~8K tokens default budget for context injection
+		HyDEEnabled:                    false,         // Opt-in: requires API configuration
+		HyDEModel:                      "gpt-4o-mini", // Cost-efficient default
+		HyDEMaxTokens:                  150,
+		HyDETimeoutMS:                  800, // 800ms within 5s expansion budget
+		WorkerHost:                     "127.0.0.1",
+		DatabaseMaxConns:               10,
+		FalkorDBGraphName:              "engram",
+		GraphSearchExpansion:           true,
+		TelemetryEnabled:               true,
+		SmartGCEnabled:                 false, // Opt-in: archive low-value observations
+		SmartGCThreshold:               0.05,  // FinalScore below this = candidate for archival
+		SmartGCMinAgeDays:              14,    // Only consider observations older than 14 days
+		QueryExpansionTimeoutMS:        3000,  // 3s cap for HyDE + synonym expansion
+		DedupSimilarityThreshold:       0.7,   // 70% similarity threshold for deduplication (raised from 0.55 after pre-test T029)
+		DedupWindowSize:                200,   // Examine up to 200 candidates for dedup
+		ClusteringThreshold:            0.55,  // 55% similarity threshold for result clustering
+		StoreMemoryHardLimit:           10000,
+		StoreMemorySoftLimit:           1000,
+		StoreMemorySummarize:           false,
+		StoreMemoryDedupThreshold:      0.92,
+		LLMMaxTokens:                   4096,  // Enough for thinking models (reasoning + content)
+		LLMFilterEnabled:               false, // Opt-in: requires LLM configuration
+		LLMFilterTimeoutMS:             3000,  // 3s timeout for LLM filter
+		LLMFilterCandidates:            15,    // Evaluate top 15 candidates
+		ConsolidationEnabled:           false, // Opt-in: near-duplicate merging during maintenance
+		SupersessionEnabled:            true,  // Enabled: mark old decisions superseded on new write
+		StorePathSupersessionEnabled:   true,  // Enabled: allow dedup UPDATE flows on store paths to supersede existing observations
+		SupersessionThreshold:          0.9,   // 90% similarity triggers write-time supersession
+		ConsolidationThreshold:         0.95,  // 95% similarity triggers maintenance-time merge
+		AlwaysInjectLimit:              20,    // Inject up to 20 always-inject observations per session
+		ProjectInjectLimit:             15,    // Inject up to 15 project-scoped observations per session
+		InjectionFloor:                 0,     // Silence path: 0 = disabled (v4 default, FR-1). Operators can set ENGRAM_INJECTION_FLOOR=3 for legacy fill behavior.
+		InjectUnified:                  true,  // Use unified RetrieveRelevant path for inject (FR-3). Set ENGRAM_INJECT_UNIFIED=false for emergency rollback.
+		TypeLanesEnabled:               false, // Opt-in: typed lane dispatch for retrieval (FR-8)
+		ProjectBriefingEnabled:          false, // Opt-in: inject synthesized per-project briefing block (FR-6 / T029)
+		WriteMergeEnabled:               false, // Opt-in: write-time merge path for observations (FR-10 / T040)
+		ContradictionDetectionEnabled:   true,  // Safety default until operators disable the old supersede path explicitly (T038a)
+		InjectGraphBFSEnabled:           false, // Opt-in: entity-seeded BFS traversal for inject path (US8 / T042)
+		SessionBoost:                    1.3,   // Boost factor for observations from recently active sessions
+		TypeSearchLanes:                cloneTypeSearchLanes(DefaultTypeSearchLanes),
+		InjectionStrategies:            []string{"baseline", "effectiveness-weighted", "recency-boosted", "diverse"},
+		InjectionStrategyMode:          "round-robin",
+		DefaultStrategy:                "baseline",
 		OutcomeRecorderIntervalMinutes: 15,
-		EntityExtractionEnabled:        true,  // Enabled by default when LLM client is available
-		EntityExtractionLimit:          20,    // Max observations processed per maintenance cycle
-		WikiGenerationLimit:            10,    // Max wiki pages generated per maintenance cycle
-		WikiMinSources:                 5,     // Min linked observations to trigger wiki generation
+		EntityExtractionEnabled:        true, // Enabled by default when LLM client is available
+		EntityExtractionLimit:          20,   // Max observations processed per maintenance cycle
+		WikiGenerationLimit:            10,   // Max wiki pages generated per maintenance cycle
+		WikiMinSources:                 5,    // Min linked observations to trigger wiki generation
 		SignalWeights: map[string]float64{
 			"git_commit":   1.0,
 			"pr_created":   2.0,
@@ -318,7 +391,7 @@ func Default() *Config {
 		},
 		// Source-aware decay defaults (gstack-insights FR-2)
 		HalfLifeManual:     30.0,
-		HalfLifeSDK:         7.0,
+		HalfLifeSDK:        7.0,
 		HalfLifeLLM:        90.0,
 		HalfLifeAlgorithm:  14.0,
 		HalfLifeCrossModel: 60.0,
@@ -435,6 +508,26 @@ func Load() (*Config, error) {
 			}
 			if v, ok := settings["ENGRAM_CLUSTERING_THRESHOLD"].(float64); ok && v > 0 && v <= 1.0 {
 				cfg.ClusteringThreshold = v
+			}
+			if v, ok := settings["ENGRAM_TYPE_LANES_ENABLED"].(bool); ok {
+				cfg.TypeLanesEnabled = v
+			}
+			if v, ok := settings["ENGRAM_PROJECT_BRIEFING_ENABLED"].(bool); ok {
+				cfg.ProjectBriefingEnabled = v
+			}
+			if v, ok := settings["ENGRAM_WRITE_MERGE_ENABLED"].(bool); ok {
+				cfg.WriteMergeEnabled = v
+			}
+			if v, ok := settings["ENGRAM_CONTRADICTION_DETECTION_ENABLED"].(bool); ok {
+				cfg.ContradictionDetectionEnabled = v
+			}
+			if v, ok := settings["ENGRAM_INJECT_GRAPH_BFS_ENABLED"].(bool); ok {
+				cfg.InjectGraphBFSEnabled = v
+			}
+			if raw, ok := settings["type_search_lanes"]; ok {
+				cfg.TypeSearchLanes = mergeTypeSearchLanes(DefaultTypeSearchLanes, raw)
+			} else if raw, ok := settings["ENGRAM_TYPE_SEARCH_LANES"]; ok {
+				cfg.TypeSearchLanes = mergeTypeSearchLanes(DefaultTypeSearchLanes, raw)
 			}
 		}
 	}
@@ -624,6 +717,9 @@ func Load() (*Config, error) {
 	if v := strings.TrimSpace(os.Getenv("ENGRAM_SUPERSESSION_ENABLED")); v == "false" || v == "0" {
 		cfg.SupersessionEnabled = false
 	}
+	if v := strings.TrimSpace(os.Getenv("ENGRAM_STORE_PATH_SUPERSESSION_ENABLED")); v == "false" || v == "0" {
+		cfg.StorePathSupersessionEnabled = false
+	}
 	if v := strings.TrimSpace(os.Getenv("ENGRAM_SUPERSESSION_THRESHOLD")); v != "" {
 		if f, err := strconv.ParseFloat(v, 64); err == nil && f > 0 && f <= 1.0 {
 			cfg.SupersessionThreshold = f
@@ -652,6 +748,37 @@ func Load() (*Config, error) {
 	if v := strings.TrimSpace(os.Getenv("ENGRAM_INJECT_UNIFIED")); v != "" {
 		if b, err := strconv.ParseBool(v); err == nil {
 			cfg.InjectUnified = b
+		}
+	}
+	if v := strings.TrimSpace(os.Getenv("ENGRAM_TYPE_LANES_ENABLED")); v != "" {
+		if b, err := strconv.ParseBool(v); err == nil {
+			cfg.TypeLanesEnabled = b
+		}
+	}
+	if v := strings.TrimSpace(os.Getenv("ENGRAM_PROJECT_BRIEFING_ENABLED")); v != "" {
+		if b, err := strconv.ParseBool(v); err == nil {
+			cfg.ProjectBriefingEnabled = b
+		}
+	}
+	if v := strings.TrimSpace(os.Getenv("ENGRAM_WRITE_MERGE_ENABLED")); v != "" {
+		if b, err := strconv.ParseBool(v); err == nil {
+			cfg.WriteMergeEnabled = b
+		}
+	}
+	if v := strings.TrimSpace(os.Getenv("ENGRAM_CONTRADICTION_DETECTION_ENABLED")); v != "" {
+		if b, err := strconv.ParseBool(v); err == nil {
+			cfg.ContradictionDetectionEnabled = b
+		}
+	}
+	if v := strings.TrimSpace(os.Getenv("ENGRAM_INJECT_GRAPH_BFS_ENABLED")); v != "" {
+		if b, err := strconv.ParseBool(v); err == nil {
+			cfg.InjectGraphBFSEnabled = b
+		}
+	}
+	if v := strings.TrimSpace(os.Getenv("ENGRAM_TYPE_SEARCH_LANES")); v != "" {
+		var raw any
+		if err := json.Unmarshal([]byte(v), &raw); err == nil {
+			cfg.TypeSearchLanes = mergeTypeSearchLanes(cfg.TypeSearchLanes, raw)
 		}
 	}
 	if v := strings.TrimSpace(os.Getenv("ENGRAM_SESSION_BOOST")); v != "" {
@@ -903,7 +1030,6 @@ func GetCollectionConfigPath() string {
 	home, _ := os.UserHomeDir()
 	return filepath.Join(home, ".config", "engram", "collections.yml")
 }
-
 
 // GetWorkstationID returns the workstation identifier from environment.
 // Returns empty string if not set; caller should fall back to sessions.WorkstationID().

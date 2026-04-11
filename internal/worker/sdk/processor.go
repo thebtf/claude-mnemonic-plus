@@ -16,13 +16,14 @@ import (
 
 	json "github.com/goccy/go-json"
 
+	"github.com/rs/zerolog/log"
 	"github.com/thebtf/engram/internal/config"
 	"github.com/thebtf/engram/internal/db/gorm"
 	"github.com/thebtf/engram/internal/learning"
 	"github.com/thebtf/engram/internal/privacy"
+	"github.com/thebtf/engram/internal/vector"
 	"github.com/thebtf/engram/pkg/models"
 	"github.com/thebtf/engram/pkg/similarity"
-	"github.com/rs/zerolog/log"
 )
 
 // CircuitBreaker implements a simple circuit breaker pattern for CLI calls.
@@ -221,6 +222,7 @@ type Processor struct {
 	summaryStore             *gorm.SummaryStore
 	reasoningStore           *gorm.ReasoningTraceStore
 	llmClient                learning.LLMClient
+	vectorClient             vector.Client
 	broadcastFunc            BroadcastFunc
 	syncObservationFunc      SyncObservationFunc
 	syncSummaryFunc          SyncSummaryFunc
@@ -272,6 +274,21 @@ func (p *Processor) broadcast(event map[string]any) {
 	}
 }
 
+func (p *Processor) enqueueObservationSync(obs *models.Observation) {
+	if p.syncObservationFunc == nil || obs == nil {
+		return
+	}
+	if p.vectorSyncChan != nil {
+		select {
+		case p.vectorSyncChan <- obs:
+			return
+		default:
+			log.Debug().Int64("obs_id", obs.ID).Msg("Vector sync channel full, using fallback goroutine")
+		}
+	}
+	go p.syncObservationFunc(obs)
+}
+
 // DefaultConcurrentLLMCalls is the default number of concurrent LLM calls.
 // Override with ENGRAM_LLM_CONCURRENCY env var.
 const DefaultConcurrentLLMCalls = 4
@@ -279,7 +296,7 @@ const DefaultConcurrentLLMCalls = 4
 // NewProcessor creates a new SDK processor.
 // It requires at least one LLM backend: either an OpenAI-compatible API (ENGRAM_LLM_URL)
 // or a local Claude CLI binary. If neither is available, it returns an error.
-func NewProcessor(observationStore *gorm.ObservationStore, summaryStore *gorm.SummaryStore) (*Processor, error) {
+func NewProcessor(observationStore *gorm.ObservationStore, summaryStore *gorm.SummaryStore, vectorClient vector.Client) (*Processor, error) {
 	cfg := config.Get()
 
 	// Initialize LLM client (OpenAI-compatible API — works in Docker)
@@ -317,6 +334,7 @@ func NewProcessor(observationStore *gorm.ObservationStore, summaryStore *gorm.Su
 		llmClient:                llmClient,
 		observationStore:         observationStore,
 		summaryStore:             summaryStore,
+		vectorClient:             vectorClient,
 		sem:                      make(chan struct{}, concurrency),
 		circuitBreaker:           NewCircuitBreaker(5, 60),                               // Open after 5 failures, reset after 60s
 		deduplicator:             NewRequestDeduplicator(300, 1000),                      // 5-minute TTL, 1000 max entries
@@ -377,6 +395,185 @@ func (p *Processor) CircuitBreakerMetrics() CircuitBreakerMetrics {
 // IsAvailable checks if an LLM backend (API or CLI) is available for processing.
 func (p *Processor) IsAvailable() bool {
 	return p.llmClient != nil
+}
+
+const writeMergeSimilarityThreshold = 0.75
+
+func unionStrings(parts ...[]string) []string {
+	seen := make(map[string]struct{})
+	merged := make([]string, 0)
+	for _, part := range parts {
+		for _, item := range part {
+			item = strings.TrimSpace(item)
+			if item == "" {
+				continue
+			}
+			if _, ok := seen[item]; ok {
+				continue
+			}
+			seen[item] = struct{}{}
+			merged = append(merged, item)
+		}
+	}
+	return merged
+}
+
+func mergeNarrative(existing, incoming string) string {
+	existing = strings.TrimSpace(existing)
+	incoming = strings.TrimSpace(incoming)
+	switch {
+	case existing == "":
+		return incoming
+	case incoming == "":
+		return existing
+	case existing == incoming:
+		return existing
+	case strings.Contains(existing, incoming):
+		return existing
+	case strings.Contains(incoming, existing):
+		return incoming
+	default:
+		return existing + "\n\n" + incoming
+	}
+}
+
+func mergeFileMtimes(existing models.JSONInt64Map, incoming map[string]int64) map[string]int64 {
+	if len(existing) == 0 && len(incoming) == 0 {
+		return nil
+	}
+	merged := make(map[string]int64, len(existing)+len(incoming))
+	for path, mtime := range existing {
+		merged[path] = mtime
+	}
+	for path, mtime := range incoming {
+		merged[path] = mtime
+	}
+	return merged
+}
+
+func (p *Processor) queryWriteMergeCandidateIDs(ctx context.Context, project string, obs *models.ParsedObservation) []int64 {
+	if p.vectorClient == nil || !p.vectorClient.IsConnected() || obs == nil {
+		return nil
+	}
+	queryText := strings.TrimSpace(strings.Join([]string{obs.Title, obs.Narrative, strings.Join(obs.Facts, " ")}, " "))
+	if queryText == "" {
+		return nil
+	}
+	results, err := p.vectorClient.Query(ctx, queryText, 5, vector.BuildWhereFilter(vector.DocTypeObservation, project, false, nil))
+	if err != nil {
+		log.Warn().Err(err).Str("project", project).Msg("write-merge: vector candidate lookup failed")
+		return nil
+	}
+	candidateIDs := make([]int64, 0, len(results))
+	for _, result := range results {
+		if result.Similarity < writeMergeSimilarityThreshold {
+			continue
+		}
+		candidateIDs = append(candidateIDs, vector.ExtractObservationIDs([]vector.QueryResult{result}, project)...)
+	}
+	return candidateIDs
+}
+
+func (p *Processor) applyWriteMergeDecision(ctx context.Context, sdkSessionID, project string, obs *models.ParsedObservation, promptNumber int) (*models.Observation, bool, string, error) {
+	if obs == nil || !config.Get().WriteMergeEnabled || p.llmClient == nil {
+		return nil, false, "", nil
+	}
+	candidateIDs := p.queryWriteMergeCandidateIDs(ctx, project, obs)
+	if len(candidateIDs) == 0 {
+		return nil, false, "", nil
+	}
+	fetchedCandidates, err := p.observationStore.GetObservationsByIDs(ctx, candidateIDs, "default", len(candidateIDs))
+	if err != nil {
+		return nil, false, "", err
+	}
+	candidates := make([]*models.Observation, 0, len(fetchedCandidates))
+	for _, candidate := range fetchedCandidates {
+		if candidate == nil || candidate.ID <= 0 || candidate.Type != obs.Type || candidate.IsSuperseded || candidate.Project != project {
+			continue
+		}
+		candidates = append(candidates, candidate)
+	}
+	if len(candidates) == 0 {
+		return nil, false, "", nil
+	}
+	newObs := models.NewObservation(sdkSessionID, project, obs, promptNumber, 0)
+	decision, err := learning.DecideMerge(ctx, p.llmClient, newObs, candidates)
+	if err != nil {
+		return nil, false, "", nil
+	}
+	if decision.Action == learning.MergeActionCreateNew {
+		return nil, false, "", nil
+	}
+	if decision.TargetID <= 0 {
+		log.Warn().Str("action", decision.Action).Msg("write-merge: missing target_id, falling back to create")
+		return nil, false, "", nil
+	}
+	var target *models.Observation
+	for _, candidate := range candidates {
+		if candidate != nil && candidate.ID == decision.TargetID {
+			target = candidate
+			break
+		}
+	}
+	if target == nil {
+		log.Warn().Int64("target_id", decision.TargetID).Msg("write-merge: target_id not in candidate set, falling back to create")
+		return nil, false, "", nil
+	}
+
+	switch decision.Action {
+	case learning.MergeActionSkip:
+		log.Info().Str("project", project).Int64("target_id", target.ID).Msg("write-merge: skipped new observation")
+		return nil, true, learning.MergeActionSkip, nil
+	case learning.MergeActionSupersede:
+		if !config.Get().ContradictionDetectionEnabled {
+			log.Info().Str("project", project).Int64("target_id", target.ID).Msg("write-merge: contradiction detection disabled; falling back to create path")
+			return nil, false, "", nil
+		}
+		// Keep old observation active until the caller successfully creates the replacement row.
+		// This avoids the lossy state where the old row is superseded but the new insert fails.
+		return target, false, learning.MergeActionSupersede, nil
+	case learning.MergeActionUpdate:
+		title := target.Title.String
+		if title == "" {
+			title = obs.Title
+		}
+		subtitle := target.Subtitle.String
+		if subtitle == "" {
+			subtitle = obs.Subtitle
+		}
+		narrative := mergeNarrative(target.Narrative.String, obs.Narrative)
+		facts := unionStrings([]string(target.Facts), obs.Facts)
+		concepts := unionStrings([]string(target.Concepts), obs.Concepts)
+		filesRead := unionStrings([]string(target.FilesRead), obs.FilesRead)
+		filesModified := unionStrings([]string(target.FilesModified), obs.FilesModified)
+		commandsRun := unionStrings([]string(target.CommandsRun), obs.CommandsRun)
+		fileMtimes := mergeFileMtimes(target.FileMtimes, obs.FileMtimes)
+		updated, err := p.observationStore.UpdateObservation(ctx, target.ID, &gorm.ObservationUpdate{
+			Title:         &title,
+			Subtitle:      &subtitle,
+			Narrative:     &narrative,
+			Facts:         &facts,
+			Concepts:      &concepts,
+			FilesRead:     &filesRead,
+			FilesModified: &filesModified,
+			CommandsRun:   &commandsRun,
+			FileMtimes:    &fileMtimes,
+		})
+		if err != nil {
+			return nil, false, "", err
+		}
+		p.enqueueObservationSync(updated)
+		p.broadcast(map[string]any{
+			"type":    "observation",
+			"action":  "updated",
+			"id":      target.ID,
+			"project": project,
+		})
+		log.Info().Str("project", project).Int64("target_id", target.ID).Msg("write-merge: updated existing observation")
+		return updated, false, learning.MergeActionUpdate, nil
+	default:
+		return nil, false, "", nil
+	}
 }
 
 // ProcessObservation processes a single tool observation and extracts insights.
@@ -461,7 +658,7 @@ func (p *Processor) ProcessObservation(ctx context.Context, sdkSessionID, projec
 	}
 
 	// Store each observation (with deduplication check)
-	var storedCount, skippedCount int
+	var storedCount, skippedCount, mergeEvaluatedCount, mergeSkipCount int
 
 	for _, obs := range observations {
 		// Capture file modification times for staleness detection
@@ -480,12 +677,51 @@ func (p *Processor) ProcessObservation(ctx context.Context, sdkSessionID, projec
 			continue
 		}
 
+		mergeEvaluatedCount++
+		mergedObs, mergeSkipped, mergeAction, mergeErr := p.applyWriteMergeDecision(ctx, sdkSessionID, project, obs, promptNumber)
+		if mergeErr != nil {
+			log.Warn().Err(mergeErr).Msg("write-merge: failed to apply merge decision, falling back to create path")
+		}
+		if mergeSkipped {
+			mergeSkipCount++
+			skippedCount++
+			continue
+		}
+		if mergedObs != nil && mergedObs.ID > 0 {
+			if existingObs != nil {
+				replaced := false
+				for i, existing := range existingObs {
+					if existing != nil && existing.ID == mergedObs.ID {
+						existingObs[i] = mergedObs
+						replaced = true
+						break
+					}
+				}
+				if !replaced {
+					existingObs = append(existingObs, mergedObs)
+				}
+			}
+			if mergeAction == learning.MergeActionUpdate {
+				storedCount++
+				continue
+			}
+		}
+
 		id, createdAtEpoch, err := p.observationStore.StoreObservation(ctx, sdkSessionID, project, obs, promptNumber, 0)
 		if err != nil {
 			log.Error().Err(err).Msg("Failed to store observation")
 			continue
 		}
-
+		if mergedObs != nil && mergedObs.ID > 0 && !mergedObs.IsSuperseded {
+			if err := p.observationStore.MarkAsSuperseded(ctx, mergedObs.ID); err != nil {
+				rollbackErr := p.observationStore.DeleteObservation(ctx, id)
+				if rollbackErr != nil {
+					log.Error().Err(rollbackErr).Int64("new_id", id).Msg("write-merge: failed to rollback replacement observation after supersede failure")
+					return fmt.Errorf("write-merge: failed to supersede target %d after replacement insert: %w (rollback failed: %v)", mergedObs.ID, err, rollbackErr)
+				}
+				return fmt.Errorf("write-merge: failed to supersede target %d after replacement insert: %w", mergedObs.ID, err)
+			}
+		}
 		storedCount++
 		log.Info().
 			Int64("id", id).
@@ -495,21 +731,11 @@ func (p *Processor) ProcessObservation(ctx context.Context, sdkSessionID, projec
 			Msg("Observation stored")
 
 		// Sync to vector DB via bounded worker pool (non-blocking to reduce latency)
-		if p.syncObservationFunc != nil && p.vectorSyncChan != nil {
+		if p.syncObservationFunc != nil {
 			fullObs := models.NewObservation(sdkSessionID, project, obs, promptNumber, 0)
 			fullObs.ID = id
 			fullObs.CreatedAtEpoch = createdAtEpoch
-			// Non-blocking send to worker pool - drops if channel is full
-			select {
-			case p.vectorSyncChan <- fullObs:
-				// Sent to worker pool
-			default:
-				// Channel full, fall back to direct sync in goroutine (bounded by channel buffer)
-				log.Debug().Int64("obs_id", id).Msg("Vector sync channel full, using fallback goroutine")
-				go func(obsToSync *models.Observation) {
-					p.syncObservationFunc(obsToSync)
-				}(fullObs)
-			}
+			p.enqueueObservationSync(fullObs)
 		}
 
 		// Broadcast new observation event for dashboard refresh
@@ -531,6 +757,14 @@ func (p *Processor) ProcessObservation(ctx context.Context, sdkSessionID, projec
 			Int("stored", storedCount).
 			Int("skipped", skippedCount).
 			Msg("Observation processing complete (duplicates skipped)")
+	}
+	if mergeEvaluatedCount > 0 {
+		log.Info().
+			Str("project", project).
+			Int("merge_evaluated", mergeEvaluatedCount).
+			Int("merge_skipped", mergeSkipCount).
+			Float64("merge_skip_rate", float64(mergeSkipCount)/float64(mergeEvaluatedCount)).
+			Msg("write-merge telemetry")
 	}
 
 	// Asynchronously extract reasoning traces from the LLM response (System 2 memory).
@@ -594,7 +828,7 @@ func (p *Processor) extractAndStoreReasoning(ctx context.Context, sdkSessionID, 
 		Project:      project,
 		Steps:        string(stepsJSON),
 		QualityScore: trace.QualityScore,
-		TaskContext:   string(taskCtxJSON),
+		TaskContext:  string(taskCtxJSON),
 	}
 
 	id, err := p.reasoningStore.Create(ctx, dbTrace)
@@ -1303,7 +1537,6 @@ func hasMeaningfulContent(assistantMsg string) bool {
 	// Require at least 2 work indicators to generate a summary
 	return matchCount >= 2
 }
-
 
 // systemPrompt is the extraction system prompt for the live SDK processor.
 // It uses the same category taxonomy as the backfill extractor, adapted for

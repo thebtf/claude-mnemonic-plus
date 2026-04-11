@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/rs/zerolog/log"
+	"github.com/thebtf/engram/internal/config"
 	dedupPkg "github.com/thebtf/engram/internal/dedup"
 	"github.com/thebtf/engram/internal/pipeline"
 	"github.com/thebtf/engram/internal/privacy"
@@ -215,7 +216,20 @@ func (s *Service) handleIngestEvent(w http.ResponseWriter, r *http.Request) {
 
 	// Handle UPDATE: supersede existing observation if dedup detected contradiction.
 	if ingestDedupResult != nil && ingestDedupResult.Action == dedupPkg.ActionUpdate && ingestDedupResult.ExistingID > 0 {
-		_ = s.observationStore.MarkAsSuperseded(r.Context(), ingestDedupResult.ExistingID)
+		if config.Get().StorePathSupersessionEnabled {
+			if err := s.observationStore.MarkAsSuperseded(r.Context(), ingestDedupResult.ExistingID); err != nil {
+				log.Warn().
+					Err(err).
+					Int64("existing_id", ingestDedupResult.ExistingID).
+					Float64("similarity", ingestDedupResult.Similarity).
+					Msg("ingest: failed to supersede existing observation")
+			}
+		} else {
+			log.Info().
+				Int64("existing_id", ingestDedupResult.ExistingID).
+				Float64("similarity", ingestDedupResult.Similarity).
+				Msg("ingest: store-path supersession disabled; keeping existing observation active")
+		}
 	}
 
 	// Mark raw event as processed

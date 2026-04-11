@@ -2,6 +2,9 @@ package worker
 
 import (
 	"context"
+	"path/filepath"
+	"sort"
+	"strings"
 	"time"
 
 	"github.com/rs/zerolog/log"
@@ -73,6 +76,47 @@ func (s *Service) lookupRecentSessionIDs(ctx context.Context, project string, si
 		return nil, nil
 	}
 	return s.observationStore.GetRecentSessionIDs(ctx, project, since)
+}
+
+func normalizeObservationIDs(raw []int64) []int64 {
+	ids := make([]int64, 0, len(raw))
+	seen := make(map[int64]struct{}, len(raw))
+	for _, id := range raw {
+		if id <= 0 {
+			continue
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		ids = append(ids, id)
+	}
+	return ids
+}
+
+func (s *Service) lookupGraphSeedNeighbors(ctx context.Context, seedID int64) ([]int64, error) {
+	if seedID <= 0 {
+		return nil, nil
+	}
+	if s.retrievalHooks != nil && s.retrievalHooks.getGraphNeighbors != nil {
+		rawIDs, err := s.retrievalHooks.getGraphNeighbors(ctx, seedID, 2, 10)
+		if err != nil {
+			return nil, err
+		}
+		return normalizeObservationIDs(rawIDs), nil
+	}
+	if s.graphStore == nil {
+		return nil, nil
+	}
+	neighbors, err := s.graphStore.GetNeighbors(ctx, seedID, 2, 10)
+	if err != nil {
+		return nil, err
+	}
+	rawIDs := make([]int64, 0, len(neighbors))
+	for _, neighbor := range neighbors {
+		rawIDs = append(rawIDs, neighbor.ObsID)
+	}
+	return normalizeObservationIDs(rawIDs), nil
 }
 
 func (s *Service) sessionBoostFactor() float64 {
@@ -173,4 +217,101 @@ func (s *Service) loadLastUserPromptBySession(ctx context.Context, project, sess
 		return nil, nil
 	}
 	return prompts[0], nil
+}
+
+func (s *Service) ExtractSessionEntitySeeds(ctx context.Context, sessionID, project string) []int64 {
+	if sessionID == "" || project == "" {
+		return nil
+	}
+
+	normalize := func(raw string) string {
+		return strings.TrimSpace(strings.ToLower(raw))
+	}
+	promptTokenSet := make(map[string]struct{})
+	appendPromptToken := func(raw string) {
+		raw = normalize(raw)
+		if raw == "" {
+			return
+		}
+		promptTokenSet[raw] = struct{}{}
+	}
+
+	if prompt, err := s.loadLastUserPromptBySession(ctx, project, sessionID, 20); err == nil && prompt != nil {
+		for _, token := range strings.Fields(prompt.PromptText) {
+			appendPromptToken(token)
+		}
+	}
+
+	var entityObservations []*models.Observation
+	if s.retrievalHooks != nil && s.retrievalHooks.getEntityObservationsBySession != nil {
+		all, err := s.retrievalHooks.getEntityObservationsBySession(ctx, sessionID)
+		if err != nil {
+			log.Debug().Err(err).Str("session_id", sessionID).Msg("failed to get entity observations via hook")
+		} else {
+			for _, obs := range all {
+				if obs != nil && obs.Type == models.ObsTypeEntity {
+					entityObservations = append(entityObservations, obs)
+				}
+			}
+		}
+	} else if s.observationStore != nil {
+		allSessionObservations, err := s.observationStore.GetObservationsBySession(ctx, sessionID)
+		if err != nil {
+			log.Debug().Err(err).Str("session_id", sessionID).Msg("failed to get session observations")
+		}
+		for _, obs := range allSessionObservations {
+			if obs != nil && obs.Type == models.ObsTypeEntity {
+				entityObservations = append(entityObservations, obs)
+			}
+		}
+	}
+
+	seedIDs := make([]int64, 0, 5)
+	for _, obs := range entityObservations {
+		if obs == nil || obs.ID <= 0 {
+			continue
+		}
+
+		matched := false
+		if _, ok := promptTokenSet[normalize(obs.Title.String)]; ok {
+			matched = true
+		}
+		if !matched {
+			for _, path := range obs.FilesRead {
+				if _, ok := promptTokenSet[normalize(filepath.Base(path))]; ok {
+					matched = true
+					break
+				}
+			}
+		}
+		if !matched {
+			for _, path := range obs.FilesModified {
+				if _, ok := promptTokenSet[normalize(filepath.Base(path))]; ok {
+					matched = true
+					break
+				}
+			}
+		}
+		if matched {
+			seedIDs = append(seedIDs, obs.ID)
+		}
+	}
+
+	if len(seedIDs) == 0 {
+		return nil
+	}
+	unique := make(map[int64]struct{}, len(seedIDs))
+	result := make([]int64, 0, len(seedIDs))
+	for _, id := range seedIDs {
+		if _, ok := unique[id]; ok {
+			continue
+		}
+		unique[id] = struct{}{}
+		result = append(result, id)
+	}
+	sort.Slice(result, func(i, j int) bool { return result[i] < result[j] })
+	if len(result) > 5 {
+		result = result[:5]
+	}
+	return result
 }
