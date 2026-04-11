@@ -405,7 +405,7 @@ func (s *Service) handleFileContext(w http.ResponseWriter, r *http.Request) {
 			// Build search query from file path
 			query := buildFileQuery(file)
 
-			where := vector.BuildWhereFilter(vector.DocTypeObservation, project, false)
+			where := vector.BuildWhereFilter(vector.DocTypeObservation, project, false, nil)
 			vectorResults, vecErr := s.vectorClient.Query(ctx, query, limit*2, where)
 			if vecErr != nil {
 				log.Warn().Err(vecErr).Str("file", file).Msg("Vector search failed for file context")
@@ -923,7 +923,7 @@ func (s *Service) handleContextInject(w http.ResponseWriter, r *http.Request) {
 		// Uses hardcoded query with position-rank + temporal boost instead of hybrid search.
 		if s.vectorClient != nil && s.vectorClient.IsConnected() {
 			legacyQuery := project + " code development"
-			where := vector.BuildWhereFilter(vector.DocTypeObservation, project, false)
+			where := vector.BuildWhereFilter(vector.DocTypeObservation, project, false, nil)
 
 			vectorResults, vecErr := s.vectorClient.Query(ctx, legacyQuery, 20, where)
 			if vecErr != nil {

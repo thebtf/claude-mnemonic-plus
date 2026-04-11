@@ -81,6 +81,7 @@ func (s *Server) handleStoreMemory(ctx context.Context, args json.RawMessage) (s
 	if dedupThreshold <= 0 {
 		dedupThreshold = 0.92
 	}
+	storePathSupersessionEnabled := cfg.StorePathSupersessionEnabled
 
 	if utf8.RuneCountInString(params.Content) > hardLimit {
 		return "", fmt.Errorf("content exceeds maximum length of %d characters", hardLimit)
@@ -171,11 +172,18 @@ func (s *Server) handleStoreMemory(ctx context.Context, args json.RawMessage) (s
 			return string(out), nil
 		}
 		if dedupResult.Action == dedup.ActionUpdate {
-			supersededID = dedupResult.ExistingID
-			log.Info().
-				Int64("superseded_id", dedupResult.ExistingID).
-				Float64("similarity", dedupResult.Similarity).
-				Msg("store_memory: superseding existing observation (contradiction zone)")
+			if storePathSupersessionEnabled {
+				supersededID = dedupResult.ExistingID
+				log.Info().
+					Int64("superseded_id", dedupResult.ExistingID).
+					Float64("similarity", dedupResult.Similarity).
+					Msg("store_memory: superseding existing observation (contradiction zone)")
+			} else {
+				log.Info().
+					Int64("existing_id", dedupResult.ExistingID).
+					Float64("similarity", dedupResult.Similarity).
+					Msg("store_memory: store-path supersession disabled; keeping existing observation active")
+			}
 		}
 	}
 	if contradictionAction == "" {
@@ -250,7 +258,7 @@ func (s *Server) handleStoreMemory(ctx context.Context, args json.RawMessage) (s
 		if threshold <= 0 {
 			threshold = 0.9
 		}
-		where := vector.BuildWhereFilter(vector.DocTypeObservation, params.Project, false)
+		where := vector.BuildWhereFilter(vector.DocTypeObservation, params.Project, false, nil)
 		similar, err := s.vectorClient.Query(ctx, params.Content, 3, where)
 		if err == nil {
 			for _, result := range similar {
@@ -328,7 +336,7 @@ func computeTTLDays(explicit *int, concepts []string) int {
 		"api": 7, "endpoint": 7,
 		"library": 30, "framework": 30,
 		"language-feature": 90,
-		"architecture": 180, "pattern": 180,
+		"architecture":     180, "pattern": 180,
 	}
 	minTTL := 0
 	for _, c := range concepts {

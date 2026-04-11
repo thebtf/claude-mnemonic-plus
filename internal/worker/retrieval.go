@@ -108,7 +108,7 @@ func (s *Service) RetrieveRelevant(ctx context.Context, project, query string, o
 	usedVector := false
 	vectorSearchFailed := false
 	if s.hasVectorRetrieval() {
-		where := vector.BuildWhereFilter(vector.DocTypeObservation, project, false)
+		where := vector.BuildWhereFilter(vector.DocTypeObservation, project, false, nil)
 		allVectorResults := make([]vector.QueryResult, 0, len(expandedQueries)*limit*2)
 		vectorErrors := 0
 		for _, expandedQuery := range expandedQueries {

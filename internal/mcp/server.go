@@ -13,6 +13,7 @@ import (
 
 	"sync"
 
+	"github.com/rs/zerolog/log"
 	"github.com/thebtf/engram/internal/chunking"
 	"github.com/thebtf/engram/internal/collections"
 	"github.com/thebtf/engram/internal/consolidation"
@@ -27,7 +28,6 @@ import (
 	"github.com/thebtf/engram/internal/sessions"
 	"github.com/thebtf/engram/internal/vector"
 	"github.com/thebtf/engram/pkg/models"
-	"github.com/rs/zerolog/log"
 )
 
 // Server is the MCP server that exposes search tools.
@@ -164,9 +164,9 @@ type ToolCallParams struct {
 
 // Tool tier constants for tool visibility grouping.
 const (
-	tierCore    = 1 // T1: Always visible — most-used tools
-	tierUseful  = 2 // T2: Visible by default — regularly useful tools
-	tierAdmin   = 3 // T3+: Hidden by default — admin, analytics, bulk ops
+	tierCore   = 1 // T1: Always visible — most-used tools
+	tierUseful = 2 // T2: Visible by default — regularly useful tools
+	tierAdmin  = 3 // T3+: Hidden by default — admin, analytics, bulk ops
 )
 
 // Tool represents an MCP tool definition.
@@ -1196,17 +1196,17 @@ func (s *Server) handleToolsList(req *Request) *Response {
 					"type":     "object",
 					"required": []string{"content"},
 					"properties": map[string]any{
-						"content":    map[string]any{"type": "string", "description": "The content/knowledge to remember"},
-						"title":      map[string]any{"type": "string", "description": "Short title for the memory"},
-						"tags":       map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "Concept tags (supports hierarchical: lang:go:concurrency)"},
-						"rejected":  map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "Alternatives considered and dismissed (for decision observations)"},
-						"type":       map[string]any{"type": "string", "description": "Memory type: decision, bugfix, feature, discovery, refactor"},
-						"importance": map[string]any{"type": "number", "minimum": 0, "maximum": 1, "description": "Importance score (0-1)"},
-						"scope":      map[string]any{"type": "string", "enum": []string{"project", "global"}, "description": "Visibility scope"},
-						"project":    map[string]any{"type": "string", "description": "Project ID (defaults to current)"},
-						"ttl_days":       map[string]any{"type": "integer", "minimum": 1, "description": "TTL in days for verified facts. Auto-computed from tags if not provided. Only applies to observations with 'verified' tag."},
-						"always_inject":  map[string]any{"type": "boolean", "description": "If true, this memory will be injected into every agent context regardless of query relevance. Use for behavioral rules that must always be present."},
-						"agent_source":   map[string]any{"type": "string", "enum": []string{"claude-code", "codex", "gemini", "other", "unknown"}, "description": "Which AI tool created this observation"},
+						"content":       map[string]any{"type": "string", "description": "The content/knowledge to remember"},
+						"title":         map[string]any{"type": "string", "description": "Short title for the memory"},
+						"tags":          map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "Concept tags (supports hierarchical: lang:go:concurrency)"},
+						"rejected":      map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "Alternatives considered and dismissed (for decision observations)"},
+						"type":          map[string]any{"type": "string", "description": "Memory type: decision, bugfix, feature, discovery, refactor"},
+						"importance":    map[string]any{"type": "number", "minimum": 0, "maximum": 1, "description": "Importance score (0-1)"},
+						"scope":         map[string]any{"type": "string", "enum": []string{"project", "global"}, "description": "Visibility scope"},
+						"project":       map[string]any{"type": "string", "description": "Project ID (defaults to current)"},
+						"ttl_days":      map[string]any{"type": "integer", "minimum": 1, "description": "TTL in days for verified facts. Auto-computed from tags if not provided. Only applies to observations with 'verified' tag."},
+						"always_inject": map[string]any{"type": "boolean", "description": "If true, this memory will be injected into every agent context regardless of query relevance. Use for behavioral rules that must always be present."},
+						"agent_source":  map[string]any{"type": "string", "enum": []string{"claude-code", "codex", "gemini", "other", "unknown"}, "description": "Which AI tool created this observation"},
 					},
 				},
 			},
@@ -1218,10 +1218,10 @@ func (s *Server) handleToolsList(req *Request) *Response {
 					"type":     "object",
 					"required": []string{"query"},
 					"properties": map[string]any{
-						"query":  map[string]any{"type": "string", "description": "Natural language query"},
-						"tags":   map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "Filter by concept tags"},
-						"type":   map[string]any{"type": "string", "description": "Filter by observation type"},
-						"limit":  map[string]any{"type": "number", "default": 10, "minimum": 1, "maximum": 50},
+						"query":   map[string]any{"type": "string", "description": "Natural language query"},
+						"tags":    map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "Filter by concept tags"},
+						"type":    map[string]any{"type": "string", "description": "Filter by observation type"},
+						"limit":   map[string]any{"type": "number", "default": 10, "minimum": 1, "maximum": 50},
 						"format":  map[string]any{"type": "string", "enum": []string{"text", "items", "detailed"}, "default": "text"},
 						"project": map[string]any{"type": "string", "description": "Project ID to scope results (includes project-scoped and global observations)"},
 					},
@@ -2086,7 +2086,7 @@ func (s *Server) handleFindSimilarObservations(ctx context.Context, args json.Ra
 		return "", fmt.Errorf("vector search not available")
 	}
 
-	where := vector.BuildWhereFilter(vector.DocTypeObservation, params.Project, true)
+	where := vector.BuildWhereFilter(vector.DocTypeObservation, params.Project, true, nil)
 	results, err := s.vectorClient.Query(ctx, params.Query, params.Limit*2, where)
 	if err != nil {
 		return "", fmt.Errorf("vector search failed: %w", err)
@@ -2931,7 +2931,7 @@ func (s *Server) handleSuggestConsolidations(ctx context.Context, args json.RawM
 		}
 
 		// Query for similar observations
-		where := vector.BuildWhereFilter(vector.DocTypeObservation, params.Project, true)
+		where := vector.BuildWhereFilter(vector.DocTypeObservation, params.Project, true, nil)
 		results, err := s.vectorClient.Query(ctx, searchText, 10, where)
 		if err != nil {
 			continue
@@ -4763,8 +4763,8 @@ func (s *Server) handleFindByFileContext(ctx context.Context, args json.RawMessa
 	}
 
 	type fileContextResult struct {
-		FilePath     string               `json:"file_path"`
-		Count        int                  `json:"count"`
+		FilePath     string                `json:"file_path"`
+		Count        int                   `json:"count"`
 		Observations []*models.Observation `json:"observations"`
 	}
 

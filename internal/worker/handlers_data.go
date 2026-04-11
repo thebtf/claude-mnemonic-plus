@@ -8,11 +8,11 @@ import (
 	"strings"
 	"time"
 
+	"github.com/rs/zerolog/log"
 	"github.com/thebtf/engram/internal/db/gorm"
 	"github.com/thebtf/engram/internal/embedding"
 	"github.com/thebtf/engram/internal/vector"
 	"github.com/thebtf/engram/pkg/models"
-	"github.com/rs/zerolog/log"
 )
 
 // handleGetObservations godoc
@@ -53,7 +53,7 @@ func (s *Service) handleGetObservations(w http.ResponseWriter, r *http.Request) 
 
 	// Use vector search if query is provided and vector client is available
 	if query != "" && s.vectorClient != nil && s.vectorClient.IsConnected() {
-		where := vector.BuildWhereFilter(vector.DocTypeObservation, "", false)
+		where := vector.BuildWhereFilter(vector.DocTypeObservation, "", false, nil)
 		vectorResults, vecErr := s.vectorClient.Query(r.Context(), query, pagination.Limit*2, where)
 		if vecErr == nil && len(vectorResults) > 0 {
 			obsIDs := vector.ExtractObservationIDs(vectorResults, project)
@@ -133,7 +133,7 @@ func (s *Service) handleGetSummaries(w http.ResponseWriter, r *http.Request) {
 
 	// Use vector search if query is provided and vector client is available
 	if query != "" && s.vectorClient != nil && s.vectorClient.IsConnected() {
-		where := vector.BuildWhereFilter(vector.DocTypeSessionSummary, "", false)
+		where := vector.BuildWhereFilter(vector.DocTypeSessionSummary, "", false, nil)
 		vectorResults, vecErr := s.vectorClient.Query(r.Context(), query, limit*2, where)
 		if vecErr == nil && len(vectorResults) > 0 {
 			summaryIDs := vector.ExtractSummaryIDs(vectorResults, project)
@@ -197,7 +197,7 @@ func (s *Service) handleGetPrompts(w http.ResponseWriter, r *http.Request) {
 
 	// Use vector search if query is provided and vector client is available
 	if query != "" && s.vectorClient != nil && s.vectorClient.IsConnected() {
-		where := vector.BuildWhereFilter(vector.DocTypeUserPrompt, "", false)
+		where := vector.BuildWhereFilter(vector.DocTypeUserPrompt, "", false, nil)
 		vectorResults, vecErr := s.vectorClient.Query(r.Context(), query, limit*2, where)
 		if vecErr == nil && len(vectorResults) > 0 {
 			promptIDs := vector.ExtractPromptIDs(vectorResults, project)
@@ -314,16 +314,16 @@ func (s *Service) handleGetStats(w http.ResponseWriter, r *http.Request) {
 	sessionsToday, _ := s.sessionStore.GetSessionsToday(r.Context())
 
 	response := map[string]any{
-		"uptime":             time.Since(s.startTime).String(),
-		"uptimeSeconds":      time.Since(s.startTime).Seconds(),
-		"activeSessions":     s.sessionManager.GetActiveSessionCount(),
-		"queueDepth":         s.sessionManager.GetTotalQueueDepth(),
-		"isProcessing":       s.sessionManager.IsAnySessionProcessing(),
-		"connectedClients":   s.sseBroadcaster.ClientCount(),
-		"sessionsToday":      sessionsToday,
-		"retrieval":          retrievalStats,
-		"ready":              s.ready.Load(),
-		"vectorSyncDropped":  s.vectorSyncDropped.Load(),
+		"uptime":            time.Since(s.startTime).String(),
+		"uptimeSeconds":     time.Since(s.startTime).Seconds(),
+		"activeSessions":    s.sessionManager.GetActiveSessionCount(),
+		"queueDepth":        s.sessionManager.GetTotalQueueDepth(),
+		"isProcessing":      s.sessionManager.IsAnySessionProcessing(),
+		"connectedClients":  s.sseBroadcaster.ClientCount(),
+		"sessionsToday":     sessionsToday,
+		"retrieval":         retrievalStats,
+		"ready":             s.ready.Load(),
+		"vectorSyncDropped": s.vectorSyncDropped.Load(),
 	}
 
 	// Add memory stats

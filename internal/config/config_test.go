@@ -82,6 +82,21 @@ func (s *ConfigSuite) TestInjectUnifiedEnvOverride() {
 	s.False(cfg.InjectUnified, "ENGRAM_INJECT_UNIFIED=false must activate the legacy inject path")
 }
 
+// TestStorePathSupersessionDefaultTrue verifies store-path supersession defaults to enabled.
+func (s *ConfigSuite) TestStorePathSupersessionDefaultTrue() {
+	cfg, err := Load()
+	s.Require().NoError(err)
+	s.True(cfg.StorePathSupersessionEnabled, "store-path supersession must default to enabled for current behavior")
+}
+
+// TestStorePathSupersessionEnvOverride verifies the kill-switch disables store-path supersession.
+func (s *ConfigSuite) TestStorePathSupersessionEnvOverride() {
+	s.T().Setenv("ENGRAM_STORE_PATH_SUPERSESSION_ENABLED", "false")
+	cfg, err := Load()
+	s.Require().NoError(err)
+	s.False(cfg.StorePathSupersessionEnabled, "ENGRAM_STORE_PATH_SUPERSESSION_ENABLED=false must disable store-path supersession")
+}
+
 // TestDataDir tests data directory path.
 func (s *ConfigSuite) TestDataDir() {
 	dir := DataDir()
