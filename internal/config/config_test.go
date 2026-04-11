@@ -61,8 +61,7 @@ func (s *ConfigSuite) TestDefault() {
 
 // TestInjectionFloorEnvOverride verifies that ENGRAM_INJECTION_FLOOR=3 restores legacy fill behavior.
 func (s *ConfigSuite) TestInjectionFloorEnvOverride() {
-	os.Setenv("ENGRAM_INJECTION_FLOOR", "3")
-	defer os.Unsetenv("ENGRAM_INJECTION_FLOOR")
+	s.T().Setenv("ENGRAM_INJECTION_FLOOR", "3")
 	cfg, err := Load()
 	s.Require().NoError(err)
 	s.Equal(3, cfg.InjectionFloor)
@@ -77,8 +76,7 @@ func (s *ConfigSuite) TestInjectUnifiedDefaultTrue() {
 
 // TestInjectUnifiedEnvOverride verifies that ENGRAM_INJECT_UNIFIED=false enables the emergency rollback path.
 func (s *ConfigSuite) TestInjectUnifiedEnvOverride() {
-	os.Setenv("ENGRAM_INJECT_UNIFIED", "false")
-	defer os.Unsetenv("ENGRAM_INJECT_UNIFIED")
+	s.T().Setenv("ENGRAM_INJECT_UNIFIED", "false")
 	cfg, err := Load()
 	s.Require().NoError(err)
 	s.False(cfg.InjectUnified, "ENGRAM_INJECT_UNIFIED=false must activate the legacy inject path")
