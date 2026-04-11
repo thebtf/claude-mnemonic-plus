@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [3.7.0] - 2026-04-11
 
-Learning Memory v4 MVP — empirically-driven rebuild of the retrieval path after baseline
+Learning Memory v4 MVP -- empirically-driven rebuild of the retrieval path after baseline
 metrics showed 2164 feedback records with 0 positive / 0 negative citations and 20 noise
 candidates with 0 high-value observations. The relevant-memory injection was broadcasting
 guidance rules that agents never cited. v4 repairs the foundation before adding features.
@@ -31,14 +31,14 @@ challenge-report.md, hook-lifecycle-findings.md).
   returns an empty set meaning "nothing is relevant", the code previously overrode this
   with "top-5 composite scoring fallback". The LLM said silence; the code injected noise.
   Now the empty set is honored and an Info log line marks the silence event.
-  Error/timeout fallback (return all candidates) is unchanged — only the intentional
+  Error/timeout fallback (return all candidates) is unchanged -- only the intentional
   empty-set path changed.
   Files: `internal/search/llm_filter.go`, `internal/worker/handlers_context.go`.
   Commits: `f52b0d4` + `1a01310` + `77bbd41` (T008), `a02c586` + `14f7921` (T009).
 
 - **Hardcoded inject query replaced (FR-3)**: `handleContextInject` relevant section no longer
   uses `query := project + " code development"`. Injection now routes through
-  `RetrieveRelevant`, the same pipeline that user-prompt search uses — hybrid search,
+  `RetrieveRelevant`, the same pipeline that user-prompt search uses -- hybrid search,
   composite scoring, LLM filter, adaptive threshold, deduplication. Query is derived from
   the last user prompt for the session, falling back to project name for cold starts.
   New `retrievalHooks` extension point prepared for future F5 typed lanes and F8 BFS phases.
@@ -94,9 +94,9 @@ challenge-report.md, hook-lifecycle-findings.md).
 
 ### Config
 
-- `ENGRAM_INJECTION_FLOOR` — default changed **3 → 0** (breaking if you relied on the floor)
-- `ENGRAM_INJECT_UNIFIED` — new, default **true** (rollback flag)
-- `ENGRAM_LLM_FILTER_ENABLED` — unchanged default (false); behavior changed on empty-set path
+- `ENGRAM_INJECTION_FLOOR` -- default changed **3 -> 0** (breaking if you relied on the floor)
+- `ENGRAM_INJECT_UNIFIED` -- new, default **true** (rollback flag)
+- `ENGRAM_LLM_FILTER_ENABLED` -- unchanged default (false); behavior changed on empty-set path
 
 ### Schema
 
@@ -111,18 +111,18 @@ challenge-report.md, hook-lifecycle-findings.md).
 ### Empirical baseline (pre-v4)
 
 Captured before the v4 code changes for regression detection. See `.agent/specs/learning-memory-v4/baseline-metrics.md`.
-- 2164 feedback records, **100% neutral** — no user or heuristic ratings ever registered as positive or negative
+- 2164 feedback records, **100% neutral** -- no user or heuristic ratings ever registered as positive or negative
 - **20 noise candidates** with 10+ injections and 0 citations; **0 high-value candidates**
-- Top 10 most-retrieved observations: all `guidance` type, 888–1038 retrievals each, 0 citations
+- Top 10 most-retrieved observations: all `guidance` type, 888-1038 retrievals each, 0 citations
 - 30-day corpus: 1438 observations (decision 44.5% / discovery 33.6% / guidance 9.0%)
 - Near-dedup total merges: 0 (periodic dedup dormant)
 
 ### Post-shipment validation
 
-Validation protocol per spec.md §Validation Protocol. After deployment:
+Validation protocol per spec.md sectionValidation Protocol. After deployment:
 1. Re-run `admin(action="hit_rate")` and compare noise/value counts to baseline
 2. Run a live session with `/exit` and verify `utility_propagated_at` updates within 3s
-3. Check inject silence rate: `% of sessions with 0 relevant observations injected` — target 40% acceptable
+3. Check inject silence rate: `% of sessions with 0 relevant observations injected` -- target 40% acceptable
 4. Watch `learning_llm_calls_total` to ensure LLM filter does not spike cost
 
 ### Deferred to Phase 2 of v4
@@ -141,7 +141,7 @@ Prompt drafts for FR-6 and FR-10 are ready in `.agent/specs/learning-memory-v4/p
 
 - **Issues tool not discoverable**: `issues` tool was registered in secondary tools list but not in `primaryTools()`, so `tools/list` never returned it. Agents could not see or use the issues tool. Now included in primary tools (9 consolidated tools).
 - **MCP instructions missing issues**: `buildInstructions()` described "7 Tools" without mentioning issues. Updated to "8 Tools" with dedicated Issues section, workflow examples, and anti-pattern guidance ("Do NOT use store or docs for issues").
-- **PATCH /api/issues/{id} missing reopen support**: Handler only accepted `status=resolved`. Added `status=reopened` which calls `ReopenIssue` — needed for openclaw-engram REST-based reopen.
+- **PATCH /api/issues/{id} missing reopen support**: Handler only accepted `status=resolved`. Added `status=reopened` which calls `ReopenIssue` -- needed for openclaw-engram REST-based reopen.
 
 ### Added
 
@@ -153,12 +153,12 @@ Prompt drafts for FR-6 and FR-10 are ready in `.agent/specs/learning-memory-v4/p
 
 ### Added
 
-- **Learning Memory** — engram now learns from every session which observations are useful
+- **Learning Memory** -- engram now learns from every session which observations are useful
   - **Citation signal wiring**: stop hook detects which injected observations were referenced by the agent (via existing `detectUtilitySignal`), sends citation data to new `POST /api/sessions/{id}/mark-cited` endpoint. `PropagateCitation` updates effectiveness_score per-observation: cited = +0.03, uncited = -0.01.
-  - **Observation enrichment**: user prompts stored server-side as context for tool calls. `BuildObservationPrompt` now includes `<user_intent>` tag — extraction LLM sees WHY the agent acted, not just WHAT it did.
+  - **Observation enrichment**: user prompts stored server-side as context for tool calls. `BuildObservationPrompt` now includes `<user_intent>` tag -- extraction LLM sees WHY the agent acted, not just WHAT it did.
   - **Mid-session extract-learnings**: PreCompact hook sends last 20 messages (4000 token budget) to extract-learnings endpoint. Reliable trigger (replaces unreliable stop hook). Idempotent.
   - **Contradiction detection on write** (Mem0 Algorithm 1 adapted): cosine >= 0.92 = NOOP (near-duplicate), 0.75-0.92 = UPDATE (supersede with EVOLVES_FROM), < 0.75 = ADD. Synchronous, ~3-5ms.
-  - **Adaptive per-project threshold**: maintenance Task 20 reads citation rates from injection_log, adjusts relevance threshold ± 0.05 per project. Bounds [0.15, 0.60]. Window: 50 sessions.
+  - **Adaptive per-project threshold**: maintenance Task 20 reads citation rates from injection_log, adjusts relevance threshold +- 0.05 per project. Bounds [0.15, 0.60]. Window: 50 sessions.
   - **Migration 066**: `cited` BOOLEAN column on injection_log with composite index
 
 ### Changed
@@ -169,7 +169,7 @@ Prompt drafts for FR-6 and FR-10 are ready in `.agent/specs/learning-memory-v4/p
 
 ### Added
 
-- **Minimum Viable Learning Loop** — first production system to close the retrieve → measure → adjust → re-retrieve feedback loop
+- **Minimum Viable Learning Loop** -- first production system to close the retrieve -> measure -> adjust -> re-retrieve feedback loop
   - Bayesian effectiveness multiplier in `ApplyCompositeScoring`: `(successes + 1) / (injections + 2)`. No minimum injection gate.
   - Project-only vector search: removed `includeGlobal=true` from 3 context search call sites
   - Project filter on `GetAlwaysInjectObservations`
@@ -183,7 +183,7 @@ Prompt drafts for FR-6 and FR-10 are ready in `.agent/specs/learning-memory-v4/p
 
 ### Changed
 
-- PostToolUse hook matcher narrowed `*` → `Write|Edit|Bash|Agent|mcp__aimux` (~50+ fewer node process spawns)
+- PostToolUse hook matcher narrowed `*` -> `Write|Edit|Bash|Agent|mcp__aimux` (~50+ fewer node process spawns)
 - Behavioral rules de-duplicated (session-start only, removed from user-prompt.js)
 - Documentation rewrite (README, CHANGELOG, translations)
 
@@ -191,7 +191,7 @@ Prompt drafts for FR-6 and FR-10 are ready in `.agent/specs/learning-memory-v4/p
 
 ### Added
 
-- **LLM-Driven Memory Extraction** (ADR-005): `store(action="extract", content="...")` — agent dumps raw content, LLM extracts structured observations autonomously
+- **LLM-Driven Memory Extraction** (ADR-005): `store(action="extract", content="...")` -- agent dumps raw content, LLM extracts structured observations autonomously
 - Each extracted observation: type, title, narrative, concepts (from 20 valid concepts)
 - Privacy: content redacted via `privacy.RedactSecrets` before LLM call
 - Returns: `{extracted, stored, duplicates, titles}`
@@ -201,7 +201,7 @@ Prompt drafts for FR-6 and FR-10 are ready in `.agent/specs/learning-memory-v4/p
 ### Added
 
 - **Embedding Resilience Layer** (ADR-004): independent circuit breaker for embeddings
-- 4 health states: HEALTHY → DEGRADED → DISABLED → RECOVERING
+- 4 health states: HEALTHY -> DEGRADED -> DISABLED -> RECOVERING
 - Background health check goroutine (30s probe interval)
 - Automatic recovery within 60s of API returning
 - Selfcheck reports embedding status with failure counts
@@ -210,8 +210,8 @@ Prompt drafts for FR-6 and FR-10 are ready in `.agent/specs/learning-memory-v4/p
 
 ### Added
 
-- **Reasoning Traces — System 2 Memory** (ADR-003): structured reasoning chains (thought→action→observation→decision→conclusion)
-- Quality scoring (0-1) via LLM evaluation — only traces ≥ 0.5 stored
+- **Reasoning Traces -- System 2 Memory** (ADR-003): structured reasoning chains (thought->action->observation->decision->conclusion)
+- Quality scoring (0-1) via LLM evaluation -- only traces >= 0.5 stored
 - Auto-detection of reasoning patterns in tool events
 - `recall(action="reasoning")` retrieves past reasoning by project
 - `reasoning_traces` database table with session/project indexes
@@ -222,7 +222,7 @@ Prompt drafts for FR-6 and FR-10 are ready in `.agent/specs/learning-memory-v4/p
 
 - P1+P2 findings from 13-area investigation report
 - Summary observation fallback when assistant message empty
-- userPrompt fallback threshold lowered 50→10 chars
+- userPrompt fallback threshold lowered 50->10 chars
 - Circuit breaker recovery logging
 - BeforeToolCallResult type added to OpenClaw HookResult
 - Missing concept keywords backfill migration
@@ -320,8 +320,8 @@ Prompt drafts for FR-6 and FR-10 are ready in `.agent/specs/learning-memory-v4/p
 
 ### Changed
 
-- **MCP Tool API Consolidation**: 61 tools → 7 primary tools (recall, store, feedback, vault, docs, admin, check_system_health)
-- >80% context window reduction (~6100 → ~900 tokens per session)
+- **MCP Tool API Consolidation**: 61 tools -> 7 primary tools (recall, store, feedback, vault, docs, admin, check_system_health)
+- >80% context window reduction (~6100 -> ~900 tokens per session)
 - All 61 original tool names work as backward-compatible dispatch aliases
 - Updated MCP server instructions for consolidated API
 - 6 new router files for action-based dispatch
@@ -330,7 +330,7 @@ Prompt drafts for FR-6 and FR-10 are ready in `.agent/specs/learning-memory-v4/p
 
 ### Added
 
-- OpenClaw plugin expanded from 8 → 17 tools with lifecycle hooks
+- OpenClaw plugin expanded from 8 -> 17 tools with lifecycle hooks
 - Tool descriptions include trigger conditions
 - Stop hook: switched to retrospective injection API
 - Statusline: learning effectiveness metric
@@ -344,7 +344,7 @@ Prompt drafts for FR-6 and FR-10 are ready in `.agent/specs/learning-memory-v4/p
 
 ### Changed
 
-- Removed 7 redundant MCP tool registrations (68 → 61)
+- Removed 7 redundant MCP tool registrations (68 -> 61)
 
 ## [2.0.8] - 2026-03-28
 
@@ -366,16 +366,16 @@ Releases v0.9.0 through v2.0.7 included incremental improvements to search quali
 
 ### Added
 
-- **MCP instructions** — `buildInstructions()` returns comprehensive usage guide for all 48+ tools on `initialize` — any MCP client instantly knows how to use engram
-- **Marketplace auto-sync** — GitHub Actions workflow syncs `plugin/` to `thebtf/engram-marketplace` on push to main
+- **MCP instructions** -- `buildInstructions()` returns comprehensive usage guide for all 48+ tools on `initialize` -- any MCP client instantly knows how to use engram
+- **Marketplace auto-sync** -- GitHub Actions workflow syncs `plugin/` to `thebtf/engram-marketplace` on push to main
 
 ### Fixed
 
-- **Observation extraction in Docker** — replaced Claude CLI dependency (`claude --print`) with OpenAI-compatible LLM API (`ENGRAM_LLM_URL`). Observation pipeline was completely non-functional in Docker deployments where Claude CLI is not installed.
-- **MCP panic recovery** — added panic recovery with zerolog logging in Streamable HTTP handler
-- **FalkorDB int64 panic** — convert int64 to int for falkordb-go ParameterizedQuery params
-- LLM client URL normalization — handles both `http://host:port` and `http://host:port/v1` formats
-- LLM client fallback env var — now correctly reads `ENGRAM_EMBEDDING_BASE_URL` (was `ENGRAM_EMBEDDING_URL`)
+- **Observation extraction in Docker** -- replaced Claude CLI dependency (`claude --print`) with OpenAI-compatible LLM API (`ENGRAM_LLM_URL`). Observation pipeline was completely non-functional in Docker deployments where Claude CLI is not installed.
+- **MCP panic recovery** -- added panic recovery with zerolog logging in Streamable HTTP handler
+- **FalkorDB int64 panic** -- convert int64 to int for falkordb-go ParameterizedQuery params
+- LLM client URL normalization -- handles both `http://host:port` and `http://host:port/v1` formats
+- LLM client fallback env var -- now correctly reads `ENGRAM_EMBEDDING_BASE_URL` (was `ENGRAM_EMBEDDING_URL`)
 - Configurable LLM concurrency (`ENGRAM_LLM_CONCURRENCY`), timeout, and retry with backoff for transient errors
 - Reranking API key optional for TEI/direct backends; batch size configurable via `ENGRAM_RERANKING_BATCH_SIZE`
 
@@ -387,9 +387,9 @@ Releases v0.9.0 through v2.0.7 included incremental improvements to search quali
 
 ### Added
 
-- Collection MCP tools: `list_collections`, `list_documents`, `get_document`, `ingest_document`, `search_collection`, `remove_document` — YAML-configurable knowledge bases with smart chunking
-- `import_instincts` MCP tool — import ECC instinct files as guidance observations with semantic dedup
-- Unified document search integration — `search` tool now includes document results when `type="documents"` or empty
+- Collection MCP tools: `list_collections`, `list_documents`, `get_document`, `ingest_document`, `search_collection`, `remove_document` -- YAML-configurable knowledge bases with smart chunking
+- `import_instincts` MCP tool -- import ECC instinct files as guidance observations with semantic dedup
+- Unified document search integration -- `search` tool now includes document results when `type="documents"` or empty
 - Per-session utility signal detection for self-learning
 
 ### Fixed
@@ -405,7 +405,7 @@ Releases v0.9.0 through v2.0.7 included incremental improvements to search quali
 ### Added
 
 - HTTP logs endpoint (`/api/logs`)
-- JavaScript plugin hooks replacing Go binaries — simpler deployment, no build needed
+- JavaScript plugin hooks replacing Go binaries -- simpler deployment, no build needed
 
 ### Fixed
 
@@ -450,7 +450,7 @@ Initial release with full feature set.
 
 - **Scoring System**
   - Importance scoring: type-weighted with concept, feedback, retrieval, utility bonuses
-  - Relevance scoring: decay × access × relations × importance × confidence
+  - Relevance scoring: decay x access x relations x importance x confidence
   - Belief revision: telemetry, provenance tracking, smart GC
 
 - **Session Indexing**
