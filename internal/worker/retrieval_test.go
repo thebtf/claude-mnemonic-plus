@@ -92,6 +92,60 @@ func TestRetrieveRelevant_LLMFilterHonorsSilence(t *testing.T) {
 	require.Empty(t, observations)
 }
 
+func TestRetrieveRelevant_PassesFilePathsToVectorFilter(t *testing.T) {
+	service := newRetrievalTestService()
+	var capturedWhere vector.WhereFilter
+	service.retrievalHooks.vectorQuery = func(_ context.Context, _ string, _ int, where vector.WhereFilter) ([]vector.QueryResult, error) {
+		capturedWhere = where
+		return []vector.QueryResult{}, nil
+	}
+
+	_, _, err := service.RetrieveRelevant(context.Background(), "engram", "query", RetrievalOptions{
+		MaxResults: 5,
+		FilePaths:  []string{"foo.go", "bar.go"},
+	})
+	require.NoError(t, err)
+
+	found := false
+	for _, clause := range capturedWhere.Clauses {
+		if len(clause.OrGroup) != 2 {
+			continue
+		}
+		left := clause.OrGroup[0]
+		right := clause.OrGroup[1]
+		if left.Column == "files_modified" && left.Operator == "?|" && right.Column == "files_read" && right.Operator == "?|" {
+			require.Equal(t, []string{"foo.go", "bar.go"}, left.Value)
+			require.Equal(t, []string{"foo.go", "bar.go"}, right.Value)
+			found = true
+			break
+		}
+	}
+	require.True(t, found, "expected file-scope OR clause in vector filter")
+}
+
+func TestRetrieveRelevant_WithoutFilePaths_OmitsFileScopeClause(t *testing.T) {
+	service := newRetrievalTestService()
+	var capturedWhere vector.WhereFilter
+	service.retrievalHooks.vectorQuery = func(_ context.Context, _ string, _ int, where vector.WhereFilter) ([]vector.QueryResult, error) {
+		capturedWhere = where
+		return []vector.QueryResult{}, nil
+	}
+
+	_, _, err := service.RetrieveRelevant(context.Background(), "engram", "query", RetrievalOptions{MaxResults: 5})
+	require.NoError(t, err)
+
+	for _, clause := range capturedWhere.Clauses {
+		if clause.Column == "files_modified" || clause.Column == "files_read" {
+			t.Fatalf("unexpected direct file-scope clause: %+v", clause)
+		}
+		for _, nested := range clause.OrGroup {
+			if nested.Column == "files_modified" || nested.Column == "files_read" {
+				t.Fatalf("unexpected nested file-scope clause: %+v", nested)
+			}
+		}
+	}
+}
+
 func newRetrievalTestService() *Service {
 	cfg := config.Default()
 	cfg.InjectionFloor = 0

@@ -33,6 +33,7 @@ type RetrievalOptions struct {
 	MaxResults   int
 	SessionID    string
 	UseLLMFilter bool
+	FilePaths    []string
 }
 
 type retrievalContextKey struct{}
@@ -108,7 +109,7 @@ func (s *Service) RetrieveRelevant(ctx context.Context, project, query string, o
 	usedVector := false
 	vectorSearchFailed := false
 	if s.hasVectorRetrieval() {
-		where := vector.BuildWhereFilter(vector.DocTypeObservation, project, false, nil)
+		where := vector.BuildWhereFilter(vector.DocTypeObservation, project, false, opts.FilePaths)
 		allVectorResults := make([]vector.QueryResult, 0, len(expandedQueries)*limit*2)
 		vectorErrors := 0
 		for _, expandedQuery := range expandedQueries {

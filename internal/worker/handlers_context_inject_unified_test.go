@@ -234,3 +234,41 @@ func TestInjectRelevant_LegacyPath_WhenFlagFalse(t *testing.T) {
 		t.Error("InjectUnified=false: RetrieveRelevant must NOT be called; legacy path should be used instead")
 	}
 }
+
+func TestInjectRelevant_PassesFilePathsIntoRetrievalOptions(t *testing.T) {
+	svc := newInjectTestService(true)
+	const wantSessionID = "session-files"
+	const project = "engram"
+	wantFiles := []string{"foo.go", "bar.go"}
+
+	svc.retrievalHooks.getLastPromptBySession = func(_ context.Context, _ string, sessionID string) (*models.UserPromptWithSession, error) {
+		if sessionID == wantSessionID {
+			return &models.UserPromptWithSession{UserPrompt: models.UserPrompt{PromptText: "auth"}}, nil
+		}
+		return nil, nil
+	}
+
+	var capturedOpts RetrievalOptions
+	svc.retrievalHooks.retrieveRelevant = func(_ context.Context, _ string, _ string, opts RetrievalOptions) ([]*models.Observation, map[int64]float64, error) {
+		capturedOpts = opts
+		return nil, nil, nil
+	}
+
+	injectQuery := project
+	if prompt, pErr := svc.loadLastUserPromptBySession(context.Background(), project, wantSessionID, 20); pErr == nil && prompt != nil && prompt.PromptText != "" {
+		injectQuery = prompt.PromptText
+	}
+
+	_, _, err := svc.RetrieveRelevant(context.Background(), project, injectQuery, RetrievalOptions{
+		MaxResults: 10,
+		SessionID:  wantSessionID,
+		FilePaths:  wantFiles,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(capturedOpts.FilePaths) != 2 || capturedOpts.FilePaths[0] != "foo.go" || capturedOpts.FilePaths[1] != "bar.go" {
+		t.Fatalf("expected file paths [foo.go bar.go], got %#v", capturedOpts.FilePaths)
+	}
+}

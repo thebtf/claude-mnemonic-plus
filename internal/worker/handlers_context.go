@@ -140,16 +140,18 @@ func (s *Service) handleSearchByPrompt(w http.ResponseWriter, r *http.Request) {
 	query := r.URL.Query().Get("query")
 	cwd := r.URL.Query().Get("cwd")
 	agentID := r.URL.Query().Get("agent_id")
+	filesBeingEdited := r.URL.Query()["files_being_edited"]
 
 	// For POST requests, allow JSON body to override query params.
 	var obsTypeFilter string
 	if r.Method == http.MethodPost && r.Body != nil {
 		var body struct {
-			Project string `json:"project"`
-			Query   string `json:"query"`
-			Cwd     string `json:"cwd"`
-			AgentID string `json:"agent_id"`
-			ObsType string `json:"obs_type"`
+			Project         string `json:"project"`
+			Query           string `json:"query"`
+			Cwd             string `json:"cwd"`
+			AgentID         string `json:"agent_id"`
+			ObsType         string `json:"obs_type"`
+			FilesBeingEdited []string `json:"files_being_edited"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&body); err == nil {
 			if body.Project != "" {
@@ -166,6 +168,9 @@ func (s *Service) handleSearchByPrompt(w http.ResponseWriter, r *http.Request) {
 			}
 			if body.ObsType != "" {
 				obsTypeFilter = body.ObsType
+			}
+			if len(body.FilesBeingEdited) > 0 {
+				filesBeingEdited = body.FilesBeingEdited
 			}
 			// agent_id acts as project scope for OpenClaw agents without filesystem context
 			if project == "" && agentID != "" {
@@ -204,8 +209,9 @@ func (s *Service) handleSearchByPrompt(w http.ResponseWriter, r *http.Request) {
 	retrievalMeta := &retrievalMetadata{}
 	retrievalCtx := withRetrievalRequest(r.Context(), agentID, cwd, retrievalMeta)
 	clusteredObservations, similarityScores, err := s.RetrieveRelevant(retrievalCtx, project, query, RetrievalOptions{
-		MaxResults:   maxResults,
-		UseLLMFilter: s.config.LLMFilterEnabled,
+		MaxResults:    maxResults,
+		UseLLMFilter:  s.config.LLMFilterEnabled,
+		FilePaths:     filesBeingEdited,
 	})
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -775,16 +781,18 @@ func formatStructured(obs *models.Observation) string {
 // @Router /api/context/inject [get]
 func (s *Service) handleContextInject(w http.ResponseWriter, r *http.Request) {
 	var project, agentID, cwd, legacyProject, gitRemote, relativePath, sessionID string
+	var filesBeingEdited []string
 
 	if r.Method == http.MethodPost {
 		var req struct {
-			Project       string `json:"project"`
-			AgentID       string `json:"agent_id"`
-			Cwd           string `json:"cwd"`
-			LegacyProject string `json:"legacy_project"`
-			GitRemote     string `json:"git_remote"`
-			RelativePath  string `json:"relative_path"`
-			SessionID     string `json:"session_id"`
+			Project          string   `json:"project"`
+			AgentID          string   `json:"agent_id"`
+			Cwd              string   `json:"cwd"`
+			LegacyProject    string   `json:"legacy_project"`
+			GitRemote        string   `json:"git_remote"`
+			RelativePath     string   `json:"relative_path"`
+			SessionID        string   `json:"session_id"`
+			FilesBeingEdited []string `json:"files_being_edited"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			http.Error(w, "Invalid JSON: "+err.Error(), http.StatusBadRequest)
@@ -797,6 +805,7 @@ func (s *Service) handleContextInject(w http.ResponseWriter, r *http.Request) {
 		gitRemote = req.GitRemote
 		relativePath = req.RelativePath
 		sessionID = req.SessionID
+		filesBeingEdited = req.FilesBeingEdited
 	} else {
 		// GET (deprecated — use POST)
 		project = r.URL.Query().Get("project")
@@ -806,6 +815,7 @@ func (s *Service) handleContextInject(w http.ResponseWriter, r *http.Request) {
 		gitRemote = r.URL.Query().Get("git_remote")
 		relativePath = r.URL.Query().Get("relative_path")
 		sessionID = r.URL.Query().Get("session_id")
+		filesBeingEdited = r.URL.Query()["files_being_edited"]
 	}
 
 	// Fall back to agent_id as session proxy when no explicit session_id provided
@@ -907,7 +917,7 @@ func (s *Service) handleContextInject(w http.ResponseWriter, r *http.Request) {
 				injectQuery = prompt.PromptText
 			}
 		}
-		opts := RetrievalOptions{MaxResults: 10, SessionID: sessionID}
+		opts := RetrievalOptions{MaxResults: 10, SessionID: sessionID, FilePaths: filesBeingEdited}
 		retrieved, _, retrieveErr := s.RetrieveRelevant(ctx, project, injectQuery, opts)
 		if retrieveErr != nil {
 			log.Debug().Err(retrieveErr).Str("project", project).Msg("RetrieveRelevant failed for context inject relevant section")
