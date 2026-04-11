@@ -2171,6 +2171,22 @@ func runMigrations(db *gorm.DB, embeddingDims int) error {
 				return tx.Exec(`ALTER TABLE sdk_sessions DROP COLUMN IF EXISTS utility_propagated_at`).Error
 			},
 		},
+
+		// Migration 073: partial index on sdk_sessions.utility_propagated_at.
+		// Improves query performance of recordPendingOutcomes maintenance guard which filters
+		// on this column (WHERE utility_propagated_at > NOW() - INTERVAL '2 hours').
+		// Partial index covers only non-null rows, keeping the index small.
+		{
+			ID: "073_sessions_utility_propagated_at_index",
+			Migrate: func(tx *gorm.DB) error {
+				return tx.Exec(`CREATE INDEX IF NOT EXISTS idx_sdk_sessions_utility_propagated_at
+ON sdk_sessions (utility_propagated_at)
+WHERE utility_propagated_at IS NOT NULL`).Error
+			},
+			Rollback: func(tx *gorm.DB) error {
+				return tx.Exec(`DROP INDEX IF EXISTS idx_sdk_sessions_utility_propagated_at`).Error
+			},
+		},
 	})
 	if err := m.Migrate(); err != nil {
 		return fmt.Errorf("run gormigrate migrations: %w", err)
