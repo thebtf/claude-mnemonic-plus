@@ -319,7 +319,10 @@ func (s *Service) filterFreshObservations(ctx context.Context, observations []*m
 }
 
 func (s *Service) applyReranking(query string, observations []*models.Observation, similarityScores map[int64]float64) []*models.Observation {
-	if len(observations) == 0 || (s.reranker == nil && (s.retrievalHooks == nil || s.retrievalHooks.rerank == nil && s.retrievalHooks.rerankByScore == nil)) {
+	// noRerankAvailable is true when neither a hook-based nor a direct reranker is configured.
+	noRerankAvailable := s.reranker == nil &&
+		(s.retrievalHooks == nil || (s.retrievalHooks.rerank == nil && s.retrievalHooks.rerankByScore == nil))
+	if len(observations) == 0 || noRerankAvailable {
 		return observations
 	}
 	candidates := make([]reranking.Candidate, len(observations))
