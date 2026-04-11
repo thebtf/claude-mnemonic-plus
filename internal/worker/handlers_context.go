@@ -287,7 +287,7 @@ func (s *Service) handleSearchByPrompt(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Track search misses for self-tuning analytics (inline РІР‚вЂќ avoids unbounded goroutine spawn)
+	// Track search misses for self-tuning analytics (inline — avoids unbounded goroutine spawn)
 	if len(clusteredObservations) == 0 && query != "" {
 		s.trackSearchMiss(project, query)
 	}
@@ -689,7 +689,7 @@ func splitCamelCase(s string) string {
 
 // applyActiveVersions replaces each observation's narrative with its active ObservationVersion
 // narrative when one exists. Returns a new slice; original observation pointers are not mutated.
-// Errors from the version store are silently logged РІР‚вЂќ the original narrative is used as fallback.
+// Errors from the version store are silently logged — the original narrative is used as fallback.
 func applyActiveVersions(ctx context.Context, vs *gorm.VersionStore, observations []*models.Observation) []*models.Observation {
 	if len(observations) == 0 || vs == nil {
 		return observations
@@ -707,7 +707,7 @@ func applyActiveVersions(ctx context.Context, vs *gorm.VersionStore, observation
 			result[i] = obs
 			continue
 		}
-		// Shallow copy РІР‚вЂќ only swap the narrative field so the original model is not mutated.
+		// Shallow copy — only swap the narrative field so the original model is not mutated.
 		copy := *obs
 		copy.Narrative.String = active.Narrative
 		copy.Narrative.Valid = true
@@ -759,7 +759,7 @@ func formatStructured(obs *models.Observation) string {
 
 // handleContextInject godoc
 // @Summary Inject context for session start
-// @Description Returns context for injection at session start. Response includes recent (last 5), relevant (top 10 semantic), and guidance sections. Supports GET (deprecated) and POST. Critical startup path РІР‚вЂќ optimized for speed.
+// @Description Returns context for injection at session start. Response includes recent (last 5), relevant (top 10 semantic), and guidance sections. Supports GET (deprecated) and POST. Critical startup path — optimized for speed.
 // @Tags Context
 // @Accept json
 // @Produce json
@@ -798,7 +798,7 @@ func (s *Service) handleContextInject(w http.ResponseWriter, r *http.Request) {
 		relativePath = req.RelativePath
 		sessionID = req.SessionID
 	} else {
-		// GET (deprecated РІР‚вЂќ use POST)
+		// GET (deprecated — use POST)
 		project = r.URL.Query().Get("project")
 		agentID = r.URL.Query().Get("agent_id")
 		cwd = r.URL.Query().Get("cwd")
@@ -1018,7 +1018,7 @@ func (s *Service) handleContextInject(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// --- Injection floor: ensure minimum observations across all sections ---
-	// When InjectionFloor == 0 (v4 default, FR-1), the silence path is active РІР‚вЂќ no fill.
+	// When InjectionFloor == 0 (v4 default, FR-1), the silence path is active — no fill.
 	// Operators can set InjectionFloor > 0 via ENGRAM_INJECTION_FLOOR for legacy fill behavior.
 	injectionFloor := s.config.InjectionFloor
 	if injectionFloor > 0 && s.observationStore != nil {
@@ -1218,7 +1218,7 @@ func (s *Service) handleContextInject(w http.ResponseWriter, r *http.Request) {
 
 	if compact {
 		// Compact format: only fields the hook actually uses.
-		// Main observations use fullCount limit РІР‚вЂќ condensed entries skip narrative/facts.
+		// Main observations use fullCount limit — condensed entries skip narrative/facts.
 		// Recalculate token estimate accounting for condensed format savings.
 		compactTokenEstimate := estimateTokensWithLimit(clusteredObservations, fullCount) +
 			estimateTokens(guidanceObservations)
@@ -1367,7 +1367,7 @@ func (s *Service) trackSearchMiss(project, query string) {
 // @Accept json
 // @Produce json
 // @Security ApiKeyAuth
-// @Param body body object true "Params: project (optional РІР‚вЂќ omit to aggregate across all projects), limit (optional)"
+// @Param body body object true "Params: project (optional — omit to aggregate across all projects), limit (optional)"
 // @Success 200 {object} map[string]interface{}
 // @Failure 400 {string} string "invalid project name"
 // @Failure 500 {string} string "internal error"
