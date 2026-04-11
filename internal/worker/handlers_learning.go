@@ -6,12 +6,13 @@ import (
 	"encoding/json"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/rs/zerolog/log"
+	gormstorage "github.com/thebtf/engram/internal/db/gorm"
 	"github.com/thebtf/engram/internal/learning"
 	"github.com/thebtf/engram/internal/scoring"
-	gormstorage "github.com/thebtf/engram/internal/db/gorm"
 )
 
 // handleGetEffectivenessDistribution godoc
@@ -145,6 +146,84 @@ func (s *Service) handleSetSessionOutcome(w http.ResponseWriter, r *http.Request
 		"session_id":            sessionID,
 		"outcome":               req.Outcome,
 		"observations_affected": injectedCount,
+	})
+}
+
+func (s *Service) handlePropagateOutcome(w http.ResponseWriter, r *http.Request) {
+	sessionID := chi.URLParam(r, "sessionId")
+	if sessionID == "" {
+		http.Error(w, "session id required", http.StatusBadRequest)
+		return
+	}
+
+	s.initMu.RLock()
+	sessionStore := s.sessionStore
+	injStore := s.injectionStore
+	obsStore := s.observationStore
+	s.initMu.RUnlock()
+
+	if sessionStore == nil || injStore == nil || obsStore == nil {
+		http.Error(w, "service not ready", http.StatusServiceUnavailable)
+		return
+	}
+
+	sess, err := sessionStore.FindAnySDKSession(r.Context(), sessionID)
+	if err != nil {
+		http.Error(w, "failed to load session: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if sess == nil {
+		http.Error(w, "session not found", http.StatusNotFound)
+		return
+	}
+
+	if sess.UtilityPropagatedAt.Valid {
+		elapsed := time.Since(sess.UtilityPropagatedAt.Time)
+		if elapsed < time.Minute {
+			retryAfter := int((time.Minute - elapsed).Seconds())
+			if retryAfter < 1 {
+				retryAfter = 1
+			}
+			w.WriteHeader(http.StatusConflict)
+			writeJSON(w, map[string]interface{}{
+				"error":       "rate_limited",
+				"retry_after": retryAfter,
+			})
+			return
+		}
+	}
+
+	outcome := learning.Outcome(sess.Outcome.String)
+	if !sess.Outcome.Valid || !learning.IsValidOutcome(outcome) {
+		http.Error(w, "session outcome not recorded", http.StatusBadRequest)
+		return
+	}
+
+	updatedCount, err := injStore.CountInjectionsBySession(r.Context(), sessionID)
+	if err != nil {
+		http.Error(w, "failed to count injections: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	if err := sessionStore.UpdateUtilityPropagatedAt(r.Context(), sessionID); err != nil {
+		http.Error(w, "failed to update utility propagation timestamp: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	capturedSessionID := sessionID
+	capturedOutcome := outcome
+	go func() {
+		bgCtx := context.Background()
+		if _, err := learning.PropagateOutcome(bgCtx, injStore, obsStore, capturedSessionID, capturedOutcome); err != nil {
+			log.Warn().Err(err).Str("session", capturedSessionID).Msg("manual outcome propagation failed")
+		}
+	}()
+
+	utilityPropagatedAt := time.Now().UTC().Format(time.RFC3339)
+	writeJSON(w, map[string]interface{}{
+		"updated":               updatedCount,
+		"session_id":            sessionID,
+		"utility_propagated_at": utilityPropagatedAt,
 	})
 }
 
@@ -471,17 +550,17 @@ func (s *Service) handleGetSessionInjections(w http.ResponseWriter, r *http.Requ
 	}
 
 	writeJSON(w, map[string]any{
-		"session_id":  sessionID,
-		"injections":  details,
-		"total":       totalInjections,
-		"sections":    sections,
+		"session_id": sessionID,
+		"injections": details,
+		"total":      totalInjections,
+		"sections":   sections,
 		"summary": map[string]any{
-			"high_effectiveness":    highEff,
-			"medium_effectiveness":  medEff,
-			"low_effectiveness":     lowEff,
-			"insufficient_data":     noData,
-			"avg_effectiveness":     avgEffectiveness,
-			"evaluated":             evaluated,
+			"high_effectiveness":   highEff,
+			"medium_effectiveness": medEff,
+			"low_effectiveness":    lowEff,
+			"insufficient_data":    noData,
+			"avg_effectiveness":    avgEffectiveness,
+			"evaluated":            evaluated,
 		},
 	})
 }

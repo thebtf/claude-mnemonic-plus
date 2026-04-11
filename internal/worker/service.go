@@ -1878,6 +1878,7 @@ func (s *Service) setupRoutes() {
 		r.Post("/api/sessions/{sessionId}/mark-cited", s.handleMarkCited)
 		r.Get("/api/sessions/{sessionId}/injected-observations", s.handleGetSessionInjectedObservations)
 		r.Post("/api/sessions/{sessionId}/outcome", s.handleSetSessionOutcome)
+		r.Post("/api/sessions/{sessionId}/propagate-outcome", s.handlePropagateOutcome)
 		r.Get("/api/learning/effectiveness-distribution", s.handleGetEffectivenessDistribution)
 		r.Get("/api/learning/strategies", s.handleGetStrategies)
 		r.Get("/api/learning/curve", s.handleGetLearningCurve)

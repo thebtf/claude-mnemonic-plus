@@ -24,15 +24,16 @@ type SDKSession struct {
 	SDKSessionID     sql.NullString `db:"sdk_session_id" json:"sdk_session_id,omitempty"`
 	UserPrompt       sql.NullString `db:"user_prompt" json:"user_prompt,omitempty"`
 	CompletedAt      sql.NullString `db:"completed_at" json:"completed_at,omitempty"`
-	WorkerPort       sql.NullInt64  `db:"worker_port" json:"worker_port,omitempty"`
-	CompletedAtEpoch  sql.NullInt64  `db:"completed_at_epoch" json:"completed_at_epoch,omitempty"`
-	Outcome           sql.NullString `db:"outcome" json:"outcome,omitempty"`
-	OutcomeReason     sql.NullString `db:"outcome_reason" json:"outcome_reason,omitempty"`
-	OutcomeRecordedAt sql.NullString `db:"outcome_recorded_at" json:"outcome_recorded_at,omitempty"`
-	InjectionStrategy sql.NullString `db:"injection_strategy" json:"injection_strategy,omitempty"`
-	ID                int64          `db:"id" json:"id"`
-	PromptCounter    int64          `db:"prompt_counter" json:"prompt_counter"`
-	StartedAtEpoch   int64          `db:"started_at_epoch" json:"started_at_epoch"`
+	WorkerPort          sql.NullInt64  `db:"worker_port" json:"worker_port,omitempty"`
+	CompletedAtEpoch    sql.NullInt64  `db:"completed_at_epoch" json:"completed_at_epoch,omitempty"`
+	Outcome             sql.NullString `db:"outcome" json:"outcome,omitempty"`
+	OutcomeReason       sql.NullString `db:"outcome_reason" json:"outcome_reason,omitempty"`
+	OutcomeRecordedAt   sql.NullString `db:"outcome_recorded_at" json:"outcome_recorded_at,omitempty"`
+	UtilityPropagatedAt sql.NullTime   `db:"utility_propagated_at" json:"utility_propagated_at,omitempty"`
+	InjectionStrategy   sql.NullString `db:"injection_strategy" json:"injection_strategy,omitempty"`
+	ID                  int64          `db:"id" json:"id"`
+	PromptCounter       int64          `db:"prompt_counter" json:"prompt_counter"`
+	StartedAtEpoch      int64          `db:"started_at_epoch" json:"started_at_epoch"`
 }
 
 // ActiveSession represents an in-memory active session being processed.

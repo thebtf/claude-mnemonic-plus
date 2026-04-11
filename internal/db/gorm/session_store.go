@@ -260,6 +260,21 @@ func (s *SessionStore) UpdateSessionOutcome(ctx context.Context, claudeSessionID
 	return nil
 }
 
+// UpdateUtilityPropagatedAt records when utility propagation was last triggered for a session.
+func (s *SessionStore) UpdateUtilityPropagatedAt(ctx context.Context, claudeSessionID string) error {
+	result := s.db.WithContext(ctx).
+		Model(&SDKSession{}).
+		Where("claude_session_id = ?", claudeSessionID).
+		Update("utility_propagated_at", time.Now())
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return fmt.Errorf("session not found: %s", claudeSessionID)
+	}
+	return nil
+}
+
 // StrategyStatRow holds aggregated stats for a single injection strategy.
 type StrategyStatRow struct {
 	Strategy  string
@@ -417,9 +432,10 @@ func toModelSDKSession(sess *SDKSession) *models.SDKSession {
 		StartedAtEpoch:   sess.StartedAtEpoch,
 		CompletedAt:       sess.CompletedAt,
 		CompletedAtEpoch:  sess.CompletedAtEpoch,
-		Outcome:           sess.Outcome,
-		OutcomeReason:     sess.OutcomeReason,
-		OutcomeRecordedAt: sess.OutcomeRecordedAt,
-		InjectionStrategy: sess.InjectionStrategy,
+		Outcome:             sess.Outcome,
+		OutcomeReason:       sess.OutcomeReason,
+		OutcomeRecordedAt:   sess.OutcomeRecordedAt,
+		UtilityPropagatedAt: sess.UtilityPropagatedAt,
+		InjectionStrategy:   sess.InjectionStrategy,
 	}
 }
