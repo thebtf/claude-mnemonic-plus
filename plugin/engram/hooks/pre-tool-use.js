@@ -129,18 +129,16 @@ async function fetchByFileContext(project, filePath) {
 }
 
 async function fetchTriggerContext(project, sessionID, toolName, toolInput) {
-  const params = new URLSearchParams({ tool: toolName });
-  if (project) params.set('project', project);
-  if (sessionID) params.set('session_id', sessionID);
+  const normalizedInput = { ...toolInput };
   if (toolName === 'Bash') {
     const command = getString(toolInput.command || toolInput.cmd);
-    if (command) params.set('command', command);
+    if (command) normalizedInput.command = command;
   }
   const filePath = extractFilePath(toolInput);
-  if (filePath) params.set('file_path', filePath);
+  if (filePath) normalizedInput.file_path = filePath;
   const result = await lib.requestPost('/api/memory/triggers', {
     tool: toolName,
-    params: toolInput,
+    params: normalizedInput,
     project,
     session_id: sessionID,
   }, 200);

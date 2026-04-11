@@ -86,7 +86,12 @@ func parseMergeDecision(raw string) (MergeDecision, bool) {
 		return MergeDecision{}, false
 	}
 	switch parsed.Action {
-	case MergeActionCreateNew, MergeActionUpdate, MergeActionSupersede, MergeActionSkip:
+	case MergeActionCreateNew, MergeActionSkip:
+		return parsed, true
+	case MergeActionUpdate, MergeActionSupersede:
+		if parsed.TargetID <= 0 {
+			return MergeDecision{}, false
+		}
 		return parsed, true
 	default:
 		return MergeDecision{}, false

@@ -107,3 +107,19 @@ func TestDecideMerge_AllActionValues(t *testing.T) {
 	}
 }
 
+func TestDecideMerge_UpdateWithoutTargetFallsBackToCreateNew(t *testing.T) {
+	newObs := &models.Observation{Type: models.ObsTypeDecision, Title: nullString("Rule: X")}
+	decision, err := DecideMerge(context.Background(), &mergeMockLLMClient{response: `{"action":"UPDATE"}`}, newObs, nil)
+	require.NoError(t, err)
+	require.Equal(t, MergeActionCreateNew, decision.Action)
+	require.Zero(t, decision.TargetID)
+}
+
+func TestDecideMerge_SupersedeWithoutTargetFallsBackToCreateNew(t *testing.T) {
+	newObs := &models.Observation{Type: models.ObsTypeDecision, Title: nullString("Rule: X")}
+	decision, err := DecideMerge(context.Background(), &mergeMockLLMClient{response: `{"action":"SUPERSEDE","target_id":0}`}, newObs, nil)
+	require.NoError(t, err)
+	require.Equal(t, MergeActionCreateNew, decision.Action)
+	require.Zero(t, decision.TargetID)
+}
+
