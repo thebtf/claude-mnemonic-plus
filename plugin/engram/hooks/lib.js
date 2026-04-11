@@ -355,17 +355,55 @@ function incrementSessionSignals(sessionID, increments) {
     } catch {
       // File doesn't exist yet — start fresh
     }
+
+    const next = { ...current };
     for (const [key, delta] of Object.entries(increments)) {
-      current[key] = (current[key] || 0) + (Number(delta) || 0);
+      next[key] = (next[key] || 0) + (Number(delta) || 0);
     }
-    fs.writeFileSync(p, JSON.stringify(current), 'utf8');
+    fs.writeFileSync(p, JSON.stringify(next), 'utf8');
   } catch {
     // Signal tracking is best-effort; never throw
   }
 }
 
 /**
- * Read accumulated signal counters for the given session.
+ * Track up to 10 recently touched files for the given session, with dedupe.
+ * Keeps insertion order and evicts the oldest file when exceeding the limit.
+ * Stores data under the `files` key, alongside numeric counters.
+ * @param {string} sessionID - Claude session ID
+ * @param {string} filePath - Absolute or relative file path
+ */
+function appendSessionFile(sessionID, filePath) {
+  if (!sessionID || !filePath) return;
+  try {
+    const p = _signalPath(sessionID);
+    let current = {};
+    try {
+      current = JSON.parse(fs.readFileSync(p, 'utf8'));
+    } catch {
+      // File doesn't exist yet — start fresh
+    }
+
+    const file = String(filePath);
+    const priorFiles = Array.isArray(current.files)
+      ? current.files.filter((entry) => typeof entry === 'string')
+      : [];
+    const nextFiles = priorFiles.filter((entry) => entry !== file);
+    nextFiles.push(file);
+
+    if (nextFiles.length > 10) {
+      nextFiles.splice(0, nextFiles.length - 10);
+    }
+
+    const next = { ...current, files: nextFiles };
+    fs.writeFileSync(p, JSON.stringify(next), 'utf8');
+  } catch {
+    // Signal tracking is best-effort; never throw
+  }
+}
+
+/**
+ * Read accumulated signal counters and file history for the given session.
  * Returns an empty object when no signals have been recorded.
  * @param {string} sessionID - Claude session ID
  * @returns {Object}
@@ -377,6 +415,23 @@ function getSessionSignals(sessionID) {
     return JSON.parse(fs.readFileSync(p, 'utf8'));
   } catch {
     return {};
+  }
+}
+
+/**
+ * Read file history for the given session.
+ * Returns an empty array when no files have been recorded.
+ * @param {string} sessionID - Claude session ID
+ * @returns {string[]}
+ */
+function getSessionFiles(sessionID) {
+  if (!sessionID) return [];
+  try {
+    const current = getSessionSignals(sessionID);
+    const files = Array.isArray(current.files) ? current.files : [];
+    return files.filter((entry) => typeof entry === 'string');
+  } catch {
+    return [];
   }
 }
 
@@ -613,7 +668,9 @@ module.exports = {
   RunStatuslineHook,
   writeResponse,
   incrementSessionSignals,
+  appendSessionFile,
   getSessionSignals,
+  getSessionFiles,
   clearSessionSignals,
   diffScope,
   createPendingMarker,

@@ -33,6 +33,11 @@ async function handlePreToolUse(ctx, input) {
     return '';
   }
 
+  // Track touched files in the session signal store for downstream hooks.
+  if (ctx.SessionID) {
+    lib.appendSessionFile(ctx.SessionID, filePath);
+  }
+
   const project = getString(ctx.Project);
 
   // Query engram for file-specific observations (200ms timeout — NFR-3)
