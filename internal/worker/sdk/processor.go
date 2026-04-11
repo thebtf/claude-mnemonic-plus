@@ -16,6 +16,7 @@ import (
 
 	json "github.com/goccy/go-json"
 
+	"github.com/rs/zerolog/log"
 	"github.com/thebtf/engram/internal/config"
 	"github.com/thebtf/engram/internal/db/gorm"
 	"github.com/thebtf/engram/internal/learning"
@@ -23,7 +24,6 @@ import (
 	"github.com/thebtf/engram/internal/vector"
 	"github.com/thebtf/engram/pkg/models"
 	"github.com/thebtf/engram/pkg/similarity"
-	"github.com/rs/zerolog/log"
 )
 
 // CircuitBreaker implements a simple circuit breaker pattern for CLI calls.
@@ -272,6 +272,21 @@ func (p *Processor) broadcast(event map[string]any) {
 	if p.broadcastFunc != nil {
 		p.broadcastFunc(event)
 	}
+}
+
+func (p *Processor) enqueueObservationSync(obs *models.Observation) {
+	if p.syncObservationFunc == nil || obs == nil {
+		return
+	}
+	if p.vectorSyncChan != nil {
+		select {
+		case p.vectorSyncChan <- obs:
+			return
+		default:
+			log.Debug().Int64("obs_id", obs.ID).Msg("Vector sync channel full, using fallback goroutine")
+		}
+	}
+	go p.syncObservationFunc(obs)
 }
 
 // DefaultConcurrentLLMCalls is the default number of concurrent LLM calls.
@@ -534,26 +549,24 @@ func (p *Processor) applyWriteMergeDecision(ctx context.Context, sdkSessionID, p
 		commandsRun := unionStrings([]string(target.CommandsRun), obs.CommandsRun)
 		fileMtimes := mergeFileMtimes(target.FileMtimes, obs.FileMtimes)
 		updated, err := p.observationStore.UpdateObservation(ctx, target.ID, &gorm.ObservationUpdate{
-			Title: &title,
-			Subtitle: &subtitle,
-			Narrative: &narrative,
-			Facts: &facts,
-			Concepts: &concepts,
-			FilesRead: &filesRead,
+			Title:         &title,
+			Subtitle:      &subtitle,
+			Narrative:     &narrative,
+			Facts:         &facts,
+			Concepts:      &concepts,
+			FilesRead:     &filesRead,
 			FilesModified: &filesModified,
-			CommandsRun: &commandsRun,
-			FileMtimes: &fileMtimes,
+			CommandsRun:   &commandsRun,
+			FileMtimes:    &fileMtimes,
 		})
 		if err != nil {
 			return nil, false, "", err
 		}
-		if p.syncObservationFunc != nil && updated != nil {
-			p.syncObservationFunc(updated)
-		}
+		p.enqueueObservationSync(updated)
 		p.broadcast(map[string]any{
-			"type": "observation",
-			"action": "updated",
-			"id": target.ID,
+			"type":    "observation",
+			"action":  "updated",
+			"id":      target.ID,
 			"project": project,
 		})
 		log.Info().Str("project", project).Int64("target_id", target.ID).Msg("write-merge: updated existing observation")
@@ -701,8 +714,12 @@ func (p *Processor) ProcessObservation(ctx context.Context, sdkSessionID, projec
 		}
 		if mergedObs != nil && mergedObs.ID > 0 && !mergedObs.IsSuperseded {
 			if err := p.observationStore.MarkAsSuperseded(ctx, mergedObs.ID); err != nil {
-				log.Error().Err(err).Int64("target_id", mergedObs.ID).Msg("write-merge: failed to supersede old observation after replacement insert")
-				continue
+				rollbackErr := p.observationStore.DeleteObservation(ctx, id)
+				if rollbackErr != nil {
+					log.Error().Err(rollbackErr).Int64("new_id", id).Msg("write-merge: failed to rollback replacement observation after supersede failure")
+					return fmt.Errorf("write-merge: failed to supersede target %d after replacement insert: %w (rollback failed: %v)", mergedObs.ID, err, rollbackErr)
+				}
+				return fmt.Errorf("write-merge: failed to supersede target %d after replacement insert: %w", mergedObs.ID, err)
 			}
 		}
 		storedCount++
@@ -714,21 +731,11 @@ func (p *Processor) ProcessObservation(ctx context.Context, sdkSessionID, projec
 			Msg("Observation stored")
 
 		// Sync to vector DB via bounded worker pool (non-blocking to reduce latency)
-		if p.syncObservationFunc != nil && p.vectorSyncChan != nil {
+		if p.syncObservationFunc != nil {
 			fullObs := models.NewObservation(sdkSessionID, project, obs, promptNumber, 0)
 			fullObs.ID = id
 			fullObs.CreatedAtEpoch = createdAtEpoch
-			// Non-blocking send to worker pool - drops if channel is full
-			select {
-			case p.vectorSyncChan <- fullObs:
-				// Sent to worker pool
-			default:
-				// Channel full, fall back to direct sync in goroutine (bounded by channel buffer)
-				log.Debug().Int64("obs_id", id).Msg("Vector sync channel full, using fallback goroutine")
-				go func(obsToSync *models.Observation) {
-					p.syncObservationFunc(obsToSync)
-				}(fullObs)
-			}
+			p.enqueueObservationSync(fullObs)
 		}
 
 		// Broadcast new observation event for dashboard refresh
@@ -821,7 +828,7 @@ func (p *Processor) extractAndStoreReasoning(ctx context.Context, sdkSessionID, 
 		Project:      project,
 		Steps:        string(stepsJSON),
 		QualityScore: trace.QualityScore,
-		TaskContext:   string(taskCtxJSON),
+		TaskContext:  string(taskCtxJSON),
 	}
 
 	id, err := p.reasoningStore.Create(ctx, dbTrace)
@@ -1530,7 +1537,6 @@ func hasMeaningfulContent(assistantMsg string) bool {
 	// Require at least 2 work indicators to generate a summary
 	return matchCount >= 2
 }
-
 
 // systemPrompt is the extraction system prompt for the live SDK processor.
 // It uses the same category taxonomy as the backfill extractor, adapted for

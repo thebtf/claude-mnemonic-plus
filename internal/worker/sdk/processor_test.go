@@ -15,6 +15,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/thebtf/engram/internal/config"
 	dbgorm "github.com/thebtf/engram/internal/db/gorm"
+	"github.com/thebtf/engram/internal/learning"
 	"github.com/thebtf/engram/internal/vector"
 	"github.com/thebtf/engram/pkg/models"
 	"gorm.io/gorm/logger"
@@ -1814,15 +1815,23 @@ func (c *testVectorClient) DeleteDocuments(context.Context, []string) error     
 func (c *testVectorClient) Query(context.Context, string, int, vector.WhereFilter) ([]vector.QueryResult, error) {
 	return c.results, nil
 }
-func (c *testVectorClient) IsConnected() bool { return true }
-func (c *testVectorClient) Close() error      { return nil }
-func (c *testVectorClient) Count(context.Context) (int64, error) { return 0, nil }
-func (c *testVectorClient) ModelVersion() string { return "test" }
+func (c *testVectorClient) IsConnected() bool                           { return true }
+func (c *testVectorClient) Close() error                                { return nil }
+func (c *testVectorClient) Count(context.Context) (int64, error)        { return 0, nil }
+func (c *testVectorClient) ModelVersion() string                        { return "test" }
 func (c *testVectorClient) NeedsRebuild(context.Context) (bool, string) { return false, "" }
-func (c *testVectorClient) GetStaleVectors(context.Context) ([]vector.StaleVectorInfo, error) { return nil, nil }
-func (c *testVectorClient) GetHealthStats(context.Context) (*vector.HealthStats, error) { return nil, nil }
-func (c *testVectorClient) GetCacheStats() vector.CacheStatsSnapshot { return vector.CacheStatsSnapshot{} }
-func (c *testVectorClient) GetMetrics(context.Context) vector.VectorMetricsSnapshot { return vector.VectorMetricsSnapshot{} }
+func (c *testVectorClient) GetStaleVectors(context.Context) ([]vector.StaleVectorInfo, error) {
+	return nil, nil
+}
+func (c *testVectorClient) GetHealthStats(context.Context) (*vector.HealthStats, error) {
+	return nil, nil
+}
+func (c *testVectorClient) GetCacheStats() vector.CacheStatsSnapshot {
+	return vector.CacheStatsSnapshot{}
+}
+func (c *testVectorClient) GetMetrics(context.Context) vector.VectorMetricsSnapshot {
+	return vector.VectorMetricsSnapshot{}
+}
 func (c *testVectorClient) DeleteByObservationID(context.Context, int64) error { return nil }
 
 type testMergeLLMClient struct {
@@ -1833,7 +1842,7 @@ type testMergeLLMClient struct {
 
 func (m *testMergeLLMClient) Complete(_ context.Context, systemPrompt, _ string) (string, error) {
 	m.calls++
-	if systemPrompt == "You decide whether a new observation should be CREATE_NEW, UPDATE, SUPERSEDE, or SKIP. Return JSON only." {
+	if systemPrompt == learning.MergeSystemPrompt {
 		return m.mergeResponse, nil
 	}
 	return m.observationXML, nil
@@ -1848,7 +1857,7 @@ func testProcessorObservationStore(t *testing.T) (*dbgorm.ObservationStore, func
 	}
 
 	store, err := dbgorm.NewStore(dbgorm.Config{
-		DSN: dsn,
+		DSN:      dsn,
 		MaxConns: 4,
 		LogLevel: logger.Silent,
 	})
@@ -1869,23 +1878,32 @@ func seedProcessorObservation(t *testing.T, ctx context.Context, store *dbgorm.O
 	return id
 }
 
-func setWriteMergeEnabledForTest(t *testing.T, enabled bool) {
+func setEnvForTest(t *testing.T, key, value string) {
 	t.Helper()
-	original, hadOriginal := os.LookupEnv("ENGRAM_WRITE_MERGE_ENABLED")
-	require.NoError(t, os.Setenv("ENGRAM_WRITE_MERGE_ENABLED", fmt.Sprintf("%t", enabled)))
+	original, hadOriginal := os.LookupEnv(key)
+	require.NoError(t, os.Setenv(key, value))
 	_, _, err := config.Reload()
 	require.NoError(t, err)
 	t.Cleanup(func() {
 		var restoreErr error
 		if hadOriginal {
-			restoreErr = os.Setenv("ENGRAM_WRITE_MERGE_ENABLED", original)
+			restoreErr = os.Setenv(key, original)
 		} else {
-			restoreErr = os.Unsetenv("ENGRAM_WRITE_MERGE_ENABLED")
+			restoreErr = os.Unsetenv(key)
 		}
-		require.NoError(t, restoreErr)
+		if restoreErr != nil {
+			t.Errorf("failed to restore %s: %v", key, restoreErr)
+		}
 		_, _, reloadErr := config.Reload()
-		require.NoError(t, reloadErr)
+		if reloadErr != nil {
+			t.Errorf("failed to reload config: %v", reloadErr)
+		}
 	})
+}
+
+func setWriteMergeEnabledForTest(t *testing.T, enabled bool) {
+	t.Helper()
+	setEnvForTest(t, "ENGRAM_WRITE_MERGE_ENABLED", fmt.Sprintf("%t", enabled))
 }
 
 func testObservationXML(title, narrative string, facts, concepts, filesRead, filesModified, commands []string) string {
@@ -1926,9 +1944,9 @@ func makeVectorResult(id int64, project string, similarity float64) vector.Query
 		Similarity: similarity,
 		Metadata: map[string]any{
 			"sqlite_id": float64(id),
-			"doc_type": string(vector.DocTypeObservation),
-			"project": project,
-			"scope": string(models.ScopeProject),
+			"doc_type":  string(vector.DocTypeObservation),
+			"project":   project,
+			"scope":     string(models.ScopeProject),
 		},
 	}
 }
@@ -1941,28 +1959,28 @@ func TestProcessObservation_WriteMergeSkipPreventsInsertion(t *testing.T) {
 	project := fmt.Sprintf("project-skip-%d", time.Now().UnixNano())
 
 	existingID := seedProcessorObservation(t, ctx, obsStore, project, &models.ParsedObservation{
-		Type: models.ObsTypeDecision,
-		Title: "Existing decision",
-		Narrative: "Old baseline narrative",
-		Facts: []string{"existing fact"},
-		Concepts: []string{"pattern"},
+		Type:          models.ObsTypeDecision,
+		Title:         "Existing decision",
+		Narrative:     "Old baseline narrative",
+		Facts:         []string{"existing fact"},
+		Concepts:      []string{"pattern"},
 		FilesModified: []string{"existing.go"},
 	})
 
 	llm := &testMergeLLMClient{
 		observationXML: testObservationXML("Fresh decision", "Fresh narrative", []string{"new fact"}, []string{"debugging"}, []string{"new-read.go"}, []string{"fresh.go"}, nil),
-		mergeResponse: fmt.Sprintf(`{"action":"SKIP","target_id":%d}`, existingID),
+		mergeResponse:  fmt.Sprintf(`{"action":"SKIP","target_id":%d}`, existingID),
 	}
 	p := &Processor{
 		observationStore: obsStore,
-		llmClient: llm,
-		vectorClient: &testVectorClient{results: []vector.QueryResult{makeVectorResult(existingID, project, 0.91)}},
-		circuitBreaker: NewCircuitBreaker(5, 60),
-		deduplicator: NewRequestDeduplicator(300, 1000),
-		sem: make(chan struct{}, 1),
+		llmClient:        llm,
+		vectorClient:     &testVectorClient{results: []vector.QueryResult{makeVectorResult(existingID, project, 0.91)}},
+		circuitBreaker:   NewCircuitBreaker(5, 60),
+		deduplicator:     NewRequestDeduplicator(300, 1000),
+		sem:              make(chan struct{}, 1),
 	}
 
-	err := p.ProcessObservation(ctx, "session-1", project, "Bash", map[string]string{"command":"go test ./..."}, "ok   github.com/thebtf/engram/internal/worker/sdk 0.123s", 1, "/test/cwd")
+	err := p.ProcessObservation(ctx, "session-1", project, "Bash", map[string]string{"command": "go test ./..."}, "ok   github.com/thebtf/engram/internal/worker/sdk 0.123s", 1, "/test/cwd")
 	require.NoError(t, err)
 	require.Equal(t, 2, llm.calls)
 
@@ -1979,31 +1997,31 @@ func TestProcessObservation_WriteMergeUpdateReusesExistingObservation(t *testing
 	project := fmt.Sprintf("project-update-%d", time.Now().UnixNano())
 
 	existingID := seedProcessorObservation(t, ctx, obsStore, project, &models.ParsedObservation{
-		Type: models.ObsTypeDecision,
-		Title: "Existing decision",
-		Narrative: "Old baseline narrative",
-		Facts: []string{"existing fact"},
-		Concepts: []string{"pattern"},
-		FilesRead: []string{"old-read.go"},
+		Type:          models.ObsTypeDecision,
+		Title:         "Existing decision",
+		Narrative:     "Old baseline narrative",
+		Facts:         []string{"existing fact"},
+		Concepts:      []string{"pattern"},
+		FilesRead:     []string{"old-read.go"},
 		FilesModified: []string{"old.go"},
-		CommandsRun: []string{"old command"},
-		FileMtimes: map[string]int64{"old.go": 1},
+		CommandsRun:   []string{"old command"},
+		FileMtimes:    map[string]int64{"old.go": 1},
 	})
 
 	llm := &testMergeLLMClient{
 		observationXML: testObservationXML("Fresh decision", "Fresh narrative", []string{"new fact"}, []string{"debugging"}, []string{"new-read.go"}, []string{"fresh.go"}, []string{"go test ./..."}),
-		mergeResponse: fmt.Sprintf(`{"action":"UPDATE","target_id":%d}`, existingID),
+		mergeResponse:  fmt.Sprintf(`{"action":"UPDATE","target_id":%d}`, existingID),
 	}
 	p := &Processor{
 		observationStore: obsStore,
-		llmClient: llm,
-		vectorClient: &testVectorClient{results: []vector.QueryResult{makeVectorResult(existingID, project, 0.91)}},
-		circuitBreaker: NewCircuitBreaker(5, 60),
-		deduplicator: NewRequestDeduplicator(300, 1000),
-		sem: make(chan struct{}, 1),
+		llmClient:        llm,
+		vectorClient:     &testVectorClient{results: []vector.QueryResult{makeVectorResult(existingID, project, 0.91)}},
+		circuitBreaker:   NewCircuitBreaker(5, 60),
+		deduplicator:     NewRequestDeduplicator(300, 1000),
+		sem:              make(chan struct{}, 1),
 	}
 
-	err := p.ProcessObservation(ctx, "session-1", project, "Bash", map[string]string{"command":"go test ./..."}, "ok   github.com/thebtf/engram/internal/worker/sdk 0.123s", 1, "/test/cwd")
+	err := p.ProcessObservation(ctx, "session-1", project, "Bash", map[string]string{"command": "go test ./..."}, "ok   github.com/thebtf/engram/internal/worker/sdk 0.123s", 1, "/test/cwd")
 	require.NoError(t, err)
 	require.Equal(t, 2, llm.calls)
 
@@ -2033,27 +2051,27 @@ func TestProcessObservation_WriteMergeSupersedeCreatesNewObservation(t *testing.
 	project := fmt.Sprintf("project-supersede-%d", time.Now().UnixNano())
 
 	existingID := seedProcessorObservation(t, ctx, obsStore, project, &models.ParsedObservation{
-		Type: models.ObsTypeDecision,
-		Title: "Existing decision",
+		Type:      models.ObsTypeDecision,
+		Title:     "Existing decision",
 		Narrative: "Old baseline narrative",
-		Facts: []string{"existing fact"},
-		Concepts: []string{"pattern"},
+		Facts:     []string{"existing fact"},
+		Concepts:  []string{"pattern"},
 	})
 
 	llm := &testMergeLLMClient{
 		observationXML: testObservationXML("Fresh decision", "Fresh superseding narrative", []string{"new fact"}, []string{"debugging"}, []string{"new-read.go"}, []string{"fresh.go"}, nil),
-		mergeResponse: fmt.Sprintf(`{"action":"SUPERSEDE","target_id":%d}`, existingID),
+		mergeResponse:  fmt.Sprintf(`{"action":"SUPERSEDE","target_id":%d}`, existingID),
 	}
 	p := &Processor{
 		observationStore: obsStore,
-		llmClient: llm,
-		vectorClient: &testVectorClient{results: []vector.QueryResult{makeVectorResult(existingID, project, 0.91)}},
-		circuitBreaker: NewCircuitBreaker(5, 60),
-		deduplicator: NewRequestDeduplicator(300, 1000),
-		sem: make(chan struct{}, 1),
+		llmClient:        llm,
+		vectorClient:     &testVectorClient{results: []vector.QueryResult{makeVectorResult(existingID, project, 0.91)}},
+		circuitBreaker:   NewCircuitBreaker(5, 60),
+		deduplicator:     NewRequestDeduplicator(300, 1000),
+		sem:              make(chan struct{}, 1),
 	}
 
-	err := p.ProcessObservation(ctx, "session-1", project, "Bash", map[string]string{"command":"go test ./..."}, "ok   github.com/thebtf/engram/internal/worker/sdk 0.123s", 1, "/test/cwd")
+	err := p.ProcessObservation(ctx, "session-1", project, "Bash", map[string]string{"command": "go test ./..."}, "ok   github.com/thebtf/engram/internal/worker/sdk 0.123s", 1, "/test/cwd")
 	require.NoError(t, err)
 	require.Equal(t, 2, llm.calls)
 
@@ -2075,36 +2093,36 @@ func TestProcessObservation_MixedTypeCandidatesStillFindSameTypeTarget(t *testin
 	project := fmt.Sprintf("project-mixed-type-%d", time.Now().UnixNano())
 
 	featureID := seedProcessorObservation(t, ctx, obsStore, project, &models.ParsedObservation{
-		Type: models.ObsTypeFeature,
-		Title: "Feature candidate",
+		Type:      models.ObsTypeFeature,
+		Title:     "Feature candidate",
 		Narrative: "Irrelevant feature candidate",
-		Facts: []string{"feature fact"},
+		Facts:     []string{"feature fact"},
 	})
 	decisionID := seedProcessorObservation(t, ctx, obsStore, project, &models.ParsedObservation{
-		Type: models.ObsTypeDecision,
-		Title: "Decision candidate",
+		Type:      models.ObsTypeDecision,
+		Title:     "Decision candidate",
 		Narrative: "Decision baseline narrative",
-		Facts: []string{"decision fact"},
-		Concepts: []string{"pattern"},
+		Facts:     []string{"decision fact"},
+		Concepts:  []string{"pattern"},
 	})
 
 	llm := &testMergeLLMClient{
 		observationXML: testObservationXML("Fresh decision", "Fresh narrative", []string{"new fact"}, []string{"debugging"}, []string{"new-read.go"}, []string{"fresh.go"}, nil),
-		mergeResponse: fmt.Sprintf(`{"action":"UPDATE","target_id":%d}`, decisionID),
+		mergeResponse:  fmt.Sprintf(`{"action":"UPDATE","target_id":%d}`, decisionID),
 	}
 	p := &Processor{
 		observationStore: obsStore,
-		llmClient: llm,
+		llmClient:        llm,
 		vectorClient: &testVectorClient{results: []vector.QueryResult{
 			makeVectorResult(featureID, project, 0.99),
 			makeVectorResult(decisionID, project, 0.91),
 		}},
 		circuitBreaker: NewCircuitBreaker(5, 60),
-		deduplicator: NewRequestDeduplicator(300, 1000),
-		sem: make(chan struct{}, 1),
+		deduplicator:   NewRequestDeduplicator(300, 1000),
+		sem:            make(chan struct{}, 1),
 	}
 
-	err := p.ProcessObservation(ctx, "session-1", project, "Bash", map[string]string{"command":"go test ./..."}, "ok   github.com/thebtf/engram/internal/worker/sdk 0.123s", 1, "/test/cwd")
+	err := p.ProcessObservation(ctx, "session-1", project, "Bash", map[string]string{"command": "go test ./..."}, "ok   github.com/thebtf/engram/internal/worker/sdk 0.123s", 1, "/test/cwd")
 	require.NoError(t, err)
 	require.Equal(t, 2, llm.calls)
 
@@ -2116,19 +2134,7 @@ func TestProcessObservation_MixedTypeCandidatesStillFindSameTypeTarget(t *testin
 
 func TestProcessObservation_ContradictionDetectionDisabledKeepsCreateNewPath(t *testing.T) {
 	setWriteMergeEnabledForTest(t, true)
-	original, hadOriginal := os.LookupEnv("ENGRAM_CONTRADICTION_DETECTION_ENABLED")
-	require.NoError(t, os.Setenv("ENGRAM_CONTRADICTION_DETECTION_ENABLED", "false"))
-	_, _, err := config.Reload()
-	require.NoError(t, err)
-	defer func() {
-		if hadOriginal {
-			require.NoError(t, os.Setenv("ENGRAM_CONTRADICTION_DETECTION_ENABLED", original))
-		} else {
-			require.NoError(t, os.Unsetenv("ENGRAM_CONTRADICTION_DETECTION_ENABLED"))
-		}
-		_, _, reloadErr := config.Reload()
-		require.NoError(t, reloadErr)
-	}()
+	setEnvForTest(t, "ENGRAM_CONTRADICTION_DETECTION_ENABLED", "false")
 
 	ctx := context.Background()
 	obsStore, cleanup := testProcessorObservationStore(t)
@@ -2136,27 +2142,27 @@ func TestProcessObservation_ContradictionDetectionDisabledKeepsCreateNewPath(t *
 	project := fmt.Sprintf("project-contradiction-off-%d", time.Now().UnixNano())
 
 	existingID := seedProcessorObservation(t, ctx, obsStore, project, &models.ParsedObservation{
-		Type: models.ObsTypeDecision,
-		Title: "Rule: X",
+		Type:      models.ObsTypeDecision,
+		Title:     "Rule: X",
 		Narrative: "Original unrelated narrative",
-		Facts: []string{"existing fact"},
-		Concepts: []string{"pattern"},
+		Facts:     []string{"existing fact"},
+		Concepts:  []string{"pattern"},
 	})
 
 	llm := &testMergeLLMClient{
 		observationXML: testObservationXML("Rule: Y", "Semantically unrelated narrative", []string{"new fact"}, []string{"debugging"}, []string{"new-read.go"}, []string{"fresh.go"}, nil),
-		mergeResponse: fmt.Sprintf(`{"action":"SUPERSEDE","target_id":%d}`, existingID),
+		mergeResponse:  fmt.Sprintf(`{"action":"SUPERSEDE","target_id":%d}`, existingID),
 	}
 	p := &Processor{
 		observationStore: obsStore,
-		llmClient: llm,
-		vectorClient: &testVectorClient{results: []vector.QueryResult{makeVectorResult(existingID, project, 0.91)}},
-		circuitBreaker: NewCircuitBreaker(5, 60),
-		deduplicator: NewRequestDeduplicator(300, 1000),
-		sem: make(chan struct{}, 1),
+		llmClient:        llm,
+		vectorClient:     &testVectorClient{results: []vector.QueryResult{makeVectorResult(existingID, project, 0.91)}},
+		circuitBreaker:   NewCircuitBreaker(5, 60),
+		deduplicator:     NewRequestDeduplicator(300, 1000),
+		sem:              make(chan struct{}, 1),
 	}
 
-	err = p.ProcessObservation(ctx, "session-1", project, "Bash", map[string]string{"command":"go test ./..."}, "ok   github.com/thebtf/engram/internal/worker/sdk 0.123s", 1, "/test/cwd")
+	err := p.ProcessObservation(ctx, "session-1", project, "Bash", map[string]string{"command": "go test ./..."}, "ok   github.com/thebtf/engram/internal/worker/sdk 0.123s", 1, "/test/cwd")
 	require.NoError(t, err)
 
 	var count int64

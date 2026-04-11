@@ -17,7 +17,11 @@ const (
 	MergeActionSkip      = "SKIP"
 )
 
-const decideMergeTimeout = 3 * time.Second
+const (
+	// MergeSystemPrompt is the system prompt used for write-time merge decisions.
+	MergeSystemPrompt  = "You decide whether a new observation should be CREATE_NEW, UPDATE, SUPERSEDE, or SKIP. Return JSON only."
+	decideMergeTimeout = 3 * time.Second
+)
 
 // MergeDecision is the write-time merge decision contract for new observations.
 type MergeDecision struct {
@@ -34,7 +38,7 @@ func DecideMerge(ctx context.Context, llm LLMClient, newObs *models.Observation,
 	mergeCtx, cancel := context.WithTimeout(ctx, decideMergeTimeout)
 	defer cancel()
 
-	systemPrompt := "You decide whether a new observation should be CREATE_NEW, UPDATE, SUPERSEDE, or SKIP. Return JSON only."
+	systemPrompt := MergeSystemPrompt
 	userPrompt := buildDecideMergePrompt(newObs, candidates)
 	response, err := llm.Complete(mergeCtx, systemPrompt, userPrompt)
 	if err != nil {

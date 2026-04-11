@@ -101,3 +101,51 @@ test('Bash returns warning context from trigger endpoint', async () => {
   }
 });
 
+test('Read preserves existing read_counts value for file path', async () => {
+  const originalRequestPost = lib.requestPost;
+  lib.requestPost = async (endpoint, body) => {
+    assert.equal(endpoint, '/api/memory/triggers');
+    assert.deepEqual(body.params.read_counts, { 'internal/auth.go': 1 });
+    return {
+      matches: [
+        { kind: 'context', observation_id: 99, blurb: 'Existing count preserved' },
+      ],
+    };
+  };
+
+  try {
+    const result = await preToolUse.handlePreToolUse({ Project: 'engram', SessionID: 'read-preserve-1' }, {
+      tool_name: 'Read',
+      tool_input: {
+        file_path: 'internal/auth.go',
+        read_counts: { 'internal/auth.go': 1 },
+      },
+    });
+    assert.match(result, /Existing count preserved/);
+  } finally {
+    lib.requestPost = originalRequestPost;
+  }
+});
+
+test('Edit skips Windows Temp paths case-insensitively', async () => {
+  const originalRequestGet = lib.requestGet;
+  const originalRequestPost = lib.requestPost;
+  lib.requestGet = async () => {
+    throw new Error('requestGet should not be called for temp path');
+  };
+  lib.requestPost = async () => {
+    throw new Error('requestPost should not be called for temp path');
+  };
+
+  try {
+    const result = await preToolUse.handlePreToolUse({ Project: 'engram', SessionID: 'temp-path-1' }, {
+      tool_name: 'Edit',
+      tool_input: { file_path: 'C:\\Users\\test\\Temp\\scratch.txt' },
+    });
+    assert.equal(result, '');
+  } finally {
+    lib.requestGet = originalRequestGet;
+    lib.requestPost = originalRequestPost;
+  }
+});
+

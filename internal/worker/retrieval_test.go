@@ -237,7 +237,7 @@ func TestExtractSessionEntitySeeds_UsesPromptAndSessionEntities(t *testing.T) {
 	service.retrievalHooks.getLastPromptBySession = func(_ context.Context, project, sessionID string) (*models.UserPromptWithSession, error) {
 		require.Equal(t, "engram", project)
 		require.Equal(t, "session-1", sessionID)
-		return &models.UserPromptWithSession{UserPrompt: models.UserPrompt{PromptText: "authctx extra authctx"}}, nil
+		return &models.UserPromptWithSession{UserPrompt: models.UserPrompt{PromptText: "authctx billing.go"}}, nil
 	}
 	service.retrievalHooks.getEntityObservationsBySession = func(_ context.Context, sessionID string) ([]*models.Observation, error) {
 		require.Equal(t, "session-1", sessionID)
@@ -249,11 +249,13 @@ func TestExtractSessionEntitySeeds_UsesPromptAndSessionEntities(t *testing.T) {
 		entity2.FilesModified = []string{"pkg/billing.go"}
 		entity3 := newObservation(12, "extra")
 		entity3.Type = models.ObsTypeEntity
-		return []*models.Observation{entity1, entity2, entity3}, nil
+		nonEntity := newObservation(13, "authctx")
+		nonEntity.Type = models.ObsTypeDecision
+		return []*models.Observation{entity1, entity2, entity3, nonEntity}, nil
 	}
 
 	seeds := service.ExtractSessionEntitySeeds(context.Background(), "session-1", "engram")
-	require.Equal(t, []int64{10, 11, 12}, seeds)
+	require.Equal(t, []int64{10, 11}, seeds)
 }
 
 func TestExtractSessionEntitySeeds_LimitsToFiveUniqueIDs(t *testing.T) {
@@ -299,7 +301,7 @@ func TestRetrieveRelevant_InjectGraphBFSEnabled_FusesGraphNeighbors(t *testing.T
 		require.Equal(t, int64(100), obsID)
 		require.Equal(t, 2, maxHops)
 		require.Equal(t, 10, limit)
-		return []int64{42}, nil
+		return []int64{0, 42, 42, -1}, nil
 	}
 	service.retrievalHooks.vectorQuery = func(_ context.Context, _ string, _ int, _ vector.WhereFilter) ([]vector.QueryResult, error) {
 		return []vector.QueryResult{

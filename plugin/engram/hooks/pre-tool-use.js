@@ -27,14 +27,14 @@ function extractFilePath(toolInput) {
 }
 
 function shouldSkipPath(filePath) {
-  const unixTempMarker = ['/', 'tmp', '/'].join('');
-  const windowsTempMarker = [84, 101, 109, 112]
-    .map((code) => String.fromCharCode(code))
-    .join(String.fromCharCode(92));
-  const dependencyDir = ['node', '_', 'modules'].join('');
-  return filePath.includes(unixTempMarker)
-    || filePath.includes(windowsTempMarker)
-    || filePath.includes(dependencyDir);
+  const normalizedPath = getString(filePath).toLowerCase();
+  if (normalizedPath === '') return false;
+  const unixTempMarker = '/tmp/';
+  const windowsTempPattern = /[\\/]temp[\\/]/;
+  const dependencyDir = 'node_modules';
+  return normalizedPath.includes(unixTempMarker)
+    || windowsTempPattern.test(normalizedPath)
+    || normalizedPath.includes(dependencyDir);
 }
 
 function classifyObservations(observations) {
@@ -178,7 +178,15 @@ async function handlePreToolUse(ctx, input) {
     try {
       const filePath = extractFilePath(toolInput);
       const triggerInput = toolName === 'Read' && filePath
-        ? { ...toolInput, read_counts: { [filePath]: 3 } }
+        ? (() => {
+            const readCounts = (toolInput.read_counts && typeof toolInput.read_counts === 'object')
+              ? { ...toolInput.read_counts }
+              : {};
+            if (readCounts[filePath] === undefined) {
+              readCounts[filePath] = 3;
+            }
+            return { ...toolInput, read_counts: readCounts };
+          })()
         : toolInput;
       const triggerResult = await fetchTriggerContext(project, sessionID, toolName, triggerInput);
       if (triggerResult.warnings.length === 0 && triggerResult.contextObs.length === 0) return '';

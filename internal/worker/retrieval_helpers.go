@@ -78,12 +78,32 @@ func (s *Service) lookupRecentSessionIDs(ctx context.Context, project string, si
 	return s.observationStore.GetRecentSessionIDs(ctx, project, since)
 }
 
+func normalizeObservationIDs(raw []int64) []int64 {
+	ids := make([]int64, 0, len(raw))
+	seen := make(map[int64]struct{}, len(raw))
+	for _, id := range raw {
+		if id <= 0 {
+			continue
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		ids = append(ids, id)
+	}
+	return ids
+}
+
 func (s *Service) lookupGraphSeedNeighbors(ctx context.Context, seedID int64) ([]int64, error) {
 	if seedID <= 0 {
 		return nil, nil
 	}
 	if s.retrievalHooks != nil && s.retrievalHooks.getGraphNeighbors != nil {
-		return s.retrievalHooks.getGraphNeighbors(ctx, seedID, 2, 10)
+		rawIDs, err := s.retrievalHooks.getGraphNeighbors(ctx, seedID, 2, 10)
+		if err != nil {
+			return nil, err
+		}
+		return normalizeObservationIDs(rawIDs), nil
 	}
 	if s.graphStore == nil {
 		return nil, nil
@@ -92,19 +112,11 @@ func (s *Service) lookupGraphSeedNeighbors(ctx context.Context, seedID int64) ([
 	if err != nil {
 		return nil, err
 	}
-	ids := make([]int64, 0, len(neighbors))
-	seen := make(map[int64]struct{}, len(neighbors))
+	rawIDs := make([]int64, 0, len(neighbors))
 	for _, neighbor := range neighbors {
-		if neighbor.ObsID <= 0 {
-			continue
-		}
-		if _, ok := seen[neighbor.ObsID]; ok {
-			continue
-		}
-		seen[neighbor.ObsID] = struct{}{}
-		ids = append(ids, neighbor.ObsID)
+		rawIDs = append(rawIDs, neighbor.ObsID)
 	}
-	return ids, nil
+	return normalizeObservationIDs(rawIDs), nil
 }
 
 func (s *Service) sessionBoostFactor() float64 {
@@ -212,27 +224,35 @@ func (s *Service) ExtractSessionEntitySeeds(ctx context.Context, sessionID, proj
 		return nil
 	}
 
-	nameSet := make(map[string]struct{})
-	appendName := func(raw string) {
-		raw = strings.TrimSpace(strings.ToLower(raw))
+	normalize := func(raw string) string {
+		return strings.TrimSpace(strings.ToLower(raw))
+	}
+	promptTokenSet := make(map[string]struct{})
+	appendPromptToken := func(raw string) {
+		raw = normalize(raw)
 		if raw == "" {
 			return
 		}
-		nameSet[raw] = struct{}{}
+		promptTokenSet[raw] = struct{}{}
 	}
 
 	if prompt, err := s.loadLastUserPromptBySession(ctx, project, sessionID, 20); err == nil && prompt != nil {
 		for _, token := range strings.Fields(prompt.PromptText) {
-			appendName(token)
+			appendPromptToken(token)
 		}
 	}
 
 	var entityObservations []*models.Observation
 	if s.retrievalHooks != nil && s.retrievalHooks.getEntityObservationsBySession != nil {
-		var err error
-		entityObservations, err = s.retrievalHooks.getEntityObservationsBySession(ctx, sessionID)
+		all, err := s.retrievalHooks.getEntityObservationsBySession(ctx, sessionID)
 		if err != nil {
 			log.Debug().Err(err).Str("session_id", sessionID).Msg("failed to get entity observations via hook")
+		} else {
+			for _, obs := range all {
+				if obs != nil && obs.Type == models.ObsTypeEntity {
+					entityObservations = append(entityObservations, obs)
+				}
+			}
 		}
 	} else if s.observationStore != nil {
 		allSessionObservations, err := s.observationStore.GetObservationsBySession(ctx, sessionID)
@@ -251,24 +271,29 @@ func (s *Service) ExtractSessionEntitySeeds(ctx context.Context, sessionID, proj
 		if obs == nil || obs.ID <= 0 {
 			continue
 		}
-		appendName(obs.Title.String)
-		for _, path := range obs.FilesRead {
-			appendName(filepath.Base(path))
-		}
-		for _, path := range obs.FilesModified {
-			appendName(filepath.Base(path))
-		}
-	}
 
-	if len(entityObservations) > 0 {
-		for _, obs := range entityObservations {
-			if obs == nil || obs.ID <= 0 {
-				continue
+		matched := false
+		if _, ok := promptTokenSet[normalize(obs.Title.String)]; ok {
+			matched = true
+		}
+		if !matched {
+			for _, path := range obs.FilesRead {
+				if _, ok := promptTokenSet[normalize(filepath.Base(path))]; ok {
+					matched = true
+					break
+				}
 			}
-			title := strings.TrimSpace(strings.ToLower(obs.Title.String))
-			if _, ok := nameSet[title]; ok {
-				seedIDs = append(seedIDs, obs.ID)
+		}
+		if !matched {
+			for _, path := range obs.FilesModified {
+				if _, ok := promptTokenSet[normalize(filepath.Base(path))]; ok {
+					matched = true
+					break
+				}
 			}
+		}
+		if matched {
+			seedIDs = append(seedIDs, obs.ID)
 		}
 	}
 
