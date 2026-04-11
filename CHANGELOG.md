@@ -125,16 +125,6 @@ Validation protocol per spec.md sectionValidation Protocol. After deployment:
 3. Check inject silence rate: `% of sessions with 0 relevant observations injected` -- target 40% acceptable
 4. Watch `learning_llm_calls_total` to ensure LLM filter does not spike cost
 
-### Deferred to Phase 2 of v4
-
-- **FR-6** Project briefing (Task 23 `generateProjectBriefing` with `NO_CHANGE` sentinel)
-- **FR-7** File-scope prefiltering (`files_being_edited` parameter in inject/search)
-- **FR-8** Per-type search lanes (`SearchLaneConfig` map)
-- **FR-9** Alarm model expansion (`POST /api/memory/triggers` for Bash and repeated Read)
-- **FR-10** Write-time observation merge (`DecideMerge` LLM call before insert)
-
-Prompt drafts for FR-6 and FR-10 are ready in `.agent/specs/learning-memory-v4/prompt-drafts-f3-f7.md`.
-
 ## [3.4.1] - 2026-04-10
 
 ### Fixed
