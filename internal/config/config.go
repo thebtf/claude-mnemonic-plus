@@ -36,6 +36,65 @@ var CriticalConcepts = []string{
 	"gotcha", "pattern", "problem-solution", "trade-off",
 }
 
+// SearchLaneConfig defines retrieval policy overrides for typed search lanes.
+// Duplicated in config package to avoid an import cycle with internal/search.
+type SearchLaneConfig struct {
+	MinScore       float64 `json:"min_score"`
+	TopK           int     `json:"top_k"`
+	RerankerWeight float64 `json:"reranker_weight"`
+}
+
+// DefaultTypeSearchLanes is the canonical default typed-lane map for config loading.
+// Values mirror internal/search/DefaultSearchLanes but live here to avoid package cycles.
+var DefaultTypeSearchLanes = map[string]SearchLaneConfig{
+	"guidance": {MinScore: 0.20, TopK: 5, RerankerWeight: 1.5},
+	"pitfall":  {MinScore: 0.20, TopK: 5, RerankerWeight: 1.5},
+	"decision": {MinScore: 0.55, TopK: 3, RerankerWeight: 1.0},
+	"wiki":     {MinScore: 0.65, TopK: 2, RerankerWeight: 0.8},
+	"entity":   {MinScore: 0.65, TopK: 2, RerankerWeight: 0.8},
+	"pattern":  {MinScore: 0.40, TopK: 5, RerankerWeight: 1.2},
+	"bugfix":   {MinScore: 0.40, TopK: 5, RerankerWeight: 1.2},
+	"feature":  {MinScore: 0.40, TopK: 5, RerankerWeight: 1.2},
+	"default":  {MinScore: 0.35, TopK: 10, RerankerWeight: 1.0},
+}
+
+func cloneTypeSearchLanes(src map[string]SearchLaneConfig) map[string]SearchLaneConfig {
+	if len(src) == 0 {
+		return map[string]SearchLaneConfig{}
+	}
+	cloned := make(map[string]SearchLaneConfig, len(src))
+	for key, value := range src {
+		cloned[key] = value
+	}
+	return cloned
+}
+
+func mergeTypeSearchLanes(base map[string]SearchLaneConfig, raw any) map[string]SearchLaneConfig {
+	merged := cloneTypeSearchLanes(base)
+	rawMap, ok := raw.(map[string]any)
+	if !ok {
+		return merged
+	}
+	for laneName, laneRaw := range rawMap {
+		laneMap, ok := laneRaw.(map[string]any)
+		if !ok {
+			continue
+		}
+		cfg := merged[laneName]
+		if v, ok := laneMap["min_score"].(float64); ok {
+			cfg.MinScore = v
+		}
+		if v, ok := laneMap["top_k"].(float64); ok && v > 0 {
+			cfg.TopK = int(v)
+		}
+		if v, ok := laneMap["reranker_weight"].(float64); ok && v >= 0 {
+			cfg.RerankerWeight = v
+		}
+		merged[laneName] = cfg
+	}
+	return merged
+}
+
 // Config holds the application configuration.
 // Field order optimized for memory alignment (fieldalignment).
 type Config struct {
@@ -130,7 +189,9 @@ type Config struct {
 	ProjectInjectLimit           int      `json:"project_inject_limit"`            // ENGRAM_PROJECT_INJECT_LIMIT (default: 15)
 	InjectionFloor               int      `json:"injection_floor"`                 // ENGRAM_INJECTION_FLOOR (default: 0)
 	InjectUnified                bool     `json:"inject_unified"`                  // ENGRAM_INJECT_UNIFIED (default: true) — emergency rollback flag; removed after two release cycles
+	TypeLanesEnabled             bool     `json:"type_lanes_enabled"`              // ENGRAM_TYPE_LANES_ENABLED (default: false)
 	SessionBoost                 float64  `json:"session_boost"`                   // ENGRAM_SESSION_BOOST (default: 1.3)
+	TypeSearchLanes              map[string]SearchLaneConfig `json:"type_search_lanes"` // typed lane overrides; merged over DefaultTypeSearchLanes
 
 	// Injection strategy A/B testing (closed-loop learning FR-5)
 	InjectionStrategies   []string `json:"injection_strategies"`    // Available strategies
@@ -302,7 +363,9 @@ func Default() *Config {
 		ProjectInjectLimit:             15,    // Inject up to 15 project-scoped observations per session
 		InjectionFloor:                 0,     // Silence path: 0 = disabled (v4 default, FR-1). Operators can set ENGRAM_INJECTION_FLOOR=3 for legacy fill behavior.
 		InjectUnified:                  true,  // Use unified RetrieveRelevant path for inject (FR-3). Set ENGRAM_INJECT_UNIFIED=false for emergency rollback.
+		TypeLanesEnabled:               false, // Opt-in: typed lane dispatch for retrieval (FR-8)
 		SessionBoost:                   1.3,   // Boost factor for observations from recently active sessions
+		TypeSearchLanes:                cloneTypeSearchLanes(DefaultTypeSearchLanes),
 		InjectionStrategies:            []string{"baseline", "effectiveness-weighted", "recency-boosted", "diverse"},
 		InjectionStrategyMode:          "round-robin",
 		DefaultStrategy:                "baseline",
@@ -437,6 +500,14 @@ func Load() (*Config, error) {
 			}
 			if v, ok := settings["ENGRAM_CLUSTERING_THRESHOLD"].(float64); ok && v > 0 && v <= 1.0 {
 				cfg.ClusteringThreshold = v
+			}
+			if v, ok := settings["ENGRAM_TYPE_LANES_ENABLED"].(bool); ok {
+				cfg.TypeLanesEnabled = v
+			}
+			if raw, ok := settings["type_search_lanes"]; ok {
+				cfg.TypeSearchLanes = mergeTypeSearchLanes(DefaultTypeSearchLanes, raw)
+			} else if raw, ok := settings["ENGRAM_TYPE_SEARCH_LANES"]; ok {
+				cfg.TypeSearchLanes = mergeTypeSearchLanes(DefaultTypeSearchLanes, raw)
 			}
 		}
 	}
@@ -657,6 +728,11 @@ func Load() (*Config, error) {
 	if v := strings.TrimSpace(os.Getenv("ENGRAM_INJECT_UNIFIED")); v != "" {
 		if b, err := strconv.ParseBool(v); err == nil {
 			cfg.InjectUnified = b
+		}
+	}
+	if v := strings.TrimSpace(os.Getenv("ENGRAM_TYPE_LANES_ENABLED")); v != "" {
+		if b, err := strconv.ParseBool(v); err == nil {
+			cfg.TypeLanesEnabled = b
 		}
 	}
 	if v := strings.TrimSpace(os.Getenv("ENGRAM_SESSION_BOOST")); v != "" {
