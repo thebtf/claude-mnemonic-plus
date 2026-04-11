@@ -14,6 +14,18 @@ function escapeXmlTags(value) {
     .replace(/>/g, '&gt;');
 }
 
+function buildSearchRequest(project, prompt, cwd, filesBeingEdited) {
+  const request = {
+    project,
+    query: prompt,
+    cwd,
+  };
+  if (Array.isArray(filesBeingEdited) && filesBeingEdited.length > 0) {
+    request.files_being_edited = filesBeingEdited.filter((entry) => typeof entry === 'string' && entry !== '');
+  }
+  return request;
+}
+
 async function handleUserPrompt(ctx, input) {
   const prompt = asString(input.prompt) || asString(input.Prompt);
   const project = typeof ctx.Project === 'string' ? ctx.Project : '';
@@ -37,13 +49,10 @@ async function handleUserPrompt(ctx, input) {
   let observationCount = 0;
   let matchedCount = 0;
   const searchIds = [];
+  const filesBeingEdited = ctx.SessionID ? lib.getSessionFiles(ctx.SessionID) : [];
 
   try {
-    const searchResult = await lib.requestPost('/api/context/search', {
-      project,
-      query: prompt,
-      cwd,
-    });
+    const searchResult = await lib.requestPost('/api/context/search', buildSearchRequest(project, prompt, cwd, filesBeingEdited));
 
     const observations = Array.isArray(searchResult.observations)
       ? searchResult.observations
@@ -408,6 +417,13 @@ async function handleUserPrompt(ctx, input) {
   return '';
 }
 
-(async () => {
-  await lib.RunHook('UserPromptSubmit', handleUserPrompt);
-})();
+if (require.main === module) {
+  (async () => {
+    await lib.RunHook('UserPromptSubmit', handleUserPrompt);
+  })();
+}
+
+module.exports = {
+  buildSearchRequest,
+  handleUserPrompt,
+};
