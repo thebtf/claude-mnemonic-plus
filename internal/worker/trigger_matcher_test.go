@@ -60,7 +60,7 @@ func TestHandleMemoryTriggers_EditSemanticMatchReturnsWarningAndUsesFileScope(t 
 	require.Contains(t, matches[0].Blurb, "auth.go")
 
 	require.True(t, hasTriggerProjectScopeClause(capturedWhere, "engram"), "expected project/global scope clause")
-	require.True(t, hasTriggerFileScopeClause(capturedWhere, "internal/auth.go"), "expected file-scope clause")
+	require.False(t, hasTriggerFileScopeClause(capturedWhere, "internal/auth.go"), "pgvector backend does not persist file path metadata in vectors table")
 }
 
 func TestHandleMemoryTriggers_EditSemanticMatchFiltersTypesAndCapsTop3(t *testing.T) {

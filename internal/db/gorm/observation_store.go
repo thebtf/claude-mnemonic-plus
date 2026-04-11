@@ -15,6 +15,7 @@ import (
 	"gorm.io/gorm"
 
 	"github.com/rs/zerolog/log"
+	"github.com/thebtf/engram/internal/privacy"
 	"github.com/thebtf/engram/pkg/models"
 )
 
@@ -184,7 +185,7 @@ func (s *ObservationStore) StoreObservation(ctx context.Context, sdkSessionID, p
 		Concepts:                 models.JSONStringArray(obs.Concepts),
 		FilesRead:                models.JSONStringArray(obs.FilesRead),
 		FilesModified:            models.JSONStringArray(obs.FilesModified),
-		CommandsRun:              models.JSONStringArray(obs.CommandsRun),
+		CommandsRun:              models.JSONStringArray(sanitizeCommands(obs.CommandsRun)),
 		FileMtimes:               models.JSONInt64Map(obs.FileMtimes),
 		PromptNumber:             nullInt64(promptNumber),
 		DiscoveryTokens:          discoveryTokens,
@@ -282,7 +283,7 @@ func (s *ObservationStore) UpdateObservation(ctx context.Context, id int64, upda
 		updates["files_modified"] = string(filesModifiedJSON)
 	}
 	if update.CommandsRun != nil {
-		commandsRunJSON, _ := json.Marshal(*update.CommandsRun)
+		commandsRunJSON, _ := json.Marshal(sanitizeCommands(*update.CommandsRun))
 		updates["commands_run"] = string(commandsRunJSON)
 	}
 	if update.FileMtimes != nil {
@@ -522,10 +523,14 @@ func (s *ObservationStore) GetAlwaysInjectObservations(ctx context.Context, proj
 // GetProjectBriefingObservation retrieves the active wiki observation tagged with
 // the "project-briefing" concept for a specific project.
 func (s *ObservationStore) GetProjectBriefingObservation(ctx context.Context, project string) (*models.Observation, error) {
+	if strings.TrimSpace(project) == "" {
+		return nil, nil
+	}
 	var dbObservation Observation
 	err := s.db.WithContext(ctx).
 		Scopes(activeObservationFilter(), importanceOrdering()).
 		Where("project = ?", project).
+		Where("COALESCE(scope, 'project') = 'project'").
 		Where("type = ?", string(models.ObsTypeWiki)).
 		Where("concepts @> ?", `["project-briefing"]`).
 		First(&dbObservation).Error
@@ -570,12 +575,13 @@ func (s *ObservationStore) GetObservationsByCommandPrefix(ctx context.Context, p
 		limit = 10
 	}
 
-	pattern := strings.TrimSpace(command) + "%"
+	escaper := strings.NewReplacer(`\\`, `\\\\`, `%`, `\\%`, `_`, `\\_`)
+	pattern := escaper.Replace(strings.TrimSpace(command)) + "%"
 	var dbObservations []Observation
 	err := s.db.WithContext(ctx).
 		Scopes(projectScopeFilter(project), activeObservationFilter(), importanceOrdering()).
 		Where("type IN ?", []models.ObservationType{models.ObsTypeBugfix, models.ObsTypePitfall}).
-		Where("EXISTS (SELECT 1 FROM jsonb_array_elements_text(commands_run) AS cmd WHERE cmd LIKE ?)", pattern).
+		Where("EXISTS (SELECT 1 FROM jsonb_array_elements_text(commands_run) AS cmd WHERE cmd LIKE ? ESCAPE '\\\\')", pattern).
 		Limit(limit).
 		Find(&dbObservations).Error
 	if err != nil {
@@ -1562,7 +1568,7 @@ func toModelObservation(o *Observation) *models.Observation {
 		Concepts:                o.Concepts,
 		FilesRead:               o.FilesRead,
 		FilesModified:           o.FilesModified,
-		CommandsRun:             o.CommandsRun,
+		CommandsRun:             sanitizeCommands(o.CommandsRun),
 		FileMtimes:              o.FileMtimes,
 		PromptNumber:            o.PromptNumber,
 		DiscoveryTokens:         o.DiscoveryTokens,
@@ -1614,6 +1620,17 @@ func nullInt64(val int) sql.NullInt64 {
 		return sql.NullInt64{Valid: false}
 	}
 	return sql.NullInt64{Int64: int64(val), Valid: true}
+}
+
+func sanitizeCommands(commands []string) []string {
+	if len(commands) == 0 {
+		return nil
+	}
+	sanitized := make([]string, len(commands))
+	for i, cmd := range commands {
+		sanitized[i] = privacy.RedactSecrets(strings.TrimSpace(cmd))
+	}
+	return sanitized
 }
 
 // GetCredential retrieves a credential observation by name and project.

@@ -775,6 +775,12 @@ func Load() (*Config, error) {
 			cfg.InjectGraphBFSEnabled = b
 		}
 	}
+	if v := strings.TrimSpace(os.Getenv("ENGRAM_TYPE_SEARCH_LANES")); v != "" {
+		var raw any
+		if err := json.Unmarshal([]byte(v), &raw); err == nil {
+			cfg.TypeSearchLanes = mergeTypeSearchLanes(cfg.TypeSearchLanes, raw)
+		}
+	}
 	if v := strings.TrimSpace(os.Getenv("ENGRAM_SESSION_BOOST")); v != "" {
 		if f, err := strconv.ParseFloat(v, 64); err == nil && f > 0 {
 			cfg.SessionBoost = f

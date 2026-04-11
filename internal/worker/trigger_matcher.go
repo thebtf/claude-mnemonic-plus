@@ -200,7 +200,7 @@ func (s *Service) matchEditWriteSemanticTriggers(ctx context.Context, req Memory
 		return []MemoryTriggerMatch{}, nil
 	}
 
-	where := vector.BuildWhereFilter(vector.DocTypeObservation, req.Project, true, []string{filePath})
+	where := vector.BuildWhereFilter(vector.DocTypeObservation, req.Project, true)
 	query := buildEditWriteTriggerQuery(req.Tool, filePath, req.Params)
 
 	vectorResults, err := s.runVectorQuery(ctx, query, semanticTriggerCandidateLimit, where)

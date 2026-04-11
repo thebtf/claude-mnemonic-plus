@@ -203,6 +203,7 @@ func (s *Server) handleStoreMemory(ctx context.Context, args json.RawMessage) (s
 					Float64("similarity", dedupResult.Similarity).
 					Msg("store_memory: superseding existing observation (contradiction zone)")
 			} else {
+				contradictionAction = "ADD"
 				log.Info().
 					Int64("existing_id", dedupResult.ExistingID).
 					Float64("similarity", dedupResult.Similarity).

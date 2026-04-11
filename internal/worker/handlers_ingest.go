@@ -217,7 +217,13 @@ func (s *Service) handleIngestEvent(w http.ResponseWriter, r *http.Request) {
 	// Handle UPDATE: supersede existing observation if dedup detected contradiction.
 	if ingestDedupResult != nil && ingestDedupResult.Action == dedupPkg.ActionUpdate && ingestDedupResult.ExistingID > 0 {
 		if config.Get().StorePathSupersessionEnabled {
-			_ = s.observationStore.MarkAsSuperseded(r.Context(), ingestDedupResult.ExistingID)
+			if err := s.observationStore.MarkAsSuperseded(r.Context(), ingestDedupResult.ExistingID); err != nil {
+				log.Warn().
+					Err(err).
+					Int64("existing_id", ingestDedupResult.ExistingID).
+					Float64("similarity", ingestDedupResult.Similarity).
+					Msg("ingest: failed to supersede existing observation")
+			}
 		} else {
 			log.Info().
 				Int64("existing_id", ingestDedupResult.ExistingID).

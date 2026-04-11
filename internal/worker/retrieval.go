@@ -80,7 +80,7 @@ type retrievalHooks struct {
 }
 
 func (s *Service) typeLanesEnabled() bool {
-	return s.config != nil && s.config.TypeLanesEnabled && len(s.config.TypeSearchLanes) > 0
+	return s.config != nil && s.config.TypeLanesEnabled
 }
 
 func (s *Service) laneConfigForType(obsType models.ObservationType) (cfg struct {
@@ -119,11 +119,13 @@ func (s *Service) laneConfigForType(obsType models.ObservationType) (cfg struct 
 
 func (s *Service) laneWeightMap() map[models.ObservationType]float64 {
 	weights := make(map[models.ObservationType]float64)
-	if s.config == nil {
-		return weights
-	}
-	for name, lane := range s.config.TypeSearchLanes {
+	for name, lane := range search.DefaultSearchLanes {
 		weights[models.ObservationType(name)] = lane.RerankerWeight
+	}
+	if s.config != nil && len(s.config.TypeSearchLanes) > 0 {
+		for name, lane := range s.config.TypeSearchLanes {
+			weights[models.ObservationType(name)] = lane.RerankerWeight
+		}
 	}
 	return weights
 }

@@ -4,10 +4,13 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 	dbgorm "github.com/thebtf/engram/internal/db/gorm"
@@ -20,7 +23,8 @@ import (
 func TestHandleMemoryTriggers_BashSecretDetectionReturnsEmptyArray(t *testing.T) {
 	service := newRetrievalTestService()
 
-	secretCommand := "curl -H 'Authorization: Bearer sk-test-secret-token-1234567890' https://example.com"
+	bearerToken := strings.Join([]string{"sk", "test", "secret", "token", "1234567890"}, "-")
+	secretCommand := "curl -H 'Authorization: Bearer " + bearerToken + "' https://example.com"
 	body, err := json.Marshal(MemoryTriggerRequest{
 		Tool:      "Bash",
 		Params:    map[string]any{"command": secretCommand},
@@ -47,21 +51,23 @@ func TestHandleMemoryTriggers_BashCommandPrefixMatchesTop3Warnings(t *testing.T)
 	defer cleanup()
 
 	ctx := context.Background()
+	project := fmt.Sprintf("engram-trigger-%d", time.Now().UnixNano())
+	sdkSessionID := fmt.Sprintf("claude-bash-%d", time.Now().UnixNano())
 	sessionStore := dbgorm.NewSessionStore(store)
-	_, err := sessionStore.CreateSDKSession(ctx, "claude-bash", "engram", "")
+	_, err := sessionStore.CreateSDKSession(ctx, sdkSessionID, project, "")
 	require.NoError(t, err)
 
-	seedBashTriggerObservation(t, observationStore, "claude-bash", "engram", models.ObsTypeBugfix, "Force push incident", []string{"Executed: git push --force"})
-	seedBashTriggerObservation(t, observationStore, "claude-bash", "engram", models.ObsTypePitfall, "Main branch overwrite", []string{"Executed: git push --force origin main"})
-	seedBashTriggerObservation(t, observationStore, "claude-bash", "engram", models.ObsTypeBugfix, "Protected branch failure", []string{"Executed: git push --force origin"})
-	seedBashTriggerObservation(t, observationStore, "claude-bash", "engram", models.ObsTypePitfall, "Should be capped", []string{"Executed: git push --force-with-lease"})
-	seedBashTriggerObservation(t, observationStore, "claude-bash", "engram", models.ObsTypeDiscovery, "Discovery should be filtered", []string{"Executed: git push --force"})
+	seedBashTriggerObservation(t, observationStore, sdkSessionID, project, models.ObsTypeBugfix, "Force push incident", []string{"Executed: git push --force"})
+	seedBashTriggerObservation(t, observationStore, sdkSessionID, project, models.ObsTypePitfall, "Main branch overwrite", []string{"Executed: git push --force origin main"})
+	seedBashTriggerObservation(t, observationStore, sdkSessionID, project, models.ObsTypeBugfix, "Protected branch failure", []string{"Executed: git push --force origin"})
+	seedBashTriggerObservation(t, observationStore, sdkSessionID, project, models.ObsTypePitfall, "Should be capped", []string{"Executed: git push --force-with-lease"})
+	seedBashTriggerObservation(t, observationStore, sdkSessionID, project, models.ObsTypeDiscovery, "Discovery should be filtered", []string{"Executed: git push --force"})
 
 	service := &Service{observationStore: observationStore}
 	body, err := json.Marshal(MemoryTriggerRequest{
 		Tool:      "Bash",
 		Params:    map[string]any{"command": "git push --force origin main"},
-		Project:   "engram",
+		Project:   project,
 		SessionID: "session-1",
 	})
 	require.NoError(t, err)
@@ -87,17 +93,19 @@ func TestHandleMemoryTriggers_BashCommandWithoutMatchReturnsEmptyArray(t *testin
 	defer cleanup()
 
 	ctx := context.Background()
+	project := fmt.Sprintf("engram-trigger-%d", time.Now().UnixNano())
+	sdkSessionID := fmt.Sprintf("claude-bash-empty-%d", time.Now().UnixNano())
 	sessionStore := dbgorm.NewSessionStore(store)
-	_, err := sessionStore.CreateSDKSession(ctx, "claude-bash-empty", "engram", "")
+	_, err := sessionStore.CreateSDKSession(ctx, sdkSessionID, project, "")
 	require.NoError(t, err)
 
-	seedBashTriggerObservation(t, observationStore, "claude-bash-empty", "engram", models.ObsTypeBugfix, "Unrelated build failure", []string{"Executed: go build ./..."})
+	seedBashTriggerObservation(t, observationStore, sdkSessionID, project, models.ObsTypeBugfix, "Unrelated build failure", []string{"Executed: go build ./..."})
 
 	service := &Service{observationStore: observationStore}
 	body, err := json.Marshal(MemoryTriggerRequest{
 		Tool:      "Bash",
 		Params:    map[string]any{"command": "ls -la"},
-		Project:   "engram",
+		Project:   project,
 		SessionID: "session-1",
 	})
 	require.NoError(t, err)

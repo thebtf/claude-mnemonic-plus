@@ -317,13 +317,14 @@ func buildWhereClauses(where vector.WhereFilter, startIdx int) ([]string, []any,
 	// allowedColumns is the set of column identifiers permitted in WHERE clauses.
 	// This prevents SQL injection via unvalidated column names in fmt.Sprintf.
 	allowedColumns := map[string]struct{}{
-		"doc_type":       {},
-		"project":        {},
-		"scope":          {},
-		"field_type":     {},
-		"sqlite_id":      {},
-		"files_modified": {},
-		"files_read":     {},
+		"doc_type":   {},
+		"project":    {},
+		"scope":      {},
+		"field_type": {},
+		"sqlite_id":  {},
+	}
+	allowedOperators := map[string]struct{}{
+		"=": {},
 	}
 
 	var whereClauses []string
@@ -336,36 +337,39 @@ func buildWhereClauses(where vector.WhereFilter, startIdx int) ([]string, []any,
 			orArgIndexes := make(map[string]int)
 			for _, oc := range clause.OrGroup {
 				if _, ok := allowedColumns[oc.Column]; !ok {
-					return nil, nil, fmt.Errorf("unsupported where column: %s", oc.Column)
+					continue
 				}
 				operator := oc.Operator
 				if operator == "" {
 					operator = "="
 				}
+				if _, ok := allowedOperators[operator]; !ok {
+					return nil, nil, fmt.Errorf("unsupported where operator: %s", operator)
+				}
 				key := fmt.Sprintf("%s:%T:%v", operator, oc.Value, oc.Value)
 				placeholderIdx := argIdx
-				if operator == "?|" {
-					if reusedArgIdx, ok := orArgIndexes[key]; ok {
-						placeholderIdx = reusedArgIdx
-					} else {
-						orArgIndexes[key] = argIdx
-						args = append(args, oc.Value)
-						argIdx++
-					}
+				if reusedArgIdx, ok := orArgIndexes[key]; ok {
+					placeholderIdx = reusedArgIdx
 				} else {
+					orArgIndexes[key] = argIdx
 					args = append(args, oc.Value)
 					argIdx++
 				}
 				orParts = append(orParts, fmt.Sprintf("%s %s $%d", oc.Column, operator, placeholderIdx))
 			}
-			whereClauses = append(whereClauses, "("+strings.Join(orParts, " OR ")+")")
+			if len(orParts) > 0 {
+				whereClauses = append(whereClauses, "("+strings.Join(orParts, " OR ")+")")
+			}
 		} else {
 			if _, ok := allowedColumns[clause.Column]; !ok {
-				return nil, nil, fmt.Errorf("unsupported where column: %s", clause.Column)
+				continue
 			}
 			operator := clause.Operator
 			if operator == "" {
 				operator = "="
+			}
+			if _, ok := allowedOperators[operator]; !ok {
+				return nil, nil, fmt.Errorf("unsupported where operator: %s", operator)
 			}
 			whereClauses = append(whereClauses, fmt.Sprintf("%s %s $%d", clause.Column, operator, argIdx))
 			args = append(args, clause.Value)
