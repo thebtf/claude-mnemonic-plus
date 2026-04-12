@@ -47,10 +47,10 @@ echo "║         Engram - Uninstallation Script           ║"
 echo "╚═══════════════════════════════════════════════════════════╝"
 echo ""
 
-# Stop worker
-info "Stopping worker processes..."
-pkill -9 -f 'engram.*worker' 2>/dev/null || true
-pkill -9 -f '\.claude/plugins/.*/worker' 2>/dev/null || true
+# Stop server
+info "Stopping server processes..."
+pkill -9 -f 'engram-server' 2>/dev/null || true
+pkill -9 -f '\.claude/plugins/.*/engram-server' 2>/dev/null || true
 # Kill process on port 37777 (use lsof on macOS, ss/fuser on Linux)
 if command -v lsof &> /dev/null; then
     lsof -ti :37777 | xargs kill -9 2>/dev/null || true

@@ -27,9 +27,9 @@ graph TB
 
     subgraph "Engram Server (Go)"
         subgraph "Entry Points"
-            WK["Worker<br/>cmd/worker<br/>:37777 HTTP"]
+            WK["Server<br/>cmd/engram-server<br/>:37777 HTTP"]
             MCP_STDIO["MCP stdio<br/>cmd/mcp"]
-            MCP_PROXY["MCP stdio-proxy<br/>cmd/mcp-stdio-proxy"]
+            MCP_PROXY["engram client<br/>cmd/engram"]
         end
 
         subgraph "HTTP API Layer (chi router)"
@@ -294,7 +294,7 @@ Scheduler runs 3 independent cycles:
 
 | Package | Purpose | Key Types |
 |---------|---------|-----------|
-| `cmd/worker` | HTTP API server | `main()` |
+| `cmd/engram-server` | HTTP API server | `main()` |
 | `cmd/mcp` | MCP stdio server | `main()` |
 | `plugin/engram/hooks/*.js` | JS lifecycle hooks (node) | `session-start.js`, `stop.js`, etc. |
 | `internal/worker` | Service orchestrator, HTTP handlers | `Service` |

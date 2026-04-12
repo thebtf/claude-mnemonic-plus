@@ -32,14 +32,14 @@ COPY --from=dashboard /ui/dist/ internal/worker/static/
 # Inject version from git tags
 ARG VERSION=dev
 
-# Build server binary (worker with integrated MCP SSE)
-RUN CGO_ENABLED=1 go build -tags fts5 -ldflags "-X main.Version=${VERSION} -s -w" -o /out/engram-server ./cmd/worker
+# Build server binary
+RUN CGO_ENABLED=1 go build -tags fts5 -ldflags "-X main.Version=${VERSION} -s -w" -o /out/engram-server ./cmd/engram-server
 
 # Build client-side binaries: engram local proxy
 RUN CGO_ENABLED=1 go build -tags fts5 -ldflags "-X main.Version=${VERSION} -s -w" -o /out/engram ./cmd/engram
 RUN CGO_ENABLED=1 go build -tags fts5 -ldflags "-X main.Version=${VERSION} -s -w" -o /out/engram-mcp ./cmd/mcp
 
-# --- Server image: worker + MCP SSE ---
+# --- Server image ---
 FROM debian:bookworm-slim AS server
 
 WORKDIR /app

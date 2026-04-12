@@ -30,14 +30,16 @@ exposes 48 MCP tools via Streamable HTTP / SSE on port 37777.
 - Database: PostgreSQL 17 + pgvector (HNSW cosine index)
 - Embedding: OpenAI-compatible REST API
 - Reranking: API-based cross-encoder reranker
-- Worker: `cmd/worker/main.go` — HTTP API + MCP SSE + MCP Streamable HTTP + dashboard
+- Server: `cmd/engram-server/main.go` — HTTP API + MCP SSE + MCP Streamable HTTP + dashboard
+- Client: `cmd/engram/main.go` — stdio MCP proxy with git-derived project identity
 - Hooks: `plugin/hooks/` — JavaScript hooks for Claude Code lifecycle
 - Plugin: `plugin/` — Claude Code plugin definition + marketplace
 
 ## KEY DIRECTORIES
 
 ```
-cmd/worker/          — server entry point
+cmd/engram-server/   — server entry point
+cmd/engram/          — local client (stdio MCP proxy)
 internal/mcp/        — MCP protocol, 48 tool handlers (tools_*.go)
 internal/search/     — hybrid search (tsvector + vector + BM25, RRF fusion)
 internal/scoring/    — importance + relevance scoring
