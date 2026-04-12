@@ -2196,6 +2196,29 @@ WHERE utility_propagated_at IS NOT NULL`).Error
 				return tx.Exec(`ALTER TABLE observations DROP COLUMN IF EXISTS commands_run`).Error
 			},
 		},
+		// Migration 075: Add type column to issues for categorisation (bug/feature/improvement/task).
+		{
+			ID: "075_issues_type",
+			Migrate: func(tx *gorm.DB) error {
+				sqls := []string{
+					`ALTER TABLE issues ADD COLUMN IF NOT EXISTS type TEXT NOT NULL DEFAULT 'task'`,
+					`ALTER TABLE issues DROP CONSTRAINT IF EXISTS issues_type_check`,
+					`ALTER TABLE issues ADD CONSTRAINT issues_type_check CHECK (type IN ('bug', 'feature', 'improvement', 'task'))`,
+				}
+				for _, s := range sqls {
+					if err := tx.Exec(s).Error; err != nil {
+						return err
+					}
+				}
+				return nil
+			},
+			Rollback: func(tx *gorm.DB) error {
+				if err := tx.Exec(`ALTER TABLE issues DROP CONSTRAINT IF EXISTS issues_type_check`).Error; err != nil {
+					return err
+				}
+				return tx.Exec(`ALTER TABLE issues DROP COLUMN IF EXISTS type`).Error
+			},
+		},
 	})
 	if err := m.Migrate(); err != nil {
 		return fmt.Errorf("run gormigrate migrations: %w", err)

@@ -979,6 +979,7 @@ export interface Issue {
   body: string
   status: 'open' | 'acknowledged' | 'resolved' | 'reopened' | 'closed' | 'rejected'
   priority: 'critical' | 'high' | 'medium' | 'low'
+  type: 'bug' | 'feature' | 'improvement' | 'task'
   source_project: string
   target_project: string
   source_agent: string
@@ -1017,13 +1018,15 @@ export async function fetchIssues(
   status?: string,
   limit?: number,
   offset?: number,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  type?: string
 ): Promise<IssueListResponse> {
   const params = new URLSearchParams()
   if (project) params.set('project', project)
   if (status) params.set('status', status)
   if (limit) params.set('limit', String(limit))
   if (offset) params.set('offset', String(offset))
+  if (type) params.set('type', type)
   return fetchWithRetry<IssueListResponse>(`${API_BASE}/issues?${params}`, { signal })
 }
 
@@ -1049,9 +1052,41 @@ export async function updateIssue(
     title?: string
     body?: string
     priority?: string
+    type?: string
     labels?: string[]
   },
   signal?: AbortSignal
 ): Promise<{ message: string }> {
   return patchJson<{ message: string }>(`${API_BASE}/issues/${id}`, fields, { signal })
+}
+
+export async function createIssue(
+  data: { title: string; body?: string; type?: string; priority?: string; target_project: string },
+  signal?: AbortSignal
+): Promise<{ id: number; message: string }> {
+  const targetProject = data.target_project?.trim()
+  if (!targetProject) {
+    throw new Error('target_project is required')
+  }
+  return postJson<{ id: number; message: string }>(
+    `${API_BASE}/issues`,
+    {
+      ...data,
+      target_project: targetProject,
+      type: data.type || 'task',
+      priority: data.priority || 'medium',
+      source_project: 'dashboard',
+      source_agent: 'human',
+    },
+    { signal },
+  )
+}
+
+export async function fetchTrackedProjects(signal?: AbortSignal): Promise<string[]> {
+  try {
+    const data = await fetchWithRetry<{ projects?: string[] }>(`${API_BASE}/issues/tracked-projects`, { signal })
+    return data.projects || []
+  } catch {
+    return []
+  }
 }
