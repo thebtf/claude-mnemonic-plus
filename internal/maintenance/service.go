@@ -164,7 +164,7 @@ func (s *Service) Start(ctx context.Context) {
 
 	// Initial run after 5 minutes (allow system to stabilize)
 	time.Sleep(5 * time.Minute)
-	s.runMaintenance(ctx)
+	s.startMaintenance(ctx)
 
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
@@ -178,7 +178,7 @@ func (s *Service) Start(ctx context.Context) {
 			s.log.Info().Msg("Maintenance shutting down due to stop signal")
 			return
 		case <-ticker.C:
-			s.runMaintenance(ctx)
+			s.startMaintenance(ctx)
 		}
 	}
 }
@@ -286,15 +286,9 @@ func (s *Service) recordPendingOutcomes(ctx context.Context) {
 }
 
 // runMaintenance executes all maintenance tasks.
+// Callers (RunNow, Start ticker) must set maintenanceRunning = true before calling.
+// This method clears the flag on exit via defer.
 func (s *Service) runMaintenance(ctx context.Context) {
-	s.mu.Lock()
-	if s.maintenanceRunning {
-		s.mu.Unlock()
-		return
-	}
-	s.maintenanceRunning = true
-	s.mu.Unlock()
-
 	defer func() {
 		s.mu.Lock()
 		s.maintenanceRunning = false
@@ -1074,7 +1068,21 @@ func (s *Service) Stats() map[string]any {
 	}
 }
 
-// RunNow triggers an immediate maintenance run.
+// startMaintenance atomically sets the running flag and calls runMaintenance.
+// Used by the scheduled ticker. Returns false if already running.
+func (s *Service) startMaintenance(ctx context.Context) bool {
+	s.mu.Lock()
+	if s.maintenanceRunning {
+		s.mu.Unlock()
+		return false
+	}
+	s.maintenanceRunning = true
+	s.mu.Unlock()
+	s.runMaintenance(ctx)
+	return true
+}
+
+// RunNow triggers an immediate maintenance run in a background goroutine.
 // Returns false if maintenance is already running.
 func (s *Service) RunNow(ctx context.Context) bool {
 	s.mu.Lock()
