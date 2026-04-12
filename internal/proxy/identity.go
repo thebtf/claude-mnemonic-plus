@@ -1,6 +1,7 @@
 package proxy
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"fmt"
@@ -47,9 +48,10 @@ func ResolveProjectSlug(cwd string) (slug string, gitRemote string, err error) {
 }
 
 // getGitInfo runs the two git commands needed for the primary slug.
+// Both commands share a single context so the total timeout is bounded.
 // Returns (remoteURL, relativePath, error).
 func getGitInfo(cwd string) (remoteURL, relativePath string, err error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
 	rawRemote, err := runGit(ctx, cwd, "remote", "get-url", "origin")
@@ -61,10 +63,7 @@ func getGitInfo(cwd string) (remoteURL, relativePath string, err error) {
 		return "", "", fmt.Errorf("empty remote URL")
 	}
 
-	ctx2, cancel2 := context.WithTimeout(context.Background(), 3*time.Second)
-	defer cancel2()
-
-	rawPrefix, err := runGit(ctx2, cwd, "rev-parse", "--show-prefix")
+	rawPrefix, err := runGit(ctx, cwd, "rev-parse", "--show-prefix")
 	if err != nil {
 		return "", "", err
 	}
@@ -74,10 +73,18 @@ func getGitInfo(cwd string) (remoteURL, relativePath string, err error) {
 }
 
 // runGit executes a git command in the given directory and returns stdout.
+// On failure the error message includes stderr so callers get diagnostic detail
+// (e.g. "not a git repository") rather than a bare exit-status string.
 func runGit(ctx context.Context, dir string, args ...string) (string, error) {
 	cmdArgs := append([]string{"-C", dir}, args...)
-	out, err := exec.CommandContext(ctx, "git", cmdArgs...).Output()
+	cmd := exec.CommandContext(ctx, "git", cmdArgs...)
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	out, err := cmd.Output()
 	if err != nil {
+		if msg := strings.TrimSpace(stderr.String()); msg != "" {
+			return "", fmt.Errorf("%w: %s", err, msg)
+		}
 		return "", err
 	}
 	return string(out), nil

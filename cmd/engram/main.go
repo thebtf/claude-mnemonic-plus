@@ -108,6 +108,8 @@ func runStreamableHTTP(serverURL, authToken, projectSlug string) {
 	fmt.Fprintf(os.Stderr, "[engram] transport: streamable-http\n")
 
 	scanner := bufio.NewScanner(os.Stdin)
+	// Increase buffer to 4 MB to accommodate large JSON-RPC messages.
+	scanner.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
 	for scanner.Scan() {
 		line := scanner.Text()
 		if strings.TrimSpace(line) == "" {
@@ -179,6 +181,8 @@ func runSSE(serverURL, authToken, projectSlug string) {
 	}
 
 	scanner := bufio.NewScanner(resp.Body)
+	// Increase buffer to 4 MB to handle large SSE data payloads.
+	scanner.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
 	currentEvent := ""
 	messageData := ""
 	messageEndpoint := ""
@@ -228,6 +232,8 @@ func runSSE(serverURL, authToken, projectSlug string) {
 // forwardStdin reads JSON-RPC lines from stdin and POSTs each to the SSE message endpoint.
 func forwardStdin(endpoint, token, projectSlug string) {
 	scanner := bufio.NewScanner(os.Stdin)
+	// Increase buffer to 4 MB to accommodate large JSON-RPC messages.
+	scanner.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
 	for scanner.Scan() {
 		line := scanner.Text()
 		req, err := http.NewRequest(http.MethodPost, endpoint, strings.NewReader(line))
