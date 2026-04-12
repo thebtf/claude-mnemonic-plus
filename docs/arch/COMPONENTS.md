@@ -32,7 +32,7 @@ This document maps all runtime binaries and internal Go components for `engram`.
 - **Important note**: `maintenanceService=nil` and `consolidationScheduler=nil`; worker owns these.
 - **Logging**: `stderr` only
 
-### `bin/worker` (`cmd/worker/main.go`)
+### `bin/engram-server` (`cmd/engram-server/main.go`)
 
 - **Role**: Persistent HTTP worker daemon, API for hooks, indexing, consolidation, dashboard.
 - **Transport**: HTTP on `:37777` using `chi`.

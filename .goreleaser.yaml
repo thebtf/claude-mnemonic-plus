@@ -16,9 +16,9 @@ before:
     - bash scripts/generate-plugin-config.sh
 
 builds:
-  # Server (Worker + MCP SSE)
+  # Server
   - id: engram-server
-    main: ./cmd/worker
+    main: ./cmd/engram-server
     binary: engram-server
     env:
       - CGO_ENABLED=1
