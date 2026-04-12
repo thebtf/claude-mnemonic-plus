@@ -858,10 +858,55 @@ export async function triggerConsolidation(signal?: AbortSignal): Promise<{ mess
   return postJson<{ message: string }>(`${API_BASE}/maintenance/consolidate`, {}, { signal })
 }
 
+// ============================================================
+// Maintenance Monitor API
+// ============================================================
+
+export interface MaintenanceSubtask {
+  name: string
+  status: 'pending' | 'running' | 'completed' | 'failed'
+}
+
+export interface MaintenanceLastRun {
+  started_at: string
+  duration_ms: number
+  subtask_count: number
+}
+
+export interface MaintenanceStatus {
+  running: boolean
+  current_subtask: string
+  subtasks: MaintenanceSubtask[]
+  last_run?: MaintenanceLastRun
+  next_run_at?: string
+}
+
+export interface MaintenanceLogEntry {
+  timestamp: number
+  level: string
+  message: string
+  fields?: Record<string, unknown>
+}
+
+export async function fetchMaintenanceStatus(signal?: AbortSignal): Promise<MaintenanceStatus> {
+  return fetchWithRetry<MaintenanceStatus>(`${API_BASE}/maintenance/status`, { signal })
+}
+
+export async function fetchMaintenanceLogs(
+  limit = 100,
+  signal?: AbortSignal,
+): Promise<{ entries: MaintenanceLogEntry[]; total: number }> {
+  return fetchWithRetry<{ entries: MaintenanceLogEntry[]; total: number }>(
+    `${API_BASE}/maintenance/logs?limit=${limit}`,
+    { signal },
+  )
+}
+
 export async function triggerMaintenance(signal?: AbortSignal): Promise<{ message: string }> {
   return postJson<{ message: string }>(`${API_BASE}/maintenance/run`, {}, { signal })
 }
 
+// Keep fetchMaintenanceStats for backward compat (used by SystemView)
 export interface MaintenanceStats {
   last_consolidation?: string
   last_maintenance?: string

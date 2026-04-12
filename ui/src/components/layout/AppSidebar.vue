@@ -27,7 +27,7 @@ const allNavItems: NavItem[] = [
   { name: 'observations', label: 'Observations', icon: 'fa-brain', path: '/observations' },
   { name: 'search', label: 'Search', icon: 'fa-magnifying-glass', path: '/search' },
   { name: 'vault', label: 'Vault', icon: 'fa-vault', path: '/vault' },
-  { name: 'logs', label: 'Logs', icon: 'fa-terminal', path: '/logs' },
+  { name: 'monitor', label: 'Monitor', icon: 'fa-display', path: '/monitor' },
   { name: 'graph', label: 'Graph', icon: 'fa-diagram-project', path: '/graph' },
   { name: 'patterns', label: 'Patterns', icon: 'fa-puzzle-piece', path: '/patterns' },
   { name: 'issues', label: 'Issues', icon: 'fa-circle-exclamation', path: '/issues' },
