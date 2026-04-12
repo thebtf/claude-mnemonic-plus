@@ -98,9 +98,9 @@ func (s *Service) handleRunMaintenance(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Use background context: the request context is cancelled after the
-	// response is sent, which would prematurely abort the background job.
-	s.maintenanceService.RunNow(context.Background())
+	// Use the server's long-lived context so the job is cancelled when the
+	// server shuts down rather than outliving it.
+	s.maintenanceService.RunNow(s.ctx)
 
 	// Clean up old search query logs (90-day retention) in the background.
 	go func() {
@@ -521,7 +521,7 @@ func (s *Service) handleMaintenanceStatus(w http.ResponseWriter, r *http.Request
 	stats := s.maintenanceService.Stats()
 	isRunning := s.maintenanceService.IsRunning()
 	currentSubtask := s.maintenanceService.CurrentSubtask()
-	currentIdx, total := s.maintenanceService.CurrentProgress()
+	currentIdx, total, currentStatus := s.maintenanceService.CurrentProgress()
 
 	subtaskNames := maintenance.SubtaskNames()
 	subtasks := make([]map[string]any, len(subtaskNames))
@@ -531,8 +531,14 @@ func (s *Service) handleMaintenanceStatus(w http.ResponseWriter, r *http.Request
 			if i < currentIdx-1 {
 				status = "completed"
 			} else if i == currentIdx-1 {
-				status = "running"
+				status = currentStatus
+				if status == "started" {
+					status = "running"
+				}
 			}
+		} else if currentIdx > 0 {
+			// Idle after a run — show last run results
+			status = "completed"
 		}
 		subtasks[i] = map[string]any{
 			"name":   name,

@@ -70,6 +70,7 @@ type Service struct {
 	currentSubtask             string
 	currentSubtaskIndex        int
 	subtaskTotal               int
+	currentSubtaskStatus       string
 	OnProgress                 ProgressCallback
 	OnComplete                 func(CompletionSummary)
 }
@@ -297,8 +298,6 @@ func (s *Service) runMaintenance(ctx context.Context) {
 	defer func() {
 		s.mu.Lock()
 		s.maintenanceRunning = false
-		s.currentSubtask = ""
-		s.currentSubtaskIndex = 0
 		s.mu.Unlock()
 	}()
 
@@ -331,7 +330,7 @@ func (s *Service) runMaintenance(ctx context.Context) {
 			s.emitProgress(subtasks[taskIdx-1], taskIdx, total, "completed", fmt.Sprintf("cleaned %d", cleaned))
 		}
 	} else {
-		s.emitProgress(subtasks[taskIdx-1], taskIdx, total, "completed", "skipped (retention disabled)")
+		s.emitProgress(subtasks[taskIdx-1], taskIdx, total, "skipped", "skipped (retention disabled)")
 	}
 
 	// Task 2: Clean up stale observations
@@ -348,7 +347,7 @@ func (s *Service) runMaintenance(ctx context.Context) {
 			s.emitProgress(subtasks[taskIdx-1], taskIdx, total, "completed", fmt.Sprintf("cleaned %d", cleaned))
 		}
 	} else {
-		s.emitProgress(subtasks[taskIdx-1], taskIdx, total, "completed", "skipped (stale cleanup disabled)")
+		s.emitProgress(subtasks[taskIdx-1], taskIdx, total, "skipped", "skipped (stale cleanup disabled)")
 	}
 
 	// Task 3: Optimize database
@@ -383,7 +382,7 @@ func (s *Service) runMaintenance(ctx context.Context) {
 		s.similarityTelemetry.Run(ctx)
 		s.emitProgress(subtasks[taskIdx-1], taskIdx, total, "completed", "")
 	} else {
-		s.emitProgress(subtasks[taskIdx-1], taskIdx, total, "completed", "skipped (telemetry disabled)")
+		s.emitProgress(subtasks[taskIdx-1], taskIdx, total, "skipped", "skipped (telemetry disabled)")
 	}
 
 	// Task 6: Smart GC — archive low-value observations
@@ -400,7 +399,7 @@ func (s *Service) runMaintenance(ctx context.Context) {
 		}
 		s.emitProgress(subtasks[taskIdx-1], taskIdx, total, "completed", fmt.Sprintf("archived %d", gcStats.Archived))
 	} else {
-		s.emitProgress(subtasks[taskIdx-1], taskIdx, total, "completed", "skipped (smart GC disabled)")
+		s.emitProgress(subtasks[taskIdx-1], taskIdx, total, "skipped", "skipped (smart GC disabled)")
 	}
 
 	// Task 7: Pattern quality decay — deprecate low-quality patterns
@@ -419,7 +418,7 @@ func (s *Service) runMaintenance(ctx context.Context) {
 			s.emitProgress(subtasks[taskIdx-1], taskIdx, total, "completed", fmt.Sprintf("deprecated %d", deprecated))
 		}
 	} else {
-		s.emitProgress(subtasks[taskIdx-1], taskIdx, total, "completed", "skipped (no pattern store)")
+		s.emitProgress(subtasks[taskIdx-1], taskIdx, total, "skipped", "skipped (no pattern store)")
 	}
 
 	// Task 8: Near-duplicate consolidation — merge near-identical observations
@@ -440,7 +439,7 @@ func (s *Service) runMaintenance(ctx context.Context) {
 			s.emitProgress(subtasks[taskIdx-1], taskIdx, total, "completed", fmt.Sprintf("merged %d", merged))
 		}
 	} else {
-		s.emitProgress(subtasks[taskIdx-1], taskIdx, total, "completed", "skipped (consolidation disabled)")
+		s.emitProgress(subtasks[taskIdx-1], taskIdx, total, "skipped", "skipped (consolidation disabled)")
 	}
 
 	// Task 9: Monitor expired verified facts (log-only, no mutations)
@@ -463,7 +462,7 @@ func (s *Service) runMaintenance(ctx context.Context) {
 			s.emitProgress(subtasks[taskIdx-1], taskIdx, total, "completed", fmt.Sprintf("detected %d expired", expiredCount))
 		}
 	} else {
-		s.emitProgress(subtasks[taskIdx-1], taskIdx, total, "completed", "skipped (no store)")
+		s.emitProgress(subtasks[taskIdx-1], taskIdx, total, "skipped", "skipped (no store)")
 	}
 
 	// Task 10: Clean orphan vectors (vectors with no matching observation)
@@ -484,7 +483,7 @@ func (s *Service) runMaintenance(ctx context.Context) {
 			s.emitProgress(subtasks[taskIdx-1], taskIdx, total, "completed", fmt.Sprintf("cleaned %d", cleaned))
 		}
 	} else {
-		s.emitProgress(subtasks[taskIdx-1], taskIdx, total, "completed", "skipped (no vector client)")
+		s.emitProgress(subtasks[taskIdx-1], taskIdx, total, "skipped", "skipped (no vector client)")
 	}
 
 	// Task 11: Detect missing vectors (observations without embeddings)
@@ -502,7 +501,7 @@ func (s *Service) runMaintenance(ctx context.Context) {
 			s.emitProgress(subtasks[taskIdx-1], taskIdx, total, "completed", fmt.Sprintf("queued %d for re-embedding", missing))
 		}
 	} else {
-		s.emitProgress(subtasks[taskIdx-1], taskIdx, total, "completed", "skipped (no vector sync)")
+		s.emitProgress(subtasks[taskIdx-1], taskIdx, total, "skipped", "skipped (no vector sync)")
 	}
 
 	// Task 12: Clean stale relations (relations referencing deleted observations)
@@ -523,7 +522,7 @@ func (s *Service) runMaintenance(ctx context.Context) {
 			s.emitProgress(subtasks[taskIdx-1], taskIdx, total, "completed", fmt.Sprintf("cleaned %d", cleaned))
 		}
 	} else {
-		s.emitProgress(subtasks[taskIdx-1], taskIdx, total, "completed", "skipped (no relation store)")
+		s.emitProgress(subtasks[taskIdx-1], taskIdx, total, "skipped", "skipped (no relation store)")
 	}
 
 	// Task 13: Detect graph drift between FalkorDB and PostgreSQL
@@ -537,7 +536,7 @@ func (s *Service) runMaintenance(ctx context.Context) {
 			s.emitProgress(subtasks[taskIdx-1], taskIdx, total, "completed", "")
 		}
 	} else {
-		s.emitProgress(subtasks[taskIdx-1], taskIdx, total, "completed", "skipped (no graph store)")
+		s.emitProgress(subtasks[taskIdx-1], taskIdx, total, "skipped", "skipped (no graph store)")
 	}
 
 	// Task 14: Check embedding model change (T054)
@@ -551,7 +550,7 @@ func (s *Service) runMaintenance(ctx context.Context) {
 			s.emitProgress(subtasks[taskIdx-1], taskIdx, total, "completed", "")
 		}
 	} else {
-		s.emitProgress(subtasks[taskIdx-1], taskIdx, total, "completed", "skipped (no store)")
+		s.emitProgress(subtasks[taskIdx-1], taskIdx, total, "skipped", "skipped (no store)")
 	}
 
 	// Task 15: Recalculate effectiveness scores from junction table data
@@ -565,7 +564,7 @@ func (s *Service) runMaintenance(ctx context.Context) {
 			s.emitProgress(subtasks[taskIdx-1], taskIdx, total, "completed", "")
 		}
 	} else {
-		s.emitProgress(subtasks[taskIdx-1], taskIdx, total, "completed", "skipped (no injection store)")
+		s.emitProgress(subtasks[taskIdx-1], taskIdx, total, "skipped", "skipped (no injection store)")
 	}
 
 	// Task 16: TTL cleanup for observation_injections (90-day retention)
@@ -584,7 +583,7 @@ func (s *Service) runMaintenance(ctx context.Context) {
 			s.emitProgress(subtasks[taskIdx-1], taskIdx, total, "completed", fmt.Sprintf("deleted %d", deleted))
 		}
 	} else {
-		s.emitProgress(subtasks[taskIdx-1], taskIdx, total, "completed", "skipped (no injection store)")
+		s.emitProgress(subtasks[taskIdx-1], taskIdx, total, "skipped", "skipped (no injection store)")
 	}
 
 	// Task 17: APO-lite candidate detection — identify low-effectiveness guidance for rewrite
@@ -594,7 +593,7 @@ func (s *Service) runMaintenance(ctx context.Context) {
 		s.detectAPOCandidates(ctx)
 		s.emitProgress(subtasks[taskIdx-1], taskIdx, total, "completed", "")
 	} else {
-		s.emitProgress(subtasks[taskIdx-1], taskIdx, total, "completed", "skipped (no observation store)")
+		s.emitProgress(subtasks[taskIdx-1], taskIdx, total, "skipped", "skipped (no observation store)")
 	}
 
 	// Task 18: Generate LLM insights for patterns with generic descriptions
@@ -612,7 +611,7 @@ func (s *Service) runMaintenance(ctx context.Context) {
 			s.emitProgress(subtasks[taskIdx-1], taskIdx, total, "completed", fmt.Sprintf("generated %d", generated))
 		}
 	} else {
-		s.emitProgress(subtasks[taskIdx-1], taskIdx, total, "completed", "skipped (no LLM client)")
+		s.emitProgress(subtasks[taskIdx-1], taskIdx, total, "skipped", "skipped (no LLM client)")
 	}
 
 	// Task 19: Summarize unsummarized sessions
@@ -630,7 +629,7 @@ func (s *Service) runMaintenance(ctx context.Context) {
 			s.emitProgress(subtasks[taskIdx-1], taskIdx, total, "completed", fmt.Sprintf("summarized %d sessions", summarized))
 		}
 	} else {
-		s.emitProgress(subtasks[taskIdx-1], taskIdx, total, "completed", "skipped (no LLM client)")
+		s.emitProgress(subtasks[taskIdx-1], taskIdx, total, "skipped", "skipped (no LLM client)")
 	}
 
 	// Task 20: Adaptive threshold adjustment per project (Learning Memory v3 FR-6)
@@ -650,7 +649,7 @@ func (s *Service) runMaintenance(ctx context.Context) {
 			s.emitProgress(subtasks[taskIdx-1], taskIdx, total, "completed", fmt.Sprintf("adjusted %d projects", adjusted))
 		}
 	} else {
-		s.emitProgress(subtasks[taskIdx-1], taskIdx, total, "completed", "skipped (no observation store)")
+		s.emitProgress(subtasks[taskIdx-1], taskIdx, total, "skipped", "skipped (no observation store)")
 	}
 
 	// Task 21: Entity extraction from recent observations (synthesize-wiki-layer FR-1)
@@ -669,7 +668,7 @@ func (s *Service) runMaintenance(ctx context.Context) {
 			s.emitProgress(subtasks[taskIdx-1], taskIdx, total, "completed", fmt.Sprintf("extracted %d entities", extracted))
 		}
 	} else {
-		s.emitProgress(subtasks[taskIdx-1], taskIdx, total, "completed", "skipped (entity extraction disabled)")
+		s.emitProgress(subtasks[taskIdx-1], taskIdx, total, "skipped", "skipped (entity extraction disabled)")
 	}
 
 	// Task 22: Wiki generation for entities with sufficient sources (synthesize-wiki-layer FR-2)
@@ -691,7 +690,7 @@ func (s *Service) runMaintenance(ctx context.Context) {
 			s.emitProgress(subtasks[taskIdx-1], taskIdx, total, "completed", fmt.Sprintf("generated %d wiki pages", wikiGenerated))
 		}
 	} else {
-		s.emitProgress(subtasks[taskIdx-1], taskIdx, total, "completed", "skipped (entity extraction disabled)")
+		s.emitProgress(subtasks[taskIdx-1], taskIdx, total, "skipped", "skipped (entity extraction disabled)")
 	}
 
 	// Task 23: Project briefing generation (learning-memory-v4 FR-6)
@@ -710,7 +709,7 @@ func (s *Service) runMaintenance(ctx context.Context) {
 			s.emitProgress(subtasks[taskIdx-1], taskIdx, total, "completed", fmt.Sprintf("generated %d briefings", briefingsGenerated))
 		}
 	} else {
-		s.emitProgress(subtasks[taskIdx-1], taskIdx, total, "completed", "skipped (project briefing disabled)")
+		s.emitProgress(subtasks[taskIdx-1], taskIdx, total, "skipped", "skipped (project briefing disabled)")
 	}
 
 	// Task 24: Hit rate analytics (gstack-insights FR-5)
@@ -1083,6 +1082,7 @@ func (s *Service) RunNow(ctx context.Context) bool {
 		s.mu.Unlock()
 		return false
 	}
+	s.maintenanceRunning = true
 	s.mu.Unlock()
 	go s.runMaintenance(ctx)
 	return true
@@ -1102,11 +1102,11 @@ func (s *Service) CurrentSubtask() string {
 	return s.currentSubtask
 }
 
-// CurrentProgress returns the 1-based index of the current subtask and the total count.
-func (s *Service) CurrentProgress() (currentIndex, total int) {
+// CurrentProgress returns the 1-based index of the current subtask, the total count, and the current status.
+func (s *Service) CurrentProgress() (currentIndex, total int, status string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.currentSubtaskIndex, s.subtaskTotal
+	return s.currentSubtaskIndex, s.subtaskTotal, s.currentSubtaskStatus
 }
 
 // SubtaskNames returns the ordered list of maintenance subtask names.
@@ -1125,11 +1125,10 @@ func SubtaskNames() []string {
 // emitProgress updates the current subtask state and fires the OnProgress callback.
 func (s *Service) emitProgress(subtask string, index, total int, status, message string) {
 	s.mu.Lock()
-	if status == "started" {
-		s.currentSubtask = subtask
-		s.currentSubtaskIndex = index
-		s.subtaskTotal = total
-	}
+	s.currentSubtask = subtask
+	s.currentSubtaskIndex = index
+	s.subtaskTotal = total
+	s.currentSubtaskStatus = status
 	s.mu.Unlock()
 
 	if s.OnProgress != nil {
