@@ -355,7 +355,7 @@ onMounted(loadIssue)
               <span v-if="event.agent" class="text-gray-400">({{ event.agent }})</span>
               <span class="text-gray-400 text-xs">{{ formatRelativeTime(event.date) }}</span>
             </div>
-            <div v-if="event.body" class="markdown-body mt-1 text-sm text-gray-600 dark:text-gray-400" v-html="renderMarkdown(event.body)" />
+            <div v-if="event.body" class="markdown-body mt-1 text-sm text-gray-600 dark:text-gray-400 break-words" v-html="renderMarkdown(event.body)" />
           </div>
         </div>
       </div>
@@ -414,5 +414,14 @@ onMounted(loadIssue)
 }
 .markdown-body :deep(p) {
   @apply my-1;
+}
+.markdown-body :deep(h1) {
+  @apply text-xl font-bold mt-4 mb-2;
+}
+.markdown-body :deep(h2) {
+  @apply text-lg font-bold mt-3 mb-1;
+}
+.markdown-body :deep(h3) {
+  @apply text-base font-bold mt-2 mb-1;
 }
 </style>
