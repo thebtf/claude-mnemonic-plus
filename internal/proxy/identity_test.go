@@ -3,6 +3,7 @@ package proxy_test
 import (
 	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"testing"
@@ -10,13 +11,24 @@ import (
 	"github.com/thebtf/engram/internal/proxy"
 )
 
+// findRepoRoot returns the absolute path of the current git repository root.
+// It fails the test immediately if the git command fails.
+func findRepoRoot(t *testing.T) string {
+	t.Helper()
+	out, err := exec.Command("git", "rev-parse", "--show-toplevel").Output()
+	if err != nil {
+		t.Fatalf("failed to determine git repo root: %v", err)
+	}
+	return filepath.Clean(strings.TrimSpace(string(out)))
+}
+
 // TestResolveProjectSlug_GitRepo verifies that a directory that is a git repo
 // with a remote produces a slug of the form "engram_<8hexchars>" and a non-empty
 // gitRemote.
 func TestResolveProjectSlug_GitRepo(t *testing.T) {
 	t.Parallel()
 
-	const repoDir = `D:\Dev\engram`
+	repoDir := findRepoRoot(t)
 
 	slug, gitRemote, err := proxy.ResolveProjectSlug(repoDir)
 	if err != nil {
@@ -25,12 +37,15 @@ func TestResolveProjectSlug_GitRepo(t *testing.T) {
 
 	t.Logf("slug=%s  gitRemote=%s", slug, gitRemote)
 
-	if !strings.HasPrefix(slug, "engram_") {
-		t.Errorf("slug %q does not start with engram_", slug)
+	// The slug prefix must equal the base name of the directory passed in.
+	dirName := filepath.Base(repoDir)
+	expectedPrefix := dirName + "_"
+	if !strings.HasPrefix(slug, expectedPrefix) {
+		t.Errorf("slug %q does not start with %q", slug, expectedPrefix)
 	}
 
 	// Suffix must be exactly 8 lowercase hex characters.
-	suffix := strings.TrimPrefix(slug, "engram_")
+	suffix := strings.TrimPrefix(slug, expectedPrefix)
 	matched, _ := regexp.MatchString(`^[0-9a-f]{8}$`, suffix)
 	if !matched {
 		t.Errorf("slug suffix %q is not 8 hex chars", suffix)
@@ -71,7 +86,7 @@ func TestResolveProjectSlug_NonGitDir(t *testing.T) {
 func TestResolveProjectSlug_ConsistentAcrossCalls(t *testing.T) {
 	t.Parallel()
 
-	const repoDir = `D:\Dev\engram`
+	repoDir := findRepoRoot(t)
 
 	slug1, remote1, err1 := proxy.ResolveProjectSlug(repoDir)
 	if err1 != nil {
@@ -97,7 +112,7 @@ func TestResolveProjectSlug_ConsistentAcrossCalls(t *testing.T) {
 func TestResolveProjectSlug_WorktreeMatchesMain(t *testing.T) {
 	t.Parallel()
 
-	const mainRepo = `D:\Dev\engram`
+	mainRepo := findRepoRoot(t)
 
 	out, err := exec.Command("git", "-C", mainRepo, "worktree", "list", "--porcelain").Output()
 	if err != nil {
@@ -112,10 +127,8 @@ func TestResolveProjectSlug_WorktreeMatchesMain(t *testing.T) {
 			continue
 		}
 		path := strings.TrimPrefix(line, "worktree ")
-		// Normalise separators for comparison.
-		normPath := strings.ReplaceAll(path, "/", `\`)
-		normMain := strings.ReplaceAll(mainRepo, "/", `\`)
-		if !strings.EqualFold(normPath, normMain) {
+		// Use filepath.Clean for portable cross-platform path comparison.
+		if !strings.EqualFold(filepath.Clean(path), filepath.Clean(mainRepo)) {
 			worktreePaths = append(worktreePaths, path)
 		}
 	}

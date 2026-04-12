@@ -12,9 +12,16 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/thebtf/engram/internal/proxy"
 )
+
+// httpClient is a shared HTTP client with a timeout so that a non-responsive
+// server does not cause the proxy to hang indefinitely.
+var httpClient = &http.Client{
+	Timeout: 30 * time.Second,
+}
 
 func main() {
 	baseURL := flag.String("url", "", "Base URL for MCP endpoint (overrides ENGRAM_URL)")
@@ -74,7 +81,7 @@ func tryStreamableHTTP(serverURL, authToken, projectSlug string) bool {
 		req.Header.Set("Authorization", "Bearer "+authToken)
 	}
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := httpClient.Do(req)
 	if err != nil {
 		return false
 	}
@@ -122,7 +129,7 @@ func runStreamableHTTP(serverURL, authToken, projectSlug string) {
 			req.Header.Set("Authorization", "Bearer "+authToken)
 		}
 
-		resp, err := http.DefaultClient.Do(req)
+		resp, err := httpClient.Do(req)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "[engram] request failed: %v\n", err)
 			os.Exit(1)
@@ -159,7 +166,7 @@ func runSSE(serverURL, authToken, projectSlug string) {
 		req.Header.Set("Authorization", "Bearer "+authToken)
 	}
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := httpClient.Do(req)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
@@ -225,6 +232,10 @@ func forwardStdin(endpoint, token, projectSlug string) {
 		line := scanner.Text()
 		req, err := http.NewRequest(http.MethodPost, endpoint, strings.NewReader(line))
 		if err != nil {
+			fmt.Fprintf(os.Stderr, "[engram] forward error: %v\n", err)
+			// Exit 0: forwardStdin runs in a goroutine alongside the SSE reader.
+			// A non-zero exit here would be misleading — the primary stream may
+			// still be healthy. The SSE reader goroutine owns process lifetime.
 			os.Exit(0)
 		}
 
@@ -237,8 +248,11 @@ func forwardStdin(endpoint, token, projectSlug string) {
 			req.Header.Set("Authorization", "Bearer "+token)
 		}
 
-		resp, err := http.DefaultClient.Do(req)
+		resp, err := httpClient.Do(req)
 		if err != nil {
+			fmt.Fprintf(os.Stderr, "[engram] forward failed: %v\n", err)
+			// Exit 0: same rationale as above — network failure on the POST
+			// path should not mask a healthy SSE session with a non-zero code.
 			os.Exit(0)
 		}
 		_, _ = io.Copy(io.Discard, resp.Body)
