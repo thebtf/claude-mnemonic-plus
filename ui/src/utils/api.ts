@@ -1135,3 +1135,7 @@ export async function fetchTrackedProjects(signal?: AbortSignal): Promise<string
     return []
   }
 }
+
+export async function fetchConfig(signal?: AbortSignal): Promise<Record<string, Record<string, unknown>>> {
+  return fetchWithRetry<Record<string, Record<string, unknown>>>(`${API_BASE}/config`, { signal })
+}

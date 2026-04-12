@@ -2056,6 +2056,9 @@ func (s *Service) setupRoutes() {
 
 		// Analytics routes
 		r.Get("/api/analytics/trends", s.handleGetTrends)
+
+		// Config
+		r.Get("/api/config", s.handleGetConfig)
 	})
 }
 

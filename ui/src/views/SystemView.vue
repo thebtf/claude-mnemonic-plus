@@ -5,6 +5,7 @@ import {
   fetchVectorMetrics,
   fetchGraphStats,
   fetchVaultStatus,
+  fetchConfig,
   triggerConsolidation,
   triggerMaintenance,
   checkForUpdate,
@@ -16,6 +17,7 @@ import { copyToClipboard } from '@/utils/clipboard'
 const health = ref<SystemHealth | null>(null)
 const vectorMetrics = ref<VectorMetrics | null>(null)
 const graphStats = ref<GraphStats | null>(null)
+const config = ref<Record<string, Record<string, unknown>> | null>(null)
 const loading = ref(false)
 const error = ref<string | null>(null)
 
@@ -45,11 +47,12 @@ async function loadAll() {
   const signal = abortController.signal
 
   try {
-    const [h, v, g, vaultResult] = await Promise.allSettled([
+    const [h, v, g, vaultResult, cfgResult] = await Promise.allSettled([
       fetchSystemHealth(signal),
       fetchVectorMetrics(signal),
       fetchGraphStats(signal),
       fetchVaultStatus(signal),
+      fetchConfig(signal),
     ])
 
     // Bail out if this request was superseded by a newer one.
@@ -58,12 +61,13 @@ async function loadAll() {
     health.value = h.status === 'fulfilled' ? h.value : null
     vectorMetrics.value = v.status === 'fulfilled' ? v.value : null
     graphStats.value = g.status === 'fulfilled' ? g.value : null
+    config.value = cfgResult.status === 'fulfilled' ? cfgResult.value : null
     if (vaultResult.status === 'fulfilled') {
       vaultKeyConfigured.value = vaultResult.value.encrypted
     }
 
     // Surface real errors (not AbortErrors for the current signal).
-    const failures = [h, v, g, vaultResult]
+    const failures = [h, v, g, vaultResult, cfgResult]
       .filter(r => r.status === 'rejected')
       .map(r => (r as PromiseRejectedResult).reason)
       .filter(e => !(e instanceof Error && e.name === 'AbortError'))
@@ -354,6 +358,33 @@ onUnmounted(() => {
           <i :class="['fas mr-1.5', vaultCopyFeedback ? 'fa-check text-green-400' : vaultCopyError ? 'fa-times text-red-400' : 'fa-copy']" />
           {{ vaultCopyFeedback ? 'Copied!' : vaultCopyError ? 'Copy failed' : 'Copy command' }}
         </button>
+      </div>
+
+      <!-- Configuration -->
+      <div v-if="config" class="bg-slate-800/50 rounded-xl border border-slate-700/50 p-4 mb-6">
+        <h2 class="text-lg font-semibold text-white mb-3">
+          <i class="fas fa-sliders mr-2 text-claude-400" />Configuration
+        </h2>
+        <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+          <div v-for="(group, groupName) in config" :key="groupName" class="bg-slate-900/50 rounded-lg p-3 border border-slate-700/30">
+            <h3 class="text-sm font-medium text-claude-300 mb-2 capitalize">{{ groupName }}</h3>
+            <div class="space-y-1">
+              <div v-for="(value, key) in group" :key="key" class="flex justify-between items-center text-xs">
+                <span class="text-slate-400 font-mono">{{ key }}</span>
+                <span :class="[
+                  'font-mono',
+                  typeof value === 'boolean'
+                    ? value ? 'text-green-400' : 'text-slate-600'
+                    : 'text-slate-200'
+                ]">
+                  {{ typeof value === 'boolean' ? (value ? '✓' : '✗')
+                     : Array.isArray(value) ? value.join(', ')
+                     : value ?? '—' }}
+                </span>
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
 
       <!-- Maintenance Controls -->
