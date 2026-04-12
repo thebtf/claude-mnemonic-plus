@@ -9,6 +9,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"os"
 	"strings"
@@ -17,10 +18,23 @@ import (
 	"github.com/thebtf/engram/internal/proxy"
 )
 
-// httpClient is a shared HTTP client with a timeout so that a non-responsive
-// server does not cause the proxy to hang indefinitely.
+// httpClient is used for short-lived requests (probe ping, Streamable HTTP
+// POSTs). A 30 s timeout prevents hanging on an unresponsive server.
 var httpClient = &http.Client{
 	Timeout: 30 * time.Second,
+}
+
+// sseClient is used for the long-lived SSE connection. It has no response
+// timeout (which would kill the stream after 30 s) but its transport enforces
+// a 15 s dial + TLS-handshake timeout so the initial connection still fails fast.
+var sseClient = &http.Client{
+	Transport: &http.Transport{
+		DialContext: (&net.Dialer{
+			Timeout:   15 * time.Second,
+			KeepAlive: 30 * time.Second,
+		}).DialContext,
+		TLSHandshakeTimeout: 10 * time.Second,
+	},
 }
 
 func main() {
@@ -168,7 +182,7 @@ func runSSE(serverURL, authToken, projectSlug string) {
 		req.Header.Set("Authorization", "Bearer "+authToken)
 	}
 
-	resp, err := httpClient.Do(req)
+	resp, err := sseClient.Do(req)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
@@ -254,7 +268,7 @@ func forwardStdin(endpoint, token, projectSlug string) {
 			req.Header.Set("Authorization", "Bearer "+token)
 		}
 
-		resp, err := httpClient.Do(req)
+		resp, err := sseClient.Do(req)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "[engram] forward failed: %v\n", err)
 			// Exit 0: same rationale as above — network failure on the POST
