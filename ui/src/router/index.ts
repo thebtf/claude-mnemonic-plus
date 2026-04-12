@@ -34,9 +34,13 @@ const routes = [
     component: () => import('@/views/VaultView.vue'),
   },
   {
+    path: '/monitor',
+    name: 'monitor',
+    component: () => import('@/views/MonitorView.vue'),
+  },
+  {
     path: '/logs',
-    name: 'logs',
-    component: () => import('@/views/LogsView.vue'),
+    redirect: '/monitor',
   },
   {
     path: '/graph/:observationId?',

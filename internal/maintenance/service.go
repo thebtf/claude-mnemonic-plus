@@ -19,6 +19,18 @@ import (
 	"github.com/thebtf/engram/internal/vector/pgvector"
 )
 
+// ProgressCallback is called when a maintenance subtask changes state.
+type ProgressCallback func(subtask string, index, total int, status string, message string)
+
+// CompletionSummary holds the result of a maintenance run.
+type CompletionSummary struct {
+	DurationMs   int64 `json:"duration_ms"`
+	SubtaskCount int   `json:"subtask_count"`
+	Merged       int   `json:"merged"`
+	Archived     int   `json:"archived"`
+	Pruned       int   `json:"pruned"`
+}
+
 // Service handles scheduled maintenance tasks.
 type Service struct {
 	log                        zerolog.Logger
@@ -54,6 +66,13 @@ type Service struct {
 	llmClient                  learning.LLMClient
 	mu                         sync.Mutex
 	running                    bool
+	maintenanceRunning         bool
+	currentSubtask             string
+	currentSubtaskIndex        int
+	subtaskTotal               int
+	currentSubtaskStatus       string
+	OnProgress                 ProgressCallback
+	OnComplete                 func(CompletionSummary)
 }
 
 // NewService creates a new maintenance service.
@@ -268,54 +287,107 @@ func (s *Service) recordPendingOutcomes(ctx context.Context) {
 
 // runMaintenance executes all maintenance tasks.
 func (s *Service) runMaintenance(ctx context.Context) {
+	s.mu.Lock()
+	if s.maintenanceRunning {
+		s.mu.Unlock()
+		return
+	}
+	s.maintenanceRunning = true
+	s.mu.Unlock()
+
+	defer func() {
+		s.mu.Lock()
+		s.maintenanceRunning = false
+		s.mu.Unlock()
+	}()
+
 	start := time.Now()
 	s.log.Info().Msg("Starting maintenance run")
+
+	subtasks := SubtaskNames()
+	total := len(subtasks)
+	taskIdx := 0
+
+	// Capture per-run starting counters to compute deltas at completion.
+	s.mu.Lock()
+	startSmartGCArchived := s.totalSmartGCArchived
+	startNearDedupMerged := s.totalNearDedupMerged
+	s.mu.Unlock()
 
 	var totalCleaned int64
 
 	// Task 1: Clean up old observations by age
+	taskIdx++
+	s.emitProgress(subtasks[taskIdx-1], taskIdx, total, "started", "")
 	if s.config.ObservationRetentionDays > 0 {
 		cleaned, err := s.cleanupOldObservations(ctx)
 		if err != nil {
 			s.log.Error().Err(err).Msg("Failed to cleanup old observations")
+			s.emitProgress(subtasks[taskIdx-1], taskIdx, total, "failed", err.Error())
 		} else {
 			totalCleaned += cleaned
 			s.log.Info().Int64("cleaned", cleaned).Msg("Cleaned old observations by age")
+			s.emitProgress(subtasks[taskIdx-1], taskIdx, total, "completed", fmt.Sprintf("cleaned %d", cleaned))
 		}
+	} else {
+		s.emitProgress(subtasks[taskIdx-1], taskIdx, total, "skipped", "skipped (retention disabled)")
 	}
 
 	// Task 2: Clean up stale observations
+	taskIdx++
+	s.emitProgress(subtasks[taskIdx-1], taskIdx, total, "started", "")
 	if s.config.CleanupStaleObservations {
 		cleaned, err := s.cleanupStaleObservations(ctx)
 		if err != nil {
 			s.log.Error().Err(err).Msg("Failed to cleanup stale observations")
+			s.emitProgress(subtasks[taskIdx-1], taskIdx, total, "failed", err.Error())
 		} else {
 			totalCleaned += cleaned
 			s.log.Info().Int64("cleaned", cleaned).Msg("Cleaned stale observations")
+			s.emitProgress(subtasks[taskIdx-1], taskIdx, total, "completed", fmt.Sprintf("cleaned %d", cleaned))
 		}
+	} else {
+		s.emitProgress(subtasks[taskIdx-1], taskIdx, total, "skipped", "skipped (stale cleanup disabled)")
 	}
 
 	// Task 3: Optimize database
+	taskIdx++
+	s.emitProgress(subtasks[taskIdx-1], taskIdx, total, "started", "")
 	if err := s.store.Optimize(ctx); err != nil {
 		s.log.Error().Err(err).Msg("Failed to optimize database")
+		s.emitProgress(subtasks[taskIdx-1], taskIdx, total, "failed", err.Error())
 	} else {
 		s.totalOptimizeRun++
+		s.emitProgress(subtasks[taskIdx-1], taskIdx, total, "completed", "")
 	}
 
 	// Task 4: Clean up old prompts (keep last 1000 per session)
+	taskIdx++
+	s.emitProgress(subtasks[taskIdx-1], taskIdx, total, "started", "")
 	cleanedPrompts, err := s.cleanupOldPrompts(ctx)
 	if err != nil {
 		s.log.Error().Err(err).Msg("Failed to cleanup old prompts")
-	} else if cleanedPrompts > 0 {
-		s.log.Info().Int64("cleaned", cleanedPrompts).Msg("Cleaned old prompts")
+		s.emitProgress(subtasks[taskIdx-1], taskIdx, total, "failed", err.Error())
+	} else {
+		if cleanedPrompts > 0 {
+			s.log.Info().Int64("cleaned", cleanedPrompts).Msg("Cleaned old prompts")
+		}
+		s.emitProgress(subtasks[taskIdx-1], taskIdx, total, "completed", fmt.Sprintf("cleaned %d", cleanedPrompts))
 	}
 
 	// Task 5: Run similarity telemetry
+	taskIdx++
+	s.emitProgress(subtasks[taskIdx-1], taskIdx, total, "started", "")
 	if s.config.TelemetryEnabled && s.similarityTelemetry != nil {
 		s.similarityTelemetry.Run(ctx)
+		s.emitProgress(subtasks[taskIdx-1], taskIdx, total, "completed", "")
+	} else {
+		s.emitProgress(subtasks[taskIdx-1], taskIdx, total, "skipped", "skipped (telemetry disabled)")
 	}
 
 	// Task 6: Smart GC — archive low-value observations
+	taskIdx++
+	s.emitProgress(subtasks[taskIdx-1], taskIdx, total, "started", "")
 	if s.config.SmartGCEnabled && s.smartGC != nil {
 		gcStats := s.smartGC.Run(ctx)
 		s.totalSmartGCArchived += gcStats.Archived
@@ -325,33 +397,54 @@ func (s *Service) runMaintenance(ctx context.Context) {
 				Int64("evaluated", gcStats.Evaluated).
 				Msg("Smart GC archived low-value observations")
 		}
+		s.emitProgress(subtasks[taskIdx-1], taskIdx, total, "completed", fmt.Sprintf("archived %d", gcStats.Archived))
+	} else {
+		s.emitProgress(subtasks[taskIdx-1], taskIdx, total, "skipped", "skipped (smart GC disabled)")
 	}
 
 	// Task 7: Pattern quality decay — deprecate low-quality patterns
+	taskIdx++
+	s.emitProgress(subtasks[taskIdx-1], taskIdx, total, "started", "")
 	if s.patternStore != nil {
 		deprecated, err := pattern.RunDecay(ctx, s.patternStore)
 		if err != nil {
 			s.log.Error().Err(err).Msg("Failed to run pattern decay")
-		} else if deprecated > 0 {
-			s.totalPatternDecay += int64(deprecated)
-			s.log.Info().Int("deprecated", deprecated).Msg("Pattern decay deprecation complete")
+			s.emitProgress(subtasks[taskIdx-1], taskIdx, total, "failed", err.Error())
+		} else {
+			if deprecated > 0 {
+				s.totalPatternDecay += int64(deprecated)
+				s.log.Info().Int("deprecated", deprecated).Msg("Pattern decay deprecation complete")
+			}
+			s.emitProgress(subtasks[taskIdx-1], taskIdx, total, "completed", fmt.Sprintf("deprecated %d", deprecated))
 		}
+	} else {
+		s.emitProgress(subtasks[taskIdx-1], taskIdx, total, "skipped", "skipped (no pattern store)")
 	}
 
 	// Task 8: Near-duplicate consolidation — merge near-identical observations
+	taskIdx++
+	s.emitProgress(subtasks[taskIdx-1], taskIdx, total, "started", "")
 	if s.config.ConsolidationEnabled && s.nearDedupFinder != nil {
 		merged, err := s.nearDedupFinder.FindAndMerge(ctx)
 		if err != nil {
 			s.log.Error().Err(err).Msg("Failed to run near-duplicate consolidation")
-		} else if merged > 0 {
-			s.mu.Lock()
-			s.totalNearDedupMerged += int64(merged)
-			s.mu.Unlock()
-			s.log.Info().Int("merged", merged).Msg("Near-duplicate consolidation complete")
+			s.emitProgress(subtasks[taskIdx-1], taskIdx, total, "failed", err.Error())
+		} else {
+			if merged > 0 {
+				s.mu.Lock()
+				s.totalNearDedupMerged += int64(merged)
+				s.mu.Unlock()
+				s.log.Info().Int("merged", merged).Msg("Near-duplicate consolidation complete")
+			}
+			s.emitProgress(subtasks[taskIdx-1], taskIdx, total, "completed", fmt.Sprintf("merged %d", merged))
 		}
+	} else {
+		s.emitProgress(subtasks[taskIdx-1], taskIdx, total, "skipped", "skipped (consolidation disabled)")
 	}
 
 	// Task 9: Monitor expired verified facts (log-only, no mutations)
+	taskIdx++
+	s.emitProgress(subtasks[taskIdx-1], taskIdx, total, "started", "")
 	if s.store != nil {
 		var expiredCount int64
 		err := s.store.GetDB().WithContext(ctx).
@@ -361,125 +454,221 @@ func (s *Service) runMaintenance(ctx context.Context) {
 			Count(&expiredCount).Error
 		if err != nil {
 			s.log.Warn().Err(err).Msg("Failed to count expired verified facts")
-		} else if expiredCount > 0 {
-			s.log.Info().Int64("expired_verified_facts", expiredCount).Msg("Expired verified facts detected (monitoring only)")
+			s.emitProgress(subtasks[taskIdx-1], taskIdx, total, "failed", err.Error())
+		} else {
+			if expiredCount > 0 {
+				s.log.Info().Int64("expired_verified_facts", expiredCount).Msg("Expired verified facts detected (monitoring only)")
+			}
+			s.emitProgress(subtasks[taskIdx-1], taskIdx, total, "completed", fmt.Sprintf("detected %d expired", expiredCount))
 		}
+	} else {
+		s.emitProgress(subtasks[taskIdx-1], taskIdx, total, "skipped", "skipped (no store)")
 	}
 
 	// Task 10: Clean orphan vectors (vectors with no matching observation)
+	taskIdx++
+	s.emitProgress(subtasks[taskIdx-1], taskIdx, total, "started", "")
 	if s.vectorClient != nil && s.store != nil {
 		cleaned, err := s.cleanOrphanVectors(ctx)
 		if err != nil {
 			s.log.Error().Err(err).Msg("Failed to clean orphan vectors")
-		} else if cleaned > 0 {
-			s.mu.Lock()
-			s.totalOrphanVectorsCleaned += cleaned
-			s.mu.Unlock()
-			s.log.Info().Int64("cleaned", cleaned).Msg("Cleaned orphan vectors")
+			s.emitProgress(subtasks[taskIdx-1], taskIdx, total, "failed", err.Error())
+		} else {
+			if cleaned > 0 {
+				s.mu.Lock()
+				s.totalOrphanVectorsCleaned += cleaned
+				s.mu.Unlock()
+				s.log.Info().Int64("cleaned", cleaned).Msg("Cleaned orphan vectors")
+			}
+			s.emitProgress(subtasks[taskIdx-1], taskIdx, total, "completed", fmt.Sprintf("cleaned %d", cleaned))
 		}
+	} else {
+		s.emitProgress(subtasks[taskIdx-1], taskIdx, total, "skipped", "skipped (no vector client)")
 	}
 
 	// Task 11: Detect missing vectors (observations without embeddings)
+	taskIdx++
+	s.emitProgress(subtasks[taskIdx-1], taskIdx, total, "started", "")
 	if s.vectorClient != nil && s.vectorSync != nil && s.store != nil {
 		missing, err := s.detectMissingVectors(ctx)
 		if err != nil {
 			s.log.Error().Err(err).Msg("Failed to detect missing vectors")
-		} else if missing > 0 {
-			s.log.Info().Int64("queued_for_reembedding", missing).Msg("Queued observations with missing vectors for re-embedding")
+			s.emitProgress(subtasks[taskIdx-1], taskIdx, total, "failed", err.Error())
+		} else {
+			if missing > 0 {
+				s.log.Info().Int64("queued_for_reembedding", missing).Msg("Queued observations with missing vectors for re-embedding")
+			}
+			s.emitProgress(subtasks[taskIdx-1], taskIdx, total, "completed", fmt.Sprintf("queued %d for re-embedding", missing))
 		}
+	} else {
+		s.emitProgress(subtasks[taskIdx-1], taskIdx, total, "skipped", "skipped (no vector sync)")
 	}
 
 	// Task 12: Clean stale relations (relations referencing deleted observations)
+	taskIdx++
+	s.emitProgress(subtasks[taskIdx-1], taskIdx, total, "started", "")
 	if s.relationStore != nil && s.store != nil {
 		cleaned, err := s.cleanStaleRelations(ctx)
 		if err != nil {
 			s.log.Error().Err(err).Msg("Failed to clean stale relations")
-		} else if cleaned > 0 {
-			s.mu.Lock()
-			s.totalStaleRelationsCleaned += cleaned
-			s.mu.Unlock()
-			s.log.Info().Int64("cleaned", cleaned).Msg("Cleaned stale relations")
+			s.emitProgress(subtasks[taskIdx-1], taskIdx, total, "failed", err.Error())
+		} else {
+			if cleaned > 0 {
+				s.mu.Lock()
+				s.totalStaleRelationsCleaned += cleaned
+				s.mu.Unlock()
+				s.log.Info().Int64("cleaned", cleaned).Msg("Cleaned stale relations")
+			}
+			s.emitProgress(subtasks[taskIdx-1], taskIdx, total, "completed", fmt.Sprintf("cleaned %d", cleaned))
 		}
+	} else {
+		s.emitProgress(subtasks[taskIdx-1], taskIdx, total, "skipped", "skipped (no relation store)")
 	}
 
 	// Task 13: Detect graph drift between FalkorDB and PostgreSQL
+	taskIdx++
+	s.emitProgress(subtasks[taskIdx-1], taskIdx, total, "started", "")
 	if s.graphStore != nil && s.store != nil && s.relationStore != nil {
 		if err := s.detectGraphDrift(ctx); err != nil {
 			s.log.Error().Err(err).Msg("Failed to detect graph drift")
+			s.emitProgress(subtasks[taskIdx-1], taskIdx, total, "failed", err.Error())
+		} else {
+			s.emitProgress(subtasks[taskIdx-1], taskIdx, total, "completed", "")
 		}
+	} else {
+		s.emitProgress(subtasks[taskIdx-1], taskIdx, total, "skipped", "skipped (no graph store)")
 	}
 
 	// Task 14: Check embedding model change (T054)
+	taskIdx++
+	s.emitProgress(subtasks[taskIdx-1], taskIdx, total, "started", "")
 	if s.store != nil {
 		if err := s.checkEmbeddingModelChange(ctx); err != nil {
 			s.log.Error().Err(err).Msg("Failed to check embedding model change")
+			s.emitProgress(subtasks[taskIdx-1], taskIdx, total, "failed", err.Error())
+		} else {
+			s.emitProgress(subtasks[taskIdx-1], taskIdx, total, "completed", "")
 		}
+	} else {
+		s.emitProgress(subtasks[taskIdx-1], taskIdx, total, "skipped", "skipped (no store)")
 	}
 
 	// Task 15: Recalculate effectiveness scores from junction table data
+	taskIdx++
+	s.emitProgress(subtasks[taskIdx-1], taskIdx, total, "started", "")
 	if s.injectionStore != nil && s.store != nil {
 		if err := s.recalcEffectivenessScores(ctx); err != nil {
 			s.log.Error().Err(err).Msg("Failed to recalculate effectiveness scores")
+			s.emitProgress(subtasks[taskIdx-1], taskIdx, total, "failed", err.Error())
+		} else {
+			s.emitProgress(subtasks[taskIdx-1], taskIdx, total, "completed", "")
 		}
+	} else {
+		s.emitProgress(subtasks[taskIdx-1], taskIdx, total, "skipped", "skipped (no injection store)")
 	}
 
 	// Task 16: TTL cleanup for observation_injections (90-day retention)
+	taskIdx++
+	s.emitProgress(subtasks[taskIdx-1], taskIdx, total, "started", "")
 	if s.injectionStore != nil {
 		cutoff := time.Now().AddDate(0, 0, -90)
 		deleted, err := s.injectionStore.CleanupOldInjections(ctx, cutoff)
 		if err != nil {
 			s.log.Error().Err(err).Msg("Failed to cleanup old injection records")
-		} else if deleted > 0 {
-			s.log.Info().Int64("deleted", deleted).Msg("Cleaned old injection records (90-day TTL)")
+			s.emitProgress(subtasks[taskIdx-1], taskIdx, total, "failed", err.Error())
+		} else {
+			if deleted > 0 {
+				s.log.Info().Int64("deleted", deleted).Msg("Cleaned old injection records (90-day TTL)")
+			}
+			s.emitProgress(subtasks[taskIdx-1], taskIdx, total, "completed", fmt.Sprintf("deleted %d", deleted))
 		}
+	} else {
+		s.emitProgress(subtasks[taskIdx-1], taskIdx, total, "skipped", "skipped (no injection store)")
 	}
 
 	// Task 17: APO-lite candidate detection — identify low-effectiveness guidance for rewrite
+	taskIdx++
+	s.emitProgress(subtasks[taskIdx-1], taskIdx, total, "started", "")
 	if s.observationStore != nil {
 		s.detectAPOCandidates(ctx)
+		s.emitProgress(subtasks[taskIdx-1], taskIdx, total, "completed", "")
+	} else {
+		s.emitProgress(subtasks[taskIdx-1], taskIdx, total, "skipped", "skipped (no observation store)")
 	}
 
 	// Task 18: Generate LLM insights for patterns with generic descriptions
+	taskIdx++
+	s.emitProgress(subtasks[taskIdx-1], taskIdx, total, "started", "")
 	if s.llmClient != nil && s.patternStore != nil && s.observationStore != nil {
 		generated, err := s.generatePatternInsights(ctx)
 		if err != nil {
 			s.log.Warn().Err(err).Msg("Pattern insight generation failed")
-		} else if generated > 0 {
-			s.log.Info().Int("generated", generated).Msg("Generated pattern insights")
+			s.emitProgress(subtasks[taskIdx-1], taskIdx, total, "failed", err.Error())
+		} else {
+			if generated > 0 {
+				s.log.Info().Int("generated", generated).Msg("Generated pattern insights")
+			}
+			s.emitProgress(subtasks[taskIdx-1], taskIdx, total, "completed", fmt.Sprintf("generated %d", generated))
 		}
+	} else {
+		s.emitProgress(subtasks[taskIdx-1], taskIdx, total, "skipped", "skipped (no LLM client)")
 	}
 
 	// Task 19: Summarize unsummarized sessions
+	taskIdx++
+	s.emitProgress(subtasks[taskIdx-1], taskIdx, total, "started", "")
 	if s.llmClient != nil {
 		summarized, err := s.summarizeUnsummarizedSessions(ctx)
 		if err != nil {
 			s.log.Warn().Err(err).Msg("Session summarization failed")
-		} else if summarized > 0 {
-			s.log.Info().Int("summarized", summarized).Msg("Generated session summaries")
+			s.emitProgress(subtasks[taskIdx-1], taskIdx, total, "failed", err.Error())
+		} else {
+			if summarized > 0 {
+				s.log.Info().Int("summarized", summarized).Msg("Generated session summaries")
+			}
+			s.emitProgress(subtasks[taskIdx-1], taskIdx, total, "completed", fmt.Sprintf("summarized %d sessions", summarized))
 		}
+	} else {
+		s.emitProgress(subtasks[taskIdx-1], taskIdx, total, "skipped", "skipped (no LLM client)")
 	}
 
 	// Task 20: Adaptive threshold adjustment per project (Learning Memory v3 FR-6)
 	// Reads citation rates from injection_log, adjusts per-project thresholds.
 	// Bounds: [0.15, 0.60]. Window: last 50 sessions per project.
+	taskIdx++
+	s.emitProgress(subtasks[taskIdx-1], taskIdx, total, "started", "")
 	if s.observationStore != nil {
 		adjusted, err := s.adjustAdaptiveThresholds(ctx)
 		if err != nil {
 			s.log.Warn().Err(err).Msg("Adaptive threshold adjustment failed")
-		} else if adjusted > 0 {
-			s.log.Info().Int("adjusted", adjusted).Msg("Adjusted per-project thresholds from citation data")
+			s.emitProgress(subtasks[taskIdx-1], taskIdx, total, "failed", err.Error())
+		} else {
+			if adjusted > 0 {
+				s.log.Info().Int("adjusted", adjusted).Msg("Adjusted per-project thresholds from citation data")
+			}
+			s.emitProgress(subtasks[taskIdx-1], taskIdx, total, "completed", fmt.Sprintf("adjusted %d projects", adjusted))
 		}
+	} else {
+		s.emitProgress(subtasks[taskIdx-1], taskIdx, total, "skipped", "skipped (no observation store)")
 	}
 
 	// Task 21: Entity extraction from recent observations (synthesize-wiki-layer FR-1)
 	// LLM extracts structured entities + relations from observations, stores as type=entity.
+	taskIdx++
+	s.emitProgress(subtasks[taskIdx-1], taskIdx, total, "started", "")
 	if s.llmClient != nil && s.config.EntityExtractionEnabled {
 		extracted, err := s.extractEntities(ctx)
 		if err != nil {
 			s.log.Warn().Err(err).Msg("Entity extraction failed")
-		} else if extracted > 0 {
-			s.log.Info().Int("entities", extracted).Msg("Extracted entities from observations")
+			s.emitProgress(subtasks[taskIdx-1], taskIdx, total, "failed", err.Error())
+		} else {
+			if extracted > 0 {
+				s.log.Info().Int("entities", extracted).Msg("Extracted entities from observations")
+			}
+			s.emitProgress(subtasks[taskIdx-1], taskIdx, total, "completed", fmt.Sprintf("extracted %d entities", extracted))
 		}
+	} else {
+		s.emitProgress(subtasks[taskIdx-1], taskIdx, total, "skipped", "skipped (entity extraction disabled)")
 	}
 
 	// Task 22: Wiki generation for entities with sufficient sources (synthesize-wiki-layer FR-2)
@@ -487,47 +676,75 @@ func (s *Service) runMaintenance(ctx context.Context) {
 	// Runs AFTER Task 21 so newly created entities can be considered.
 	// Note: Gated by EntityExtractionEnabled because wiki pages are derived from entities;
 	// disabling entity extraction also disables wiki generation to keep the pipeline consistent.
+	taskIdx++
+	s.emitProgress(subtasks[taskIdx-1], taskIdx, total, "started", "")
 	if s.llmClient != nil && s.config.EntityExtractionEnabled {
 		wikiGenerated, err := s.generateWikiPages(ctx)
 		if err != nil {
 			s.log.Warn().Err(err).Msg("Wiki generation failed")
-		} else if wikiGenerated > 0 {
-			s.log.Info().Int("wiki_pages", wikiGenerated).Msg("Generated wiki pages")
+			s.emitProgress(subtasks[taskIdx-1], taskIdx, total, "failed", err.Error())
+		} else {
+			if wikiGenerated > 0 {
+				s.log.Info().Int("wiki_pages", wikiGenerated).Msg("Generated wiki pages")
+			}
+			s.emitProgress(subtasks[taskIdx-1], taskIdx, total, "completed", fmt.Sprintf("generated %d wiki pages", wikiGenerated))
 		}
+	} else {
+		s.emitProgress(subtasks[taskIdx-1], taskIdx, total, "skipped", "skipped (entity extraction disabled)")
 	}
 
 	// Task 23: Project briefing generation (learning-memory-v4 FR-6)
 	// Generates a compact per-project wiki briefing from recent observations.
+	taskIdx++
+	s.emitProgress(subtasks[taskIdx-1], taskIdx, total, "started", "")
 	if s.llmClient != nil && s.observationStore != nil && s.config.ProjectBriefingEnabled {
 		briefingsGenerated, err := s.generateProjectBriefing(ctx)
 		if err != nil {
 			s.log.Warn().Err(err).Msg("Project briefing generation failed")
-		} else if briefingsGenerated > 0 {
-			s.log.Info().Int("project_briefings", briefingsGenerated).Msg("Generated project briefings")
+			s.emitProgress(subtasks[taskIdx-1], taskIdx, total, "failed", err.Error())
+		} else {
+			if briefingsGenerated > 0 {
+				s.log.Info().Int("project_briefings", briefingsGenerated).Msg("Generated project briefings")
+			}
+			s.emitProgress(subtasks[taskIdx-1], taskIdx, total, "completed", fmt.Sprintf("generated %d briefings", briefingsGenerated))
 		}
+	} else {
+		s.emitProgress(subtasks[taskIdx-1], taskIdx, total, "skipped", "skipped (project briefing disabled)")
 	}
 
 	// Task 24: Hit rate analytics (gstack-insights FR-5)
 	// Identifies noise (10+ injections, 0 citations) and star (5+ injections, >50% citation)
 	// observations. Recalculates each cycle; requires 50+ injection_log entries.
+	taskIdx++
+	s.emitProgress(subtasks[taskIdx-1], taskIdx, total, "started", "")
 	{
 		modified, err := s.analyzeHitRate(ctx)
 		if err != nil {
 			s.log.Warn().Err(err).Msg("Hit rate analysis failed")
-		} else if modified > 0 {
-			s.log.Info().Int("modified", modified).Msg("Hit rate analysis adjusted observation scores")
+			s.emitProgress(subtasks[taskIdx-1], taskIdx, total, "failed", err.Error())
+		} else {
+			if modified > 0 {
+				s.log.Info().Int("modified", modified).Msg("Hit rate analysis adjusted observation scores")
+			}
+			s.emitProgress(subtasks[taskIdx-1], taskIdx, total, "completed", fmt.Sprintf("modified %d observations", modified))
 		}
 	}
 
-	// Task 24: File staleness detection (gstack-insights FR-9)
+	// Task 25: File staleness detection (gstack-insights FR-9)
 	// Checks if observations' referenced files were modified by newer observations.
 	// >50% stale files → 0.7x importance penalty.
+	taskIdx++
+	s.emitProgress(subtasks[taskIdx-1], taskIdx, total, "started", "")
 	{
 		stale, err := s.checkFileStaleness(ctx)
 		if err != nil {
 			s.log.Warn().Err(err).Msg("File staleness detection failed")
-		} else if stale > 0 {
-			s.log.Info().Int("stale", stale).Msg("File staleness detection marked observations")
+			s.emitProgress(subtasks[taskIdx-1], taskIdx, total, "failed", err.Error())
+		} else {
+			if stale > 0 {
+				s.log.Info().Int("stale", stale).Msg("File staleness detection marked observations")
+			}
+			s.emitProgress(subtasks[taskIdx-1], taskIdx, total, "completed", fmt.Sprintf("marked %d stale", stale))
 		}
 	}
 
@@ -536,12 +753,24 @@ func (s *Service) runMaintenance(ctx context.Context) {
 	s.lastRunTime = time.Now()
 	s.lastRunDuration = time.Since(start)
 	s.totalCleanedObs += totalCleaned
+	runArchived := int(s.totalSmartGCArchived - startSmartGCArchived)
+	runMerged := int(s.totalNearDedupMerged - startNearDedupMerged)
 	s.mu.Unlock()
 
 	s.log.Info().
 		Dur("duration", time.Since(start)).
 		Int64("observations_cleaned", totalCleaned).
 		Msg("Maintenance run completed")
+
+	if s.OnComplete != nil {
+		s.OnComplete(CompletionSummary{
+			DurationMs:   time.Since(start).Milliseconds(),
+			SubtaskCount: total,
+			Merged:       runMerged,
+			Archived:     runArchived,
+			Pruned:       int(totalCleaned),
+		})
+	}
 }
 
 // generatePatternInsights finds patterns with generic/empty descriptions and
@@ -846,8 +1075,65 @@ func (s *Service) Stats() map[string]any {
 }
 
 // RunNow triggers an immediate maintenance run.
-func (s *Service) RunNow(ctx context.Context) {
+// Returns false if maintenance is already running.
+func (s *Service) RunNow(ctx context.Context) bool {
+	s.mu.Lock()
+	if s.maintenanceRunning {
+		s.mu.Unlock()
+		return false
+	}
+	s.maintenanceRunning = true
+	s.mu.Unlock()
 	go s.runMaintenance(ctx)
+	return true
+}
+
+// IsRunning returns true if a maintenance cycle is currently executing.
+func (s *Service) IsRunning() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.maintenanceRunning
+}
+
+// CurrentSubtask returns the name of the currently executing subtask, if any.
+func (s *Service) CurrentSubtask() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.currentSubtask
+}
+
+// CurrentProgress returns the 1-based index of the current subtask, the total count, and the current status.
+func (s *Service) CurrentProgress() (currentIndex, total int, status string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.currentSubtaskIndex, s.subtaskTotal, s.currentSubtaskStatus
+}
+
+// SubtaskNames returns the ordered list of maintenance subtask names.
+func SubtaskNames() []string {
+	return []string{
+		"cleanup_old_observations", "cleanup_stale_observations", "optimize_database",
+		"cleanup_old_prompts", "similarity_telemetry", "smart_gc", "pattern_decay",
+		"near_dedup", "expired_facts", "orphan_vectors", "missing_vectors",
+		"stale_relations", "graph_drift", "embedding_model_check",
+		"effectiveness_scores", "injection_ttl", "apo_candidates",
+		"pattern_insights", "session_summarization", "adaptive_thresholds",
+		"entity_extraction", "wiki_generation", "project_briefing", "hit_rate_analytics", "file_staleness",
+	}
+}
+
+// emitProgress updates the current subtask state and fires the OnProgress callback.
+func (s *Service) emitProgress(subtask string, index, total int, status, message string) {
+	s.mu.Lock()
+	s.currentSubtask = subtask
+	s.currentSubtaskIndex = index
+	s.subtaskTotal = total
+	s.currentSubtaskStatus = status
+	s.mu.Unlock()
+
+	if s.OnProgress != nil {
+		s.OnProgress(subtask, index, total, status, message)
+	}
 }
 
 // cleanOrphanVectors finds vectors with no matching observation and deletes them.
