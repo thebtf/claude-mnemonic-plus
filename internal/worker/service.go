@@ -961,6 +961,29 @@ func (s *Service) initializeAsync() {
 		s.llmClient,
 		log.Logger,
 	)
+	maintenanceSvc.OnProgress = func(subtask string, index, total int, status, message string) {
+		s.sseBroadcaster.Broadcast(map[string]any{
+			"type":    "maintenance_progress",
+			"subtask": subtask,
+			"index":   index,
+			"total":   total,
+			"status":  status,
+			"message": message,
+		})
+	}
+	maintenanceSvc.OnComplete = func(summary maintenance.CompletionSummary) {
+		s.sseBroadcaster.Broadcast(map[string]any{
+			"type":        "maintenance_complete",
+			"duration_ms": summary.DurationMs,
+			"subtask_count": summary.SubtaskCount,
+			"summary": map[string]any{
+				"merged":   summary.Merged,
+				"archived": summary.Archived,
+				"pruned":   summary.Pruned,
+			},
+		})
+	}
+
 	s.initMu.Lock()
 	s.maintenanceService = maintenanceSvc
 	s.initMu.Unlock()
@@ -2021,6 +2044,8 @@ func (s *Service) setupRoutes() {
 		r.Post("/api/maintenance/consolidation", s.handleTriggerConsolidation)
 		r.Post("/api/maintenance/run", s.handleRunMaintenance)
 		r.Get("/api/maintenance/stats", s.handleGetMaintenanceStats)
+		r.Get("/api/maintenance/status", s.handleMaintenanceStatus)
+		r.Get("/api/maintenance/logs", s.handleMaintenanceLogs)
 		r.Get("/api/maintenance/consistency", s.handleConsistencyCheck)
 		r.Post("/api/maintenance/backfill-relations", s.handleBackfillRelations)
 		r.Post("/api/maintenance/purge-patterns", s.handlePurgePatterns)

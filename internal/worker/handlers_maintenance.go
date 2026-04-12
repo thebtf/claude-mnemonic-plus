@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/rs/zerolog/log"
+	"github.com/thebtf/engram/internal/maintenance"
 	"github.com/thebtf/engram/internal/pattern"
 )
 
@@ -86,6 +87,14 @@ func (s *Service) handleTriggerConsolidation(w http.ResponseWriter, r *http.Requ
 func (s *Service) handleRunMaintenance(w http.ResponseWriter, r *http.Request) {
 	if s.maintenanceService == nil {
 		http.Error(w, "maintenance service not available", http.StatusServiceUnavailable)
+		return
+	}
+
+	if s.maintenanceService.IsRunning() {
+		w.WriteHeader(http.StatusConflict)
+		writeJSON(w, map[string]any{
+			"error": "maintenance is already running",
+		})
 		return
 	}
 
@@ -499,6 +508,85 @@ func (s *Service) handlePurgeRebuild(w http.ResponseWriter, r *http.Request) {
 		"status":  "purged",
 		"results": results,
 		"next":    "Run backfill to rebuild from session history",
+	})
+}
+
+// handleMaintenanceStatus returns current maintenance state for the Monitor page.
+func (s *Service) handleMaintenanceStatus(w http.ResponseWriter, r *http.Request) {
+	if s.maintenanceService == nil {
+		http.Error(w, "maintenance service not available", http.StatusServiceUnavailable)
+		return
+	}
+
+	stats := s.maintenanceService.Stats()
+	isRunning := s.maintenanceService.IsRunning()
+	currentSubtask := s.maintenanceService.CurrentSubtask()
+	currentIdx, total := s.maintenanceService.CurrentProgress()
+
+	subtaskNames := maintenance.SubtaskNames()
+	subtasks := make([]map[string]any, len(subtaskNames))
+	for i, name := range subtaskNames {
+		status := "pending"
+		if isRunning {
+			if i < currentIdx-1 {
+				status = "completed"
+			} else if i == currentIdx-1 {
+				status = "running"
+			}
+		}
+		subtasks[i] = map[string]any{
+			"name":   name,
+			"status": status,
+		}
+	}
+
+	_ = total // total is derived from SubtaskNames length
+
+	var nextRunAt string
+	if lastRun, ok := stats["last_run"].(time.Time); ok && !lastRun.IsZero() {
+		if intervalHours, ok := stats["interval_hours"].(int); ok && intervalHours > 0 {
+			next := lastRun.Add(time.Duration(intervalHours) * time.Hour)
+			nextRunAt = next.Format(time.RFC3339)
+		}
+	}
+
+	response := map[string]any{
+		"running":         isRunning,
+		"current_subtask": currentSubtask,
+		"subtasks":        subtasks,
+		"next_run_at":     nextRunAt,
+	}
+
+	if lastRun, ok := stats["last_run"].(time.Time); ok && !lastRun.IsZero() {
+		response["last_run"] = map[string]any{
+			"started_at":    lastRun.Format(time.RFC3339),
+			"duration_ms":   stats["last_duration_ms"],
+			"subtask_count": len(subtaskNames),
+		}
+	}
+
+	writeJSON(w, response)
+}
+
+// handleMaintenanceLogs returns recent maintenance log entries from the ring buffer.
+func (s *Service) handleMaintenanceLogs(w http.ResponseWriter, r *http.Request) {
+	if s.logBuffer == nil {
+		writeJSON(w, map[string]any{"entries": []any{}, "total": 0})
+		return
+	}
+
+	limit := 100
+	if l := r.URL.Query().Get("limit"); l != "" {
+		if parsed, err := strconv.Atoi(l); err == nil && parsed > 0 && parsed <= 1000 {
+			limit = parsed
+		}
+	}
+
+	entries := s.logBuffer.Snapshot(limit, "", "maintenance")
+
+	writeJSON(w, map[string]any{
+		"entries": entries,
+		"total":   len(entries),
 	})
 }
 
