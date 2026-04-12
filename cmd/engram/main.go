@@ -243,6 +243,10 @@ func runSSE(serverURL, authToken, projectSlug string) {
 		case "endpoint":
 			if messageEndpoint == "" {
 				messageEndpoint = resolveMessageEndpoint(serverURL, data)
+				if err := validateEndpoint(serverURL, messageEndpoint); err != nil {
+					fmt.Fprintf(os.Stderr, "[engram] rejected SSE endpoint (SSRF guard): %v\n", err)
+					os.Exit(1)
+				}
 				stdinDone = make(chan struct{})
 				go forwardStdin(messageEndpoint, authToken, projectSlug, stdinDone)
 			}
@@ -334,4 +338,25 @@ func resolveMessageEndpoint(baseURL, path string) string {
 	}
 
 	return cleanBase + cleanPath
+}
+
+// validateEndpoint guards against SSRF by rejecting SSE-supplied endpoints
+// that do not share the same host (and optional port) as the configured server.
+// Relative paths and paths with an empty host always pass because they inherit
+// the base origin in resolveMessageEndpoint.
+func validateEndpoint(baseURL, endpoint string) error {
+	base, err := url.Parse(baseURL)
+	if err != nil {
+		return fmt.Errorf("invalid base URL: %w", err)
+	}
+	ep, err := url.Parse(endpoint)
+	if err != nil {
+		return fmt.Errorf("invalid endpoint URL: %w", err)
+	}
+	// Only reject when the endpoint carries an explicit host that differs from
+	// the base. An empty ep.Host means it is a relative reference — safe.
+	if ep.Host != "" && ep.Host != base.Host {
+		return fmt.Errorf("endpoint host %q differs from configured server %q", ep.Host, base.Host)
+	}
+	return nil
 }
