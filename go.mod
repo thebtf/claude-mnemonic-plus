@@ -18,6 +18,7 @@ require (
 	github.com/stretchr/testify v1.11.1
 	github.com/swaggo/http-swagger v1.3.4
 	github.com/swaggo/swag v1.16.6
+	github.com/thebtf/mcp-mux/muxcore v0.15.0
 	github.com/tiktoken-go/tokenizer v0.7.0
 	golang.org/x/crypto v0.47.0
 	golang.org/x/sync v0.19.0
@@ -51,6 +52,7 @@ require (
 	github.com/olekukonko/tablewriter v0.0.5 // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect
 	github.com/swaggo/files v0.0.0-20220610200504-28940afbdbfe // indirect
+	github.com/thejerf/suture/v4 v4.0.6 // indirect
 	golang.org/x/mod v0.32.0 // indirect
 	golang.org/x/net v0.49.0 // indirect
 	golang.org/x/sys v0.43.0 // indirect
