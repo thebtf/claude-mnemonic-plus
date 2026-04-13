@@ -2192,22 +2192,21 @@ func (s *Service) Start() error {
 		m := cmux.New(ln)
 
 		// gRPC connections carry HTTP/2 with the application/grpc content-type header.
-		grpcL := m.Match(cmux.HTTP2HeaderFieldPrefix("content-type", "application/grpc"))
-		// All other connections go to the HTTP/1.1 server.
-		httpL := m.Match(cmux.Any())
-
-		// Serve gRPC if the server is wired up (available after initializeAsync completes).
+		// Only add gRPC matcher if the gRPC server is available.
+		// Closing a cmux sub-listener cascades to the parent — so we must NOT
+		// create a matcher and then close it, as that kills the entire mux.
 		if s.grpcServer != nil {
+			grpcL := m.Match(cmux.HTTP2HeaderFieldPrefix("content-type", "application/grpc"))
 			go func() {
 				if err := s.grpcServer.Serve(grpcL); err != nil {
 					log.Error().Err(err).Msg("gRPC server error")
 				}
 			}()
-		} else {
-			// No gRPC server yet — drain the grpcL so cmux does not stall.
-			go func() { _ = grpcL.Close() }()
+			log.Info().Msg("gRPC server registered on cmux")
 		}
 
+		// All other connections (HTTP/1.1, HTTP/2 non-gRPC) go to the HTTP server.
+		httpL := m.Match(cmux.Any())
 		go func() {
 			if err := s.server.Serve(httpL); err != nil && err != http.ErrServerClosed {
 				log.Error().Err(err).Msg("HTTP server error")
