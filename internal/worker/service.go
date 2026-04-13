@@ -3,7 +3,10 @@ package worker
 
 import (
 	"context"
+	"crypto/tls"
+	"encoding/json"
 	"fmt"
+	"net"
 	"net/http"
 	"os"
 	"strings"
@@ -14,6 +17,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/rs/zerolog/log"
+	"github.com/soheilhy/cmux"
 	httpSwagger "github.com/swaggo/http-swagger"
 	"github.com/thebtf/engram/internal/chunking"
 	gochunking "github.com/thebtf/engram/internal/chunking/golang"
@@ -26,6 +30,7 @@ import (
 	"github.com/thebtf/engram/internal/embedding"
 	graphpkg "github.com/thebtf/engram/internal/graph"
 	"github.com/thebtf/engram/internal/graph/falkordb"
+	"github.com/thebtf/engram/internal/grpcserver"
 	"github.com/thebtf/engram/internal/learning"
 	"github.com/thebtf/engram/internal/logbuf"
 	"github.com/thebtf/engram/internal/maintenance"
@@ -46,6 +51,7 @@ import (
 	"github.com/thebtf/engram/internal/worker/session"
 	"github.com/thebtf/engram/internal/worker/sse"
 	"github.com/thebtf/engram/pkg/models"
+	googlegrpc "google.golang.org/grpc"
 )
 
 // Service configuration constants
@@ -173,6 +179,7 @@ type Service struct {
 	expensiveOpLimiter     *ExpensiveOperationLimiter
 	logBuffer              *logbuf.RingBuffer
 	backfillTracker        *backfillTracker
+	grpcServer             *googlegrpc.Server
 	searchQueryLogStore    *gorm.SearchQueryLogStore
 	retrievalStatsLogStore *gorm.RetrievalStatsLogStore
 	injectionStore         *gorm.InjectionStore
@@ -1107,6 +1114,11 @@ func (s *Service) initializeAsync() {
 	mcpServer.SetReasoningStore(reasoningStore)
 	mcpServer.SetIssueStore(issueStore)
 
+	// Wire gRPC server: create adapter over mcpServer and register with the server.
+	adapter := &mcpHandlerAdapter{mcpServer: mcpServer}
+	grpcSrv, _ := grpcserver.New(adapter)
+	s.grpcServer = grpcSrv
+
 	// TODO: Document embedding will be triggered on doc_create/doc_update via vectorSync.SyncDocument()
 	// when the full embedding pipeline integration is implemented.
 
@@ -1569,6 +1581,66 @@ func (s *Service) verifyStaleObservation(req staleVerifyRequest) {
 			Int64("id", obs.ID).
 			Msg("Background verification: observation still valid")
 	}
+}
+
+// mcpHandlerAdapter wraps mcp.Server to implement grpcserver.MCPHandler.
+// It translates gRPC tool-call requests into MCP JSON-RPC requests and back.
+type mcpHandlerAdapter struct {
+	mcpServer *mcp.Server
+}
+
+// HandleToolCall implements grpcserver.MCPHandler.
+func (a *mcpHandlerAdapter) HandleToolCall(ctx context.Context, toolName string, argsJSON []byte) ([]byte, bool, error) {
+	params := map[string]any{
+		"name":      toolName,
+		"arguments": json.RawMessage(argsJSON),
+	}
+	paramsJSON, err := json.Marshal(params)
+	if err != nil {
+		return nil, false, fmt.Errorf("failed to marshal tool call params: %w", err)
+	}
+
+	req := &mcp.Request{
+		JSONRPC: "2.0",
+		ID:      float64(1),
+		Method:  "tools/call",
+		Params:  json.RawMessage(paramsJSON),
+	}
+
+	resp := a.mcpServer.HandleRequest(ctx, req)
+	if resp == nil {
+		return nil, false, fmt.Errorf("no response from MCP server")
+	}
+	if resp.Error != nil {
+		errJSON, _ := json.Marshal(resp.Error)
+		return errJSON, true, nil
+	}
+
+	resultJSON, err := json.Marshal(resp.Result)
+	if err != nil {
+		return nil, false, fmt.Errorf("failed to marshal MCP result: %w", err)
+	}
+	return resultJSON, false, nil
+}
+
+// ToolDefinitions implements grpcserver.MCPHandler.
+func (a *mcpHandlerAdapter) ToolDefinitions() []grpcserver.ToolDef {
+	tools := a.mcpServer.ListTools()
+	defs := make([]grpcserver.ToolDef, len(tools))
+	for i, t := range tools {
+		schemaJSON, _ := json.Marshal(t.InputSchema)
+		defs[i] = grpcserver.ToolDef{
+			Name:            t.Name,
+			Description:     t.Description,
+			InputSchemaJSON: schemaJSON,
+		}
+	}
+	return defs
+}
+
+// ServerInfo implements grpcserver.MCPHandler.
+func (a *mcpHandlerAdapter) ServerInfo() (string, string) {
+	return "engram", a.mcpServer.Version()
 }
 
 // setupMiddleware configures HTTP middleware.
@@ -2080,8 +2152,10 @@ func (s *Service) Start() error {
 	}
 
 	host := config.GetWorkerHost()
+	addr := fmt.Sprintf("%s:%d", host, port)
+
 	s.server = &http.Server{
-		Addr:              fmt.Sprintf("%s:%d", host, port),
+		Addr:              addr,
 		Handler:           s.router,
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       30 * time.Second,
@@ -2092,31 +2166,82 @@ func (s *Service) Start() error {
 	// Check if we're in restart mode (after update)
 	isRestart := os.Getenv("ENGRAM_RESTART") == "1"
 
+	// startWithListener binds a TCP listener and launches HTTP + optional gRPC via cmux.
+	// Extracted so the retry loop can re-bind on a new listener each attempt.
+	startWithListener := func() error {
+		ln, err := net.Listen("tcp", addr)
+		if err != nil {
+			return err
+		}
+
+		// Optional TLS: wrap listener if cert + key are provided.
+		tlsCert := os.Getenv("ENGRAM_TLS_CERT")
+		tlsKey := os.Getenv("ENGRAM_TLS_KEY")
+		if tlsCert != "" && tlsKey != "" {
+			cert, tlsErr := tls.LoadX509KeyPair(tlsCert, tlsKey)
+			if tlsErr != nil {
+				_ = ln.Close()
+				return fmt.Errorf("failed to load TLS keypair: %w", tlsErr)
+			}
+			ln = tls.NewListener(ln, &tls.Config{Certificates: []tls.Certificate{cert}})
+			log.Info().Str("cert", tlsCert).Msg("TLS enabled")
+		} else {
+			log.Warn().Msg("TLS not configured (ENGRAM_TLS_CERT / ENGRAM_TLS_KEY unset) — serving plaintext")
+		}
+
+		m := cmux.New(ln)
+
+		// gRPC connections carry HTTP/2 with the application/grpc content-type header.
+		grpcL := m.Match(cmux.HTTP2HeaderFieldPrefix("content-type", "application/grpc"))
+		// All other connections go to the HTTP/1.1 server.
+		httpL := m.Match(cmux.Any())
+
+		// Serve gRPC if the server is wired up (available after initializeAsync completes).
+		if s.grpcServer != nil {
+			go func() {
+				if err := s.grpcServer.Serve(grpcL); err != nil {
+					log.Error().Err(err).Msg("gRPC server error")
+				}
+			}()
+		} else {
+			// No gRPC server yet — drain the grpcL so cmux does not stall.
+			go func() { _ = grpcL.Close() }()
+		}
+
+		go func() {
+			if err := s.server.Serve(httpL); err != nil && err != http.ErrServerClosed {
+				log.Error().Err(err).Msg("HTTP server error")
+			}
+		}()
+
+		// m.Serve() blocks until the listener is closed (i.e. on shutdown).
+		if err := m.Serve(); err != nil {
+			// cmux returns an error when the underlying listener is closed during shutdown.
+			// Treat that the same as http.ErrServerClosed — not a real error.
+			log.Debug().Err(err).Msg("cmux serve returned (expected on shutdown)")
+		}
+		return nil
+	}
+
 	s.wg.Add(1)
 	go func() {
 		defer s.wg.Done()
 
-		var lastErr error
 		maxRetries := 1
 		if isRestart {
 			maxRetries = 10 // Retry up to 10 times during restart
 		}
 
 		for i := 0; i < maxRetries; i++ {
-			lastErr = s.server.ListenAndServe()
-			if lastErr == http.ErrServerClosed {
-				return // Normal shutdown
+			if err := startWithListener(); err != nil {
+				if i < maxRetries-1 && isRestart {
+					log.Warn().Err(err).Int("retry", i+1).Msg("Port not ready, retrying...")
+					time.Sleep(500 * time.Millisecond)
+					continue
+				}
+				log.Error().Err(err).Msg("Failed to start listener")
 			}
-
-			if i < maxRetries-1 && isRestart {
-				log.Warn().Err(lastErr).Int("retry", i+1).Msg("Port not ready, retrying...")
-				time.Sleep(500 * time.Millisecond)
-				continue
-			}
-		}
-
-		if lastErr != nil {
-			log.Error().Err(lastErr).Msg("HTTP server error")
+			return
 		}
 	}()
 
@@ -2279,12 +2404,15 @@ func (s *Service) Shutdown(ctx context.Context) error {
 		}
 	}
 
-	// Phase 1: Stop accepting new work (HTTP server shutdown first)
-	log.Debug().Msg("Phase 1: Stopping HTTP server...")
+	// Phase 1: Stop accepting new work (HTTP server and gRPC server shutdown first)
+	log.Debug().Msg("Phase 1: Stopping HTTP and gRPC servers...")
 	if s.server != nil {
 		if err := s.server.Shutdown(ctx); err != nil {
 			collectError("http_server", err)
 		}
+	}
+	if s.grpcServer != nil {
+		s.grpcServer.GracefulStop()
 	}
 
 	// Phase 2: Stop file watchers (prevent new DB recreation)
