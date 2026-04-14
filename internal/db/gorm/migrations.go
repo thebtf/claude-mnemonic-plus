@@ -2589,6 +2589,11 @@ WHERE utility_propagated_at IS NOT NULL`).Error
 						tx.Exec("UPDATE observations SET project = ? WHERE project = ?", newID, oldID)
 						tx.Exec("UPDATE issues SET source_project = ? WHERE source_project = ?", newID, oldID)
 						tx.Exec("UPDATE issues SET target_project = ? WHERE target_project = ?", newID, oldID)
+						tx.Exec("UPDATE raw_events SET project = ? WHERE project = ?", newID, oldID)
+						tx.Exec("UPDATE indexed_sessions SET project_id = ? WHERE project_id = ?", newID, oldID)
+						tx.Exec("UPDATE user_prompts SET project = ? WHERE project = ?", newID, oldID)
+						tx.Exec("UPDATE injection_log SET project = ? WHERE project = ?", newID, oldID)
+						tx.Exec("UPDATE reasoning_traces SET project = ? WHERE project = ?", newID, oldID)
 						tx.Exec(`UPDATE projects SET
 							legacy_ids   = array_append(legacy_ids, ?),
 							display_name = COALESCE(NULLIF(display_name, ''), ?)
@@ -2600,6 +2605,12 @@ WHERE utility_propagated_at IS NOT NULL`).Error
 						tx.Exec("UPDATE observations SET project = ? WHERE project = ?", newID, oldID)
 						tx.Exec("UPDATE issues SET source_project = ? WHERE source_project = ?", newID, oldID)
 						tx.Exec("UPDATE issues SET target_project = ? WHERE target_project = ?", newID, oldID)
+						// Update all other tables with project column
+						tx.Exec("UPDATE raw_events SET project = ? WHERE project = ?", newID, oldID)
+						tx.Exec("UPDATE indexed_sessions SET project_id = ? WHERE project_id = ?", newID, oldID)
+						tx.Exec("UPDATE user_prompts SET project = ? WHERE project = ?", newID, oldID)
+						tx.Exec("UPDATE injection_log SET project = ? WHERE project = ?", newID, oldID)
+						tx.Exec("UPDATE reasoning_traces SET project = ? WHERE project = ?", newID, oldID)
 						tx.Exec(`UPDATE projects SET
 							id           = ?,
 							legacy_ids   = array_append(COALESCE(legacy_ids, ARRAY[]::TEXT[]), ?),
@@ -2608,6 +2619,42 @@ WHERE utility_propagated_at IS NOT NULL`).Error
 							newID, oldID, dirName, oldID)
 					}
 				}
+				// Phase 2: For already-clean name-only projects (from migrations 078/079),
+				// add the clean name to legacy_ids of any matching hash-based project.
+				// These projects have no underscore+hash suffix — they were already
+				// consolidated. The client now sends pure hashes, so "engram" needs
+				// to resolve to the hash. We add "engram" to legacy_ids of the hash
+				// row (if one was just created from "engram_67e398f8" above).
+				// If no hash row exists, the clean name stays as-is — it will be
+				// updated naturally on the next session start when the client sends
+				// the hash and UpsertProject creates the mapping.
+				for _, row := range rows {
+					if strings.Contains(row.ID, "_") {
+						continue // already handled above
+					}
+					if strings.HasPrefix(row.ID, "/") || strings.HasPrefix(row.ID, "D:") || strings.HasPrefix(row.ID, "C:") {
+						continue // absolute path — skip
+					}
+					if len(row.ID) == 6 || len(row.ID) == 8 {
+						// Already looks like a pure hash — skip
+						isHex := true
+						for _, c := range row.ID {
+							if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f')) {
+								isHex = false
+								break
+							}
+						}
+						if isHex {
+							continue
+						}
+					}
+					// This is a clean name like "engram" — set it as display_name
+					// if not already set, and ensure legacy_ids includes it.
+					tx.Exec(`UPDATE projects SET
+						display_name = COALESCE(NULLIF(display_name, ''), ?)
+					WHERE id = ?`, row.ID, row.ID)
+				}
+
 				return nil
 			},
 			Rollback: func(tx *gorm.DB) error {
