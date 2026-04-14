@@ -43,9 +43,8 @@ function getGitRemoteID(cwd) {
     const relativePath = execSync('git rev-parse --show-prefix', opts).toString().trim();
     const key = remoteURL + '/' + relativePath;
     const hash = crypto.createHash('sha256').update(key).digest('hex');
-    const dirName = path.basename(path.resolve(cwd || ''));
     return {
-      projectID: dirName + '_' + hash.slice(0, 8),
+      projectID: hash.slice(0, 8),
       gitRemote: remoteURL,
       relativePath: relativePath,
     };
@@ -70,14 +69,20 @@ function LegacyProjectID(cwd) {
  * ProjectIDWithName returns the canonical project ID for the given working directory.
  * Prefers a stable git-remote-based ID (cross-platform, cross-OS-path).
  * Falls back to a path-based ID for non-git directories.
+ *
+ * Algorithm mirrors internal/proxy/identity.go:ResolveProjectSlug exactly:
+ *   - git repo with remote: SHA-256(remoteURL + "/" + relativePath), first 8 hex chars
+ *   - non-git fallback: SHA-256(absolutePath), first 6 hex chars
  */
 function ProjectIDWithName(cwd) {
   const gitResult = getGitRemoteID(cwd);
   if (gitResult) {
     return gitResult.projectID;
   }
-  // Fallback: path-based ID for directories without a git remote.
-  return LegacyProjectID(cwd);
+  // Fallback: pure path-based hash for directories without a git remote.
+  const resolvedPath = path.resolve(cwd || '');
+  const hash = crypto.createHash('sha256').update(resolvedPath).digest('hex');
+  return hash.slice(0, 6);
 }
 
 function buildRequestHeaders(includeJsonBody = false) {
