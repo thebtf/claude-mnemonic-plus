@@ -4,6 +4,7 @@ package gorm
 import (
 	"database/sql"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/go-gormigrate/gormigrate/v2"
@@ -2515,6 +2516,102 @@ WHERE utility_propagated_at IS NOT NULL`).Error
 				tx.Exec("DROP TABLE IF EXISTS sessions")
 				tx.Exec("DROP TABLE IF EXISTS invitations")
 				tx.Exec("DROP TABLE IF EXISTS users")
+				return nil
+			},
+		},
+		{
+			// Migration 081: project identity redesign — pure hash IDs.
+			//
+			// Background: ResolveProjectSlug previously returned "dirName_hash8" (git) or
+			// "dirName_hash6" (non-git). It now returns a pure hash without the dirName prefix.
+			// Migrations 078/079 already consolidated most duplicate slugs into clean dirName-only
+			// project IDs.  This migration handles any remaining "dirName_hashN" rows that survived
+			// (e.g. projects added after 079 but before this upgrade) and adds the display_name
+			// column so the dirName is preserved for UI display.
+			//
+			// Algorithm (explicit mapping, not regex):
+			//   1. Find all project rows whose id contains an underscore AND whose last
+			//      underscore-separated segment is a 6- or 8-char lowercase hex string.
+			//   2. Re-associate observations and issues to the pure hash.
+			//   3. Rename the project row (UPDATE projects SET id = hash WHERE ...).
+			//   4. Persist the old slug as a legacy_id and the dirName as display_name.
+			//
+			// Collision guard: if a row with the pure hash ID already exists (e.g. because
+			// the new client already wrote one), the old row is merged into it instead.
+			ID: "081_project_identity_pure_hash",
+			Migrate: func(tx *gorm.DB) error {
+				// Add display_name column — idempotent.
+				if err := tx.Exec(`ALTER TABLE projects ADD COLUMN IF NOT EXISTS display_name VARCHAR(255)`).Error; err != nil {
+					return fmt.Errorf("migration 081: add display_name column: %w", err)
+				}
+
+				// Collect all project IDs that look like "dirName_hashN".
+				var rows []struct {
+					ID string `gorm:"column:id"`
+				}
+				if err := tx.Raw("SELECT id FROM projects").Scan(&rows).Error; err != nil {
+					return fmt.Errorf("migration 081: list projects: %w", err)
+				}
+
+				for _, row := range rows {
+					lastUnderscore := strings.LastIndex(row.ID, "_")
+					if lastUnderscore < 0 {
+						continue // no underscore — already a clean name or pure hash
+					}
+					hashPart := row.ID[lastUnderscore+1:]
+					dirPart := row.ID[:lastUnderscore]
+
+					// Validate: hash segment must be exactly 6 or 8 lowercase hex chars.
+					if len(hashPart) != 8 && len(hashPart) != 6 {
+						continue
+					}
+					isHex := true
+					for _, c := range hashPart {
+						if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f')) {
+							isHex = false
+							break
+						}
+					}
+					if !isHex {
+						continue
+					}
+
+					oldID := row.ID
+					newID := hashPart
+					dirName := dirPart
+
+					// Check whether a row with the pure hash already exists.
+					var existingCount int64
+					tx.Raw("SELECT COUNT(*) FROM projects WHERE id = ?", newID).Scan(&existingCount)
+
+					if existingCount > 0 {
+						// Pure-hash row already exists — merge old row into it.
+						tx.Exec("UPDATE observations SET project = ? WHERE project = ?", newID, oldID)
+						tx.Exec("UPDATE issues SET source_project = ? WHERE source_project = ?", newID, oldID)
+						tx.Exec("UPDATE issues SET target_project = ? WHERE target_project = ?", newID, oldID)
+						tx.Exec(`UPDATE projects SET
+							legacy_ids   = array_append(legacy_ids, ?),
+							display_name = COALESCE(NULLIF(display_name, ''), ?)
+						WHERE id = ? AND NOT (COALESCE(legacy_ids, ARRAY[]::TEXT[]) @> ARRAY[?]::TEXT[])`,
+							oldID, dirName, newID, oldID)
+						tx.Exec("DELETE FROM projects WHERE id = ?", oldID)
+					} else {
+						// No pure-hash row yet — rename in-place.
+						tx.Exec("UPDATE observations SET project = ? WHERE project = ?", newID, oldID)
+						tx.Exec("UPDATE issues SET source_project = ? WHERE source_project = ?", newID, oldID)
+						tx.Exec("UPDATE issues SET target_project = ? WHERE target_project = ?", newID, oldID)
+						tx.Exec(`UPDATE projects SET
+							id           = ?,
+							legacy_ids   = array_append(COALESCE(legacy_ids, ARRAY[]::TEXT[]), ?),
+							display_name = COALESCE(NULLIF(display_name, ''), ?)
+						WHERE id = ?`,
+							newID, oldID, dirName, oldID)
+					}
+				}
+				return nil
+			},
+			Rollback: func(tx *gorm.DB) error {
+				tx.Exec("ALTER TABLE projects DROP COLUMN IF EXISTS display_name")
 				return nil
 			},
 		},
