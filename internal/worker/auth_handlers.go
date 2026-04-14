@@ -1,0 +1,305 @@
+// Package worker provides HTTP handlers for email/password authentication.
+package worker
+
+import (
+	"encoding/json"
+	"net/http"
+	"sync"
+	"time"
+
+	"github.com/rs/zerolog/log"
+	gormdb "github.com/thebtf/engram/internal/db/gorm"
+	"golang.org/x/crypto/bcrypt"
+)
+
+const (
+	bcryptCost            = 12
+	sessionDuration       = 7 * 24 * time.Hour // 7 days
+	authSessionCookieName = "engram_auth"
+)
+
+// AuthHandlers provides HTTP handlers for email/password authentication.
+// This is separate from the master-token (HMAC) auth in handlers_auth.go.
+type AuthHandlers struct {
+	users       *gormdb.UserStore
+	invitations *gormdb.InvitationStore
+	sessions    *gormdb.AuthSessionStore
+
+	// Rate limiting: IP -> mutex + []time.Time (last N attempts)
+	loginAttempts sync.Map
+}
+
+// NewAuthHandlers creates AuthHandlers wired to the given stores.
+func NewAuthHandlers(users *gormdb.UserStore, invitations *gormdb.InvitationStore, sessions *gormdb.AuthSessionStore) *AuthHandlers {
+	return &AuthHandlers{
+		users:       users,
+		invitations: invitations,
+		sessions:    sessions,
+	}
+}
+
+// handleSetupNeeded returns {"needed": true} when no users exist yet.
+func (h *AuthHandlers) handleSetupNeeded(w http.ResponseWriter, r *http.Request) {
+	count, err := h.users.CountUsers()
+	if err != nil {
+		log.Error().Err(err).Msg("auth: failed to count users")
+		http.Error(w, `{"error":"internal error"}`, http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(map[string]bool{"needed": count == 0}); err != nil {
+		log.Error().Err(err).Msg("auth: failed to encode setup-needed response")
+	}
+}
+
+// handleSetup creates the first admin user (no invitation required).
+// Returns 409 Conflict if any users already exist.
+func (h *AuthHandlers) handleSetup(w http.ResponseWriter, r *http.Request) {
+	count, err := h.users.CountUsers()
+	if err != nil {
+		log.Error().Err(err).Msg("auth: failed to count users during setup")
+		http.Error(w, `{"error":"internal error"}`, http.StatusInternalServerError)
+		return
+	}
+	if count > 0 {
+		http.Error(w, `{"error":"setup already completed"}`, http.StatusConflict)
+		return
+	}
+
+	var req struct {
+		Email    string `json:"email"`
+		Password string `json:"password"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Email == "" || req.Password == "" {
+		http.Error(w, `{"error":"email and password required"}`, http.StatusBadRequest)
+		return
+	}
+
+	hash, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcryptCost)
+	if err != nil {
+		log.Error().Err(err).Msg("auth: bcrypt failed during setup")
+		http.Error(w, `{"error":"internal error"}`, http.StatusInternalServerError)
+		return
+	}
+
+	user, err := h.users.CreateUser(req.Email, string(hash), "admin")
+	if err != nil {
+		log.Error().Err(err).Str("email", req.Email).Msg("auth: failed to create admin user during setup")
+		http.Error(w, `{"error":"failed to create user"}`, http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+	if err := json.NewEncoder(w).Encode(map[string]any{
+		"user": map[string]any{"id": user.ID, "email": user.Email, "role": user.Role},
+	}); err != nil {
+		log.Error().Err(err).Msg("auth: failed to encode setup response")
+	}
+}
+
+// handleLogin authenticates with email+password and creates a DB-backed session.
+// Sets the engram_auth HttpOnly cookie on success.
+func (h *AuthHandlers) handleLogin(w http.ResponseWriter, r *http.Request) {
+	ip := r.RemoteAddr
+	if !h.checkRateLimit(ip) {
+		http.Error(w, `{"error":"too many login attempts, try again later"}`, http.StatusTooManyRequests)
+		return
+	}
+
+	var req struct {
+		Email    string `json:"email"`
+		Password string `json:"password"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Email == "" || req.Password == "" {
+		http.Error(w, `{"error":"email and password required"}`, http.StatusBadRequest)
+		return
+	}
+
+	user, err := h.users.GetUserByEmail(req.Email)
+	if err != nil {
+		// Don't disclose whether the email exists.
+		http.Error(w, `{"error":"invalid credentials"}`, http.StatusUnauthorized)
+		return
+	}
+
+	if user.Disabled {
+		http.Error(w, `{"error":"account disabled"}`, http.StatusForbidden)
+		return
+	}
+
+	if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(req.Password)); err != nil {
+		http.Error(w, `{"error":"invalid credentials"}`, http.StatusUnauthorized)
+		return
+	}
+
+	sess, err := h.sessions.CreateSession(user.ID, sessionDuration)
+	if err != nil {
+		log.Error().Err(err).Int64("user_id", user.ID).Msg("auth: failed to create session")
+		http.Error(w, `{"error":"internal error"}`, http.StatusInternalServerError)
+		return
+	}
+
+	// Update last login asynchronously — failure here is non-fatal.
+	now := time.Now()
+	if err := h.users.UpdateUser(user.ID, map[string]any{"last_login_at": now}); err != nil {
+		log.Warn().Err(err).Int64("user_id", user.ID).Msg("auth: failed to update last_login_at")
+	}
+
+	http.SetCookie(w, &http.Cookie{
+		Name:     authSessionCookieName,
+		Value:    sess.ID,
+		Path:     "/",
+		HttpOnly: true,
+		SameSite: http.SameSiteLaxMode,
+		MaxAge:   int(sessionDuration.Seconds()),
+	})
+
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(map[string]any{
+		"user": map[string]any{"id": user.ID, "email": user.Email, "role": user.Role},
+	}); err != nil {
+		log.Error().Err(err).Msg("auth: failed to encode login response")
+	}
+}
+
+// handleLogout invalidates the DB session and clears the engram_auth cookie.
+func (h *AuthHandlers) handleLogout(w http.ResponseWriter, r *http.Request) {
+	cookie, err := r.Cookie(authSessionCookieName)
+	if err == nil && cookie.Value != "" {
+		if delErr := h.sessions.DeleteSession(cookie.Value); delErr != nil {
+			log.Warn().Err(delErr).Msg("auth: failed to delete session on logout")
+		}
+	}
+
+	http.SetCookie(w, &http.Cookie{
+		Name:     authSessionCookieName,
+		Value:    "",
+		Path:     "/",
+		HttpOnly: true,
+		MaxAge:   -1,
+	})
+
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(map[string]string{"status": "ok"}); err != nil {
+		log.Error().Err(err).Msg("auth: failed to encode logout response")
+	}
+}
+
+// handleMe returns the current authenticated user from the engram_auth session cookie.
+func (h *AuthHandlers) handleMe(w http.ResponseWriter, r *http.Request) {
+	cookie, err := r.Cookie(authSessionCookieName)
+	if err != nil || cookie.Value == "" {
+		http.Error(w, `{"error":"not authenticated"}`, http.StatusUnauthorized)
+		return
+	}
+
+	sess, err := h.sessions.GetSession(cookie.Value)
+	if err != nil {
+		// Expired or invalid — clear the stale cookie.
+		http.SetCookie(w, &http.Cookie{
+			Name:     authSessionCookieName,
+			Value:    "",
+			Path:     "/",
+			MaxAge:   -1,
+			HttpOnly: true,
+		})
+		http.Error(w, `{"error":"session expired"}`, http.StatusUnauthorized)
+		return
+	}
+
+	user, err := h.users.GetUserByID(sess.UserID)
+	if err != nil || user.Disabled {
+		http.Error(w, `{"error":"account not found or disabled"}`, http.StatusForbidden)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(map[string]any{
+		"user": map[string]any{"id": user.ID, "email": user.Email, "role": user.Role},
+	}); err != nil {
+		log.Error().Err(err).Msg("auth: failed to encode me response")
+	}
+}
+
+// checkRateLimit allows at most 5 login attempts per minute per IP.
+// Returns true when the attempt is permitted.
+func (h *AuthHandlers) checkRateLimit(ip string) bool {
+	now := time.Now()
+	cutoff := now.Add(-time.Minute)
+
+	// Each IP gets a dedicated mutex stored in the sync.Map.
+	muKey := ip + ":mu"
+	muVal, _ := h.loginAttempts.LoadOrStore(muKey, &sync.Mutex{})
+	mu := muVal.(*sync.Mutex)
+	mu.Lock()
+	defer mu.Unlock()
+
+	attemptsKey := ip + ":attempts"
+	attemptsVal, _ := h.loginAttempts.LoadOrStore(attemptsKey, &[]time.Time{})
+	attempts := attemptsVal.(*[]time.Time)
+
+	// Discard attempts older than the window.
+	valid := (*attempts)[:0]
+	for _, t := range *attempts {
+		if t.After(cutoff) {
+			valid = append(valid, t)
+		}
+	}
+
+	if len(valid) >= 5 {
+		*attempts = valid
+		return false
+	}
+
+	*attempts = append(valid, now)
+	return true
+}
+
+// Service-level delegation methods
+// These are registered on the chi router in setupRoutes and delegate to s.authHandlers,
+// returning 503 Service Unavailable if the handler is not yet initialized (async init).
+
+func (s *Service) handleUserSetupNeeded(w http.ResponseWriter, r *http.Request) {
+	s.initMu.RLock()
+	h := s.authHandlers
+	s.initMu.RUnlock()
+	if h == nil {
+		http.Error(w, `{"error":"not ready"}`, http.StatusServiceUnavailable)
+		return
+	}
+	h.handleSetupNeeded(w, r)
+}
+
+func (s *Service) handleUserSetup(w http.ResponseWriter, r *http.Request) {
+	s.initMu.RLock()
+	h := s.authHandlers
+	s.initMu.RUnlock()
+	if h == nil {
+		http.Error(w, `{"error":"not ready"}`, http.StatusServiceUnavailable)
+		return
+	}
+	h.handleSetup(w, r)
+}
+
+func (s *Service) handleUserLogin(w http.ResponseWriter, r *http.Request) {
+	s.initMu.RLock()
+	h := s.authHandlers
+	s.initMu.RUnlock()
+	if h == nil {
+		http.Error(w, `{"error":"not ready"}`, http.StatusServiceUnavailable)
+		return
+	}
+	h.handleLogin(w, r)
+}
+
+func (s *Service) handleUserLogout(w http.ResponseWriter, r *http.Request) {
+	s.initMu.RLock()
+	h := s.authHandlers
+	s.initMu.RUnlock()
+	if h == nil {
+		http.Error(w, `{"error":"not ready"}`, http.StatusServiceUnavailable)
+		return
+	}
+	h.handleLogout(w, r)
+}

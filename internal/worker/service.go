@@ -190,6 +190,7 @@ type Service struct {
 	llmClient              learning.LLMClient
 	projectSettingsStore   *gorm.ProjectSettingsStore
 	strategySelector       *learning.StrategySelector
+	authHandlers           *AuthHandlers
 	version                string
 	recentQueriesBuf       [maxRecentQueries]RecentSearchQuery
 	wg                     sync.WaitGroup
@@ -777,6 +778,11 @@ func (s *Service) initializeAsync() {
 	// Create token store and wire into auth middleware
 	tokenStore := gorm.NewTokenStore(store)
 
+	// Create auth stores for email/password dashboard authentication (T007-T009).
+	userStore := gorm.NewUserStore(store.DB)
+	invitationStore := gorm.NewInvitationStore(store.DB)
+	authSessionStore := gorm.NewAuthSessionStore(store.DB)
+
 	// Create raw event store and ingest deduplication cache
 	rawEventStore := gorm.NewRawEventStore(store)
 
@@ -830,6 +836,15 @@ func (s *Service) initializeAsync() {
 	// Wire token store into auth middleware for client token lookups
 	if s.tokenAuth != nil {
 		s.tokenAuth.SetTokenStore(tokenStore)
+	}
+
+	// Wire email/password auth stores into TokenAuth middleware and create AuthHandlers.
+	authHandlersInstance := NewAuthHandlers(userStore, invitationStore, authSessionStore)
+	s.initMu.Lock()
+	s.authHandlers = authHandlersInstance
+	s.initMu.Unlock()
+	if s.tokenAuth != nil {
+		s.tokenAuth.SetAuthStores(userStore, authSessionStore)
 	}
 
 	// Start buffered token stats flusher (batches DB writes every 5s)
@@ -1688,6 +1703,13 @@ func (s *Service) setupRoutes() {
 	// Auth routes (public — login/logout do not require auth)
 	s.router.Post("/api/auth/login", s.handleAuthLogin)
 	s.router.Post("/api/auth/logout", s.handleAuthLogout)
+
+	// Email/password auth routes (no token auth required).
+	// Handlers delegate to s.authHandlers which is initialised async.
+	s.router.Get("/api/auth/setup-needed", s.handleUserSetupNeeded)
+	s.router.Post("/api/auth/setup", s.handleUserSetup)
+	s.router.Post("/api/auth/user-login", s.handleUserLogin)
+	s.router.Post("/api/auth/user-logout", s.handleUserLogout)
 
 	// Health check (both root and API-prefixed for compatibility)
 	// Returns 200 immediately so hooks can connect quickly during init
