@@ -2261,15 +2261,35 @@ WHERE utility_propagated_at IS NOT NULL`).Error
 			ID: "077_relations_constraints_update",
 			Migrate: func(tx *gorm.DB) error {
 				sqls := []string{
-					// Add modifies/reads to relation_type constraint (used by file-relation detector)
+					// Expand relation_type constraint to include all valid types:
+					// original 17 from migration 019 + modifies/reads (file-relation detector)
+					// + follows/prompted_by/references/referenced_by (detector.go FR-4,5,36)
 					`ALTER TABLE observation_relations DROP CONSTRAINT IF EXISTS chk_observation_relations_relation_type`,
-					`ALTER TABLE observation_relations ADD CONSTRAINT chk_observation_relations_relation_type CHECK (relation_type IN ('causes','fixes','supersedes','depends_on','relates_to','evolves_from','modifies','reads'))`,
+					`ALTER TABLE observation_relations ADD CONSTRAINT chk_observation_relations_relation_type CHECK (relation_type IN ('causes','fixes','supersedes','depends_on','relates_to','evolves_from','leads_to','similar_to','contradicts','reinforces','invalidated_by','explains','shares_theme','parallel_context','summarizes','part_of','prefers_over','modifies','reads','follows','prompted_by','references','referenced_by'))`,
 					// Add creative_association back to detection_source constraint (used by consolidation)
 					`ALTER TABLE observation_relations DROP CONSTRAINT IF EXISTS chk_observation_relations_detection_source`,
 					`ALTER TABLE observation_relations ADD CONSTRAINT chk_observation_relations_detection_source CHECK (detection_source IN ('file_overlap','embedding_similarity','temporal_proximity','narrative_mention','concept_overlap','type_progression','creative_association'))`,
 				}
 				for _, s := range sqls {
-					_ = tx.Exec(s).Error
+					if err := tx.Exec(s).Error; err != nil {
+						return fmt.Errorf("migration 077: %w", err)
+					}
+				}
+				return nil
+			},
+			Rollback: func(tx *gorm.DB) error {
+				sqls := []string{
+					// Restore migration 019 relation_type constraint (remove modifies, reads, follows, prompted_by, references, referenced_by)
+					`ALTER TABLE observation_relations DROP CONSTRAINT IF EXISTS chk_observation_relations_relation_type`,
+					`ALTER TABLE observation_relations ADD CONSTRAINT chk_observation_relations_relation_type CHECK (relation_type IN ('causes','fixes','supersedes','depends_on','relates_to','evolves_from','leads_to','similar_to','contradicts','reinforces','invalidated_by','explains','shares_theme','parallel_context','summarizes','part_of','prefers_over'))`,
+					// Restore detection_source constraint without creative_association
+					`ALTER TABLE observation_relations DROP CONSTRAINT IF EXISTS chk_observation_relations_detection_source`,
+					`ALTER TABLE observation_relations ADD CONSTRAINT chk_observation_relations_detection_source CHECK (detection_source IN ('file_overlap','embedding_similarity','temporal_proximity','narrative_mention','concept_overlap','type_progression'))`,
+				}
+				for _, s := range sqls {
+					if err := tx.Exec(s).Error; err != nil {
+						return fmt.Errorf("migration 077 rollback: %w", err)
+					}
 				}
 				return nil
 			},
