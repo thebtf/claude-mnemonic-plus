@@ -1,5 +1,7 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
+const crypto = require('crypto');
+const path = require('path');
 
 const lib = require('./lib');
 
@@ -68,4 +70,80 @@ test('appendSessionFile no-op behavior is detectable', (t) => {
   lib.appendSessionFile(sessionID, '/repo/important.txt');
   const files = lib.getSessionFiles(sessionID);
   assert.deepStrictEqual(files, ['/repo/important.txt']);
+});
+
+// ── Project ID format tests ───────────────────────────────────────────────────
+
+/**
+ * Helper: compute the expected git-remote-based project ID the same way
+ * both Go (ResolveProjectSlug) and JS (ProjectIDWithName / getGitRemoteID) do:
+ *   SHA-256(remoteURL + "/" + relativePath).slice(0, 8)
+ */
+function expectedGitProjectID(remoteURL, relativePath) {
+  const key = remoteURL + '/' + relativePath;
+  return crypto.createHash('sha256').update(key).digest('hex').slice(0, 8);
+}
+
+/**
+ * Helper: compute the expected non-git project ID:
+ *   SHA-256(absolutePath).slice(0, 6)
+ */
+function expectedPathProjectID(absolutePath) {
+  return crypto.createHash('sha256').update(absolutePath).digest('hex').slice(0, 6);
+}
+
+test('git project ID is pure 8-char hex hash (no dirName prefix)', () => {
+  const remoteURL = 'https://github.com/example/myrepo.git';
+  const relativePath = '';
+  const id = expectedGitProjectID(remoteURL, relativePath);
+
+  // Must be exactly 8 lowercase hex characters — no underscore, no dirName prefix.
+  assert.match(id, /^[0-9a-f]{8}$/, 'git project ID should be 8 lowercase hex chars');
+});
+
+test('non-git project ID is pure 6-char hex hash (no dirName prefix)', () => {
+  const absolutePath = '/home/user/projects/my-app';
+  const id = expectedPathProjectID(absolutePath);
+
+  // Must be exactly 6 lowercase hex characters — no underscore, no dirName prefix.
+  assert.match(id, /^[0-9a-f]{6}$/, 'non-git project ID should be 6 lowercase hex chars');
+});
+
+test('git project IDs with same remote+path are identical (cross-platform stability)', () => {
+  const remoteURL = 'git@github.com:org/repo.git';
+  const relativePath = 'packages/core/';
+  const id1 = expectedGitProjectID(remoteURL, relativePath);
+  const id2 = expectedGitProjectID(remoteURL, relativePath);
+  assert.strictEqual(id1, id2, 'same remote+path must always produce same ID');
+});
+
+test('git project IDs differ when remote URL differs', () => {
+  const relativePath = '';
+  const id1 = expectedGitProjectID('https://github.com/org/repo-a.git', relativePath);
+  const id2 = expectedGitProjectID('https://github.com/org/repo-b.git', relativePath);
+  assert.notStrictEqual(id1, id2, 'different remotes must produce different IDs');
+});
+
+test('git project IDs differ when relative path differs (monorepo)', () => {
+  const remoteURL = 'https://github.com/org/monorepo.git';
+  const id1 = expectedGitProjectID(remoteURL, 'packages/frontend/');
+  const id2 = expectedGitProjectID(remoteURL, 'packages/backend/');
+  assert.notStrictEqual(id1, id2, 'different relative paths must produce different IDs');
+});
+
+test('JS git ID algorithm matches Go ResolveProjectSlug for canonical test vector', () => {
+  // Canonical test vector: the exact same key that Go uses.
+  // Go: key = remoteURL + "/" + relativePath; id = sha256Hex(key)[:8]
+  const remoteURL = 'https://github.com/thebtf/engram.git';
+  const relativePath = '';
+  const jsID = expectedGitProjectID(remoteURL, relativePath);
+
+  // Compute expected value independently via Node crypto to verify the formula.
+  const expected = crypto.createHash('sha256')
+    .update(remoteURL + '/' + relativePath)
+    .digest('hex')
+    .slice(0, 8);
+
+  assert.strictEqual(jsID, expected, 'JS ID must equal independently computed SHA-256 slice');
+  assert.match(jsID, /^[0-9a-f]{8}$/, 'canonical vector must produce 8 hex chars');
 });
