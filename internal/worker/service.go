@@ -845,6 +845,8 @@ func (s *Service) initializeAsync() {
 	s.initMu.Unlock()
 	if s.tokenAuth != nil {
 		s.tokenAuth.SetAuthStores(userStore, authSessionStore)
+		cfg := config.Get()
+		s.tokenAuth.SetAuthentikConfig(cfg.AuthentikEnabled, cfg.AuthentikAutoProvision, cfg.AuthentikTrustedProxies)
 	}
 
 	// Start buffered token stats flusher (batches DB writes every 5s)
@@ -1714,10 +1716,12 @@ func (s *Service) setupRoutes() {
 	// Registration (public, requires valid invitation code)
 	s.router.Post("/api/auth/register", s.handleUserRegister)
 
-	// Admin invitation management (requires authenticated admin session)
+	// Admin management (requires authenticated admin session)
 	s.router.Route("/api/admin", func(r chi.Router) {
 		r.Post("/invitations", s.handleAdminCreateInvitation)
 		r.Get("/invitations", s.handleAdminListInvitations)
+		r.Get("/users", s.handleAdminListUsers)
+		r.Put("/users/{id}", s.handleAdminUpdateUser)
 	})
 
 	// Health check (both root and API-prefixed for compatibility)

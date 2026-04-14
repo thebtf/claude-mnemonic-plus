@@ -4,9 +4,11 @@ package worker
 import (
 	"encoding/json"
 	"net/http"
+	"strconv"
 	"sync"
 	"time"
 
+	"github.com/go-chi/chi/v5"
 	"github.com/rs/zerolog/log"
 	gormdb "github.com/thebtf/engram/internal/db/gorm"
 	"golang.org/x/crypto/bcrypt"
@@ -371,6 +373,116 @@ func (h *AuthHandlers) checkRateLimit(ip string) bool {
 	return true
 }
 
+// handleListUsers returns all users (admin only, no password hashes).
+func (h *AuthHandlers) handleListUsers(w http.ResponseWriter, r *http.Request) {
+	role, _ := r.Context().Value(authRoleKey{}).(string)
+	if role != "admin" {
+		http.Error(w, `{"error":"admin access required"}`, http.StatusForbidden)
+		return
+	}
+
+	users, err := h.users.ListUsers()
+	if err != nil {
+		log.Error().Err(err).Msg("auth: failed to list users")
+		http.Error(w, `{"error":"failed to list users"}`, http.StatusInternalServerError)
+		return
+	}
+
+	// Strip password hashes
+	type safeUser struct {
+		ID          int64      `json:"id"`
+		Email       string     `json:"email"`
+		Role        string     `json:"role"`
+		Disabled    bool       `json:"disabled"`
+		CreatedAt   time.Time  `json:"created_at"`
+		LastLoginAt *time.Time `json:"last_login_at,omitempty"`
+	}
+	safe := make([]safeUser, len(users))
+	for i, u := range users {
+		safe[i] = safeUser{u.ID, u.Email, u.Role, u.Disabled, u.CreatedAt, u.LastLoginAt}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(map[string]any{"users": safe}); err != nil {
+		log.Error().Err(err).Msg("auth: failed to encode list-users response")
+	}
+}
+
+// handleUpdateUser updates user disabled/role (admin only).
+func (h *AuthHandlers) handleUpdateUser(w http.ResponseWriter, r *http.Request) {
+	role, _ := r.Context().Value(authRoleKey{}).(string)
+	if role != "admin" {
+		http.Error(w, `{"error":"admin access required"}`, http.StatusForbidden)
+		return
+	}
+
+	idStr := chi.URLParam(r, "id")
+	id, err := strconv.ParseInt(idStr, 10, 64)
+	if err != nil {
+		http.Error(w, `{"error":"invalid user ID"}`, http.StatusBadRequest)
+		return
+	}
+
+	var req struct {
+		Disabled *bool   `json:"disabled,omitempty"`
+		Role     *string `json:"role,omitempty"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, `{"error":"invalid request"}`, http.StatusBadRequest)
+		return
+	}
+
+	updates := map[string]any{}
+	if req.Disabled != nil {
+		if *req.Disabled {
+			adminCount, _ := h.users.CountAdmins()
+			targetUser, _ := h.users.GetUserByID(id)
+			if targetUser != nil && targetUser.Role == "admin" && adminCount <= 1 {
+				http.Error(w, `{"error":"cannot disable the last admin"}`, http.StatusBadRequest)
+				return
+			}
+		}
+		updates["disabled"] = *req.Disabled
+		if *req.Disabled {
+			// Delete all sessions for disabled user
+			if err := h.sessions.DeleteUserSessions(id); err != nil {
+				log.Warn().Err(err).Int64("user_id", id).Msg("auth: failed to delete sessions for disabled user")
+			}
+		}
+	}
+	if req.Role != nil {
+		if *req.Role != "admin" && *req.Role != "operator" {
+			http.Error(w, `{"error":"role must be admin or operator"}`, http.StatusBadRequest)
+			return
+		}
+		if *req.Role != "admin" {
+			adminCount, _ := h.users.CountAdmins()
+			targetUser, _ := h.users.GetUserByID(id)
+			if targetUser != nil && targetUser.Role == "admin" && adminCount <= 1 {
+				http.Error(w, `{"error":"cannot demote the last admin"}`, http.StatusBadRequest)
+				return
+			}
+		}
+		updates["role"] = *req.Role
+	}
+
+	if len(updates) == 0 {
+		http.Error(w, `{"error":"no updates provided"}`, http.StatusBadRequest)
+		return
+	}
+
+	if err := h.users.UpdateUser(id, updates); err != nil {
+		log.Error().Err(err).Int64("user_id", id).Msg("auth: failed to update user")
+		http.Error(w, `{"error":"failed to update user"}`, http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(map[string]string{"status": "ok"}); err != nil {
+		log.Error().Err(err).Msg("auth: failed to encode update-user response")
+	}
+}
+
 // Service-level delegation methods
 // These are registered on the chi router in setupRoutes and delegate to s.authHandlers,
 // returning 503 Service Unavailable if the handler is not yet initialized (async init).
@@ -450,4 +562,26 @@ func (s *Service) handleAdminListInvitations(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	h.handleListInvitations(w, r)
+}
+
+func (s *Service) handleAdminListUsers(w http.ResponseWriter, r *http.Request) {
+	s.initMu.RLock()
+	h := s.authHandlers
+	s.initMu.RUnlock()
+	if h == nil {
+		http.Error(w, `{"error":"not ready"}`, http.StatusServiceUnavailable)
+		return
+	}
+	h.handleListUsers(w, r)
+}
+
+func (s *Service) handleAdminUpdateUser(w http.ResponseWriter, r *http.Request) {
+	s.initMu.RLock()
+	h := s.authHandlers
+	s.initMu.RUnlock()
+	if h == nil {
+		http.Error(w, `{"error":"not ready"}`, http.StatusServiceUnavailable)
+		return
+	}
+	h.handleUpdateUser(w, r)
 }
