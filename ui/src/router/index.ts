@@ -104,6 +104,12 @@ const routes = [
     name: 'learning',
     component: () => import('@/views/LearningView.vue'),
   },
+  {
+    path: '/admin',
+    name: 'admin',
+    component: () => import('@/views/AdminView.vue'),
+    meta: { requiresAdmin: true },
+  },
 ]
 
 const router = createRouter({
@@ -113,7 +119,7 @@ const router = createRouter({
 
 // Navigation guard: check setup-needed, then enforce auth
 router.beforeEach(async (to) => {
-  const { authenticated, loading, checkAuth, checkSetupNeeded } = useAuth()
+  const { authenticated, loading, checkAuth, checkSetupNeeded, isAdmin } = useAuth()
 
   if (loading.value) {
     await checkAuth()
@@ -137,6 +143,11 @@ router.beforeEach(async (to) => {
 
   // Redirect already-authenticated users away from login/register
   if ((to.name === 'login' || to.name === 'register') && authenticated.value) {
+    return { name: 'home' }
+  }
+
+  // Admin-only routes require admin role
+  if (to.meta.requiresAdmin && !isAdmin.value) {
     return { name: 'home' }
   }
 })
