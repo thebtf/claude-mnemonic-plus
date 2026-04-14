@@ -1,12 +1,17 @@
 <script setup lang="ts">
-import { onMounted } from 'vue'
+import { computed, onMounted } from 'vue'
+import { useRoute } from 'vue-router'
 import { useAuth } from '@/composables/useAuth'
 import { useSSE } from '@/composables/useSSE'
 import AppSidebar from '@/components/layout/AppSidebar.vue'
 import AppHeader from '@/components/layout/AppHeader.vue'
 
+const route = useRoute()
 const { authenticated, loading, checkAuth } = useAuth()
 const { isReconnecting, reconnectCountdown } = useSSE()
+
+// Public routes (login, setup, register) render without sidebar/header
+const isPublicRoute = computed(() => !!route.meta.public)
 
 onMounted(() => {
   checkAuth()
@@ -20,8 +25,8 @@ onMounted(() => {
       <i class="fas fa-spinner fa-spin text-2xl text-slate-500" />
     </div>
 
-    <!-- Login page (no sidebar, no header) -->
-    <router-view v-else-if="!authenticated" />
+    <!-- Public pages: login, setup, register (no sidebar, no header) -->
+    <router-view v-else-if="!authenticated || isPublicRoute" />
 
     <!-- Authenticated layout -->
     <div v-else class="flex h-screen">
