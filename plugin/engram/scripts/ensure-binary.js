@@ -94,20 +94,25 @@ async function main() {
   // Atomic swap: rename current → .old, then tmp → current.
   // This avoids deleting a running binary (fails on Windows).
   // The .old file is cleaned by upgrade.CleanStale on next daemon startup.
+  let oldPath = null;
   try {
     if (fs.existsSync(binaryPath)) {
-      const oldPath = `${binaryPath}.old.${Date.now()}`;
+      oldPath = `${binaryPath}.old.${Date.now()}`;
       fs.renameSync(binaryPath, oldPath);
     }
     fs.renameSync(tmpPath, binaryPath);
   } catch (err) {
-    process.stderr.write(`[engram] install failed: ${err.message}\n`);
     // Try fallback: copy instead of rename (cross-device moves)
     try {
       fs.copyFileSync(tmpPath, binaryPath);
       fs.unlinkSync(tmpPath);
     } catch (copyErr) {
+      process.stderr.write(`[engram] install failed: ${err.message}\n`);
       process.stderr.write(`[engram] fallback copy also failed: ${copyErr.message}\n`);
+      // Rollback: restore old binary if we moved it away
+      if (oldPath && !fs.existsSync(binaryPath) && fs.existsSync(oldPath)) {
+        try { fs.renameSync(oldPath, binaryPath); } catch {}
+      }
       return;
     }
   }
