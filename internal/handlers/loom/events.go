@@ -1,7 +1,6 @@
 package loom
 
 import (
-	"context"
 	"time"
 
 	loom "github.com/thebtf/aimux/loom"
@@ -40,7 +39,7 @@ func (m *Module) handleTaskEvent(ev loom.TaskEvent) {
 	body, err := buildNotificationPayload("notifications/loom/task_event", payload)
 	if err != nil {
 		// JSON marshalling of a plain struct should never fail; log and drop.
-		m.deps.Logger.WarnContext(context.Background(), "loom: failed to marshal task event notification",
+		m.deps.Logger.WarnContext(m.deps.DaemonCtx, "loom: failed to marshal task event notification",
 			"task_id", ev.TaskID,
 			"error", err,
 		)

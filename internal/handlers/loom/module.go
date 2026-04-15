@@ -83,7 +83,7 @@ func (m *Module) Name() string { return moduleName }
 // is returned — daemon startup aborts per framework contract.
 // RecoverCrashed failure is non-fatal: crash recovery is best-effort (a
 // previous in-flight task ends up in failed_crash rather than being replayed).
-func (m *Module) Init(_ context.Context, deps module.ModuleDeps) error {
+func (m *Module) Init(ctx context.Context, deps module.ModuleDeps) error {
 	m.deps = deps
 	m.notifier = deps.Notifier
 
@@ -105,7 +105,11 @@ func (m *Module) Init(_ context.Context, deps module.ModuleDeps) error {
 			"PRAGMA busy_timeout=5000",
 		}
 		for _, p := range pragmas {
-			if _, err := db.ExecContext(context.Background(), p); err != nil {
+			if err := ctx.Err(); err != nil {
+				_ = db.Close()
+				return fmt.Errorf("loom: init canceled: %w", err)
+			}
+			if _, err := db.ExecContext(ctx, p); err != nil {
 				_ = db.Close()
 				return fmt.Errorf("loom: %s: %w", p, err)
 			}
@@ -129,11 +133,11 @@ func (m *Module) Init(_ context.Context, deps module.ModuleDeps) error {
 	// RecoverCrashed must run once at startup to mark stale dispatched/running
 	// tasks as failed_crash. Failure is non-fatal — log and continue.
 	if n, err := eng.RecoverCrashed(); err != nil {
-		deps.Logger.WarnContext(context.Background(), "loom: crash recovery failed",
+		deps.Logger.WarnContext(ctx, "loom: crash recovery failed",
 			"error", err,
 		)
 	} else if n > 0 {
-		deps.Logger.InfoContext(context.Background(), "loom: crash recovery complete",
+		deps.Logger.InfoContext(ctx, "loom: crash recovery complete",
 			"recovered", n,
 		)
 	}
@@ -149,17 +153,25 @@ func (m *Module) Init(_ context.Context, deps module.ModuleDeps) error {
 //  2. CancelAllForProject for each tracked project — reduces straggling tasks.
 //  3. db.Close — any remaining dispatch goroutines finish their next store
 //     call with a "database closed" error and the task transitions to failed.
-func (m *Module) Shutdown(_ context.Context) error {
+func (m *Module) Shutdown(ctx context.Context) error {
 	if m.unsub != nil {
 		m.unsub()
 	}
 
 	if m.engine != nil {
 		m.tracked.Range(func(key, _ any) bool {
+			select {
+			case <-ctx.Done():
+				return false
+			default:
+			}
 			projectID, _ := key.(string)
 			_, _ = m.engine.CancelAllForProject(projectID)
 			return true
 		})
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 	}
 
 	if m.db != nil {
@@ -177,7 +189,7 @@ func (m *Module) Shutdown(_ context.Context) error {
 // Implements module.ProjectLifecycle.
 func (m *Module) OnSessionConnect(p muxcore.ProjectContext) {
 	m.tracked.Store(p.ID, struct{}{})
-	m.deps.Logger.InfoContext(context.Background(), "loom: session connected",
+	m.deps.Logger.InfoContext(m.deps.DaemonCtx, "loom: session connected",
 		"project_id", p.ID,
 	)
 }
@@ -186,7 +198,7 @@ func (m *Module) OnSessionConnect(p muxcore.ProjectContext) {
 // NOT cancel long-running tasks on session disconnect — tasks outlive sessions.
 // Implements module.ProjectLifecycle.
 func (m *Module) OnSessionDisconnect(projectID string) {
-	m.deps.Logger.InfoContext(context.Background(), "loom: session disconnected",
+	m.deps.Logger.InfoContext(m.deps.DaemonCtx, "loom: session disconnected",
 		"project_id", projectID,
 	)
 }
@@ -200,12 +212,12 @@ func (m *Module) OnSessionDisconnect(projectID string) {
 func (m *Module) OnProjectRemoved(projectID string) {
 	if m.engine != nil {
 		if n, err := m.engine.CancelAllForProject(projectID); err != nil {
-			m.deps.Logger.WarnContext(context.Background(), "loom: cancel tasks on project removal failed",
+			m.deps.Logger.WarnContext(m.deps.DaemonCtx, "loom: cancel tasks on project removal failed",
 				"project_id", projectID,
 				"error", err,
 			)
 		} else {
-			m.deps.Logger.InfoContext(context.Background(), "loom: cancelled tasks for removed project",
+			m.deps.Logger.InfoContext(m.deps.DaemonCtx, "loom: cancelled tasks for removed project",
 				"project_id", projectID,
 				"cancelled", n,
 			)

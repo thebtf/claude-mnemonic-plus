@@ -341,7 +341,10 @@ func TestLoomModule_HandleTaskEvent_EmitsNotification(t *testing.T) {
 		t.Errorf("request_id = %q, want req-001", payload.RequestID)
 	}
 	if payload.Timestamp == "" {
-		t.Error("timestamp is empty, want RFC3339Nano string")
+		t.Fatal("timestamp is empty, want RFC3339Nano string")
+	}
+	if _, err := time.Parse(time.RFC3339Nano, payload.Timestamp); err != nil {
+		t.Fatalf("timestamp = %q, not RFC3339Nano: %v", payload.Timestamp, err)
 	}
 }
 
