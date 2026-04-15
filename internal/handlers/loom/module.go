@@ -118,7 +118,7 @@ func (m *Module) Init(ctx context.Context, deps module.ModuleDeps) error {
 
 		loomEng, err := loom.NewEngine(db,
 			loom.WithLogger(deps.Logger),
-			loom.WithMeter(obs.MeterFor("loom")),
+			loom.WithMeter(obs.MeterFor(moduleName)),
 			loom.WithMaxRetries(2),
 		)
 		if err != nil {
