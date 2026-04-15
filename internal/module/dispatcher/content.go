@@ -4,8 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"time"
 
 	"github.com/thebtf/engram/internal/module"
+	"github.com/thebtf/engram/internal/module/obs"
 	muxcore "github.com/thebtf/mcp-mux/muxcore"
 )
 
@@ -102,11 +104,20 @@ func (d *Dispatcher) handleToolsCall(ctx context.Context, p muxcore.ProjectConte
 	// Priority A: static ToolProvider lookup. O(1) hash hit.
 	entry, _, ok := d.reg.ToolByName(params.Name)
 
+	// Determine the owning module name before the call for metric labelling.
+	// For static tools this comes from the registry entry; for proxy tools we
+	// ask the registry. The empty string is a safe sentinel — the metric will
+	// still be emitted with an empty module label rather than crashing.
+	var moduleName string
 	var (
 		raw     json.RawMessage
 		callErr error
 	)
+
+	start := time.Now()
+
 	if ok {
+		moduleName = entry.Module.Name()
 		// Static path: call module.ToolProvider.HandleTool under 30 s cap +
 		// panic recovery.
 		raw, callErr = callToolWithTimeout(ctx, entry.ToolProv, p, params.Name, params.Arguments,
@@ -114,10 +125,11 @@ func (d *Dispatcher) handleToolsCall(ctx context.Context, p muxcore.ProjectConte
 	} else {
 		// Priority B: ProxyToolProvider fallthrough per FR-11a. At most one
 		// proxy is registered so ambiguity is impossible.
-		proxy, _, hasProxy := d.reg.GetProxyToolProvider()
+		proxy, proxyModName, hasProxy := d.reg.GetProxyToolProvider()
 		if !hasProxy {
 			return marshalError(req.ID, -32601, fmt.Sprintf("tool not found: %s", params.Name)), nil
 		}
+		moduleName = proxyModName
 		// Proxy path: call ProxyHandleTool under the same 30 s cap + panic
 		// recovery contract. An unknown-tool result from the proxy is NOT
 		// re-mapped to -32601 here — the proxy itself is responsible for
@@ -127,6 +139,8 @@ func (d *Dispatcher) handleToolsCall(ctx context.Context, p muxcore.ProjectConte
 			params.Name, p.ID, d.logger)
 	}
 
+	durationMs := time.Since(start).Milliseconds()
+
 	if callErr != nil {
 		// Priority 1: dispatcher-injected 30 s timeout → -32603 per spec edge case.
 		// The sentinel [dispatcherTimeoutError] is specifically emitted by
@@ -134,6 +148,8 @@ func (d *Dispatcher) handleToolsCall(ctx context.Context, p muxcore.ProjectConte
 		// voluntarily returning [module.ErrTimeout]. See timeout.go docs for the
 		// full distinction and spec rationale.
 		if _, isTimeout := callErr.(*dispatcherTimeoutError); isTimeout {
+			obs.RecordHandleTool(ctx, moduleName, params.Name, "timeout", durationMs)
+			obs.RecordHandleToolError(ctx, moduleName, params.Name, "timeout")
 			return marshalError(req.ID, -32603, "internal error: "+callErr.Error()), nil
 		}
 
@@ -142,6 +158,8 @@ func (d *Dispatcher) handleToolsCall(ctx context.Context, p muxcore.ProjectConte
 		// The proxy has already built a well-formed MCP content block; the
 		// dispatcher just wraps it in the envelope.
 		if piErr, isProxyIsErr := callErr.(*module.ProxyIsError); isProxyIsErr {
+			obs.RecordHandleTool(ctx, moduleName, params.Name, "module_error", durationMs)
+			obs.RecordHandleToolError(ctx, moduleName, params.Name, "module_error")
 			content := []json.RawMessage{piErr.RawContent}
 			result := map[string]any{
 				"content": content,
@@ -156,6 +174,8 @@ func (d *Dispatcher) handleToolsCall(ctx context.Context, p muxcore.ProjectConte
 		// JSON-RPC -32xxx error).
 		var modErr *module.ModuleError
 		if isModuleError(callErr, &modErr) {
+			obs.RecordHandleTool(ctx, moduleName, params.Name, "module_error", durationMs)
+			obs.RecordHandleToolError(ctx, moduleName, params.Name, modErr.Code)
 			content := []map[string]any{
 				{"type": "text", "text": modErr.Error()},
 			}
@@ -167,8 +187,16 @@ func (d *Dispatcher) handleToolsCall(ctx context.Context, p muxcore.ProjectConte
 		}
 
 		// Priority 3: internal / panic / unknown error → -32603.
+		// Panics are recovered in callWithTimeout and arrive here as plain errors
+		// containing "panic in tool" in their message. We treat all remaining
+		// errors as "internal" at the metric level.
+		obs.RecordHandleTool(ctx, moduleName, params.Name, "internal", durationMs)
+		obs.RecordHandleToolError(ctx, moduleName, params.Name, "internal")
 		return marshalError(req.ID, -32603, callErr.Error()), nil
 	}
+
+	// Success path — record ok status.
+	obs.RecordHandleTool(ctx, moduleName, params.Name, "ok", durationMs)
 
 	// Success: wrap the raw module result in the MCP content envelope.
 	content := []json.RawMessage{raw}

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/thebtf/engram/internal/module"
+	"github.com/thebtf/engram/internal/module/obs"
 	"github.com/thebtf/engram/internal/module/registry"
 )
 
@@ -57,12 +58,14 @@ func (p *Pipeline) Start(ctx context.Context, depsProvider func(name string) mod
 			return e.Module.Init(ctx, deps)
 		})
 
+		durationMs := time.Since(start).Milliseconds()
+
 		if err != nil {
 			p.logger.Error("module Init failed — aborting startup",
 				"module", name,
 				"phase", "init",
 				"error", err,
-				"duration_ms", time.Since(start).Milliseconds(),
+				"duration_ms", durationMs,
 			)
 			// Shutdown all already-initialised modules in reverse order.
 			// entries[:i] contains exactly the i modules that succeeded.
@@ -70,10 +73,12 @@ func (p *Pipeline) Start(ctx context.Context, depsProvider func(name string) mod
 			return fmt.Errorf("module %q Init failed: %w", name, err)
 		}
 
+		obs.RecordModuleInit(ctx, name, durationMs)
+
 		p.logger.Info("module initialised",
 			"module", name,
 			"phase", "init",
-			"duration_ms", time.Since(start).Milliseconds(),
+			"duration_ms", durationMs,
 		)
 	}
 	return nil

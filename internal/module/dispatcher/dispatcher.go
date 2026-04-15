@@ -14,6 +14,7 @@ import (
 	"sync/atomic"
 
 	"github.com/thebtf/engram/internal/module"
+	"github.com/thebtf/engram/internal/module/obs"
 	"github.com/thebtf/engram/internal/module/registry"
 	muxcore "github.com/thebtf/mcp-mux/muxcore"
 )
@@ -53,6 +54,7 @@ func New(r *registry.Registry, logger *slog.Logger) *Dispatcher {
 // Panic isolation (FR-15): each module callback runs under
 // recoverLifecycleCallback so a crashy module cannot stall session setup.
 func (d *Dispatcher) OnProjectConnect(p muxcore.ProjectContext) {
+	obs.IncrementActiveSessions(context.Background())
 	d.reg.ForEachLifecycleHandler(func(h module.ProjectLifecycle) {
 		recoverLifecycleCallback(
 			"", // name resolution deferred — logger field comes from d.logger
@@ -71,6 +73,7 @@ func (d *Dispatcher) OnProjectConnect(p muxcore.ProjectContext) {
 // disconnect — tasks outlive sessions. The dispatcher enforces nothing here
 // other than panic isolation.
 func (d *Dispatcher) OnProjectDisconnect(projectID string) {
+	obs.DecrementActiveSessions(context.Background())
 	d.reg.ForEachLifecycleHandler(func(h module.ProjectLifecycle) {
 		recoverLifecycleCallback(
 			"",
