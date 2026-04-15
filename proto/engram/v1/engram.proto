@@ -16,6 +16,100 @@ service EngramService {
 
   // Ping is a lightweight health check.
   rpc Ping(PingRequest) returns (PingResponse);
+
+  // ---- Phase B additions ---------------------------------------------
+
+  // SyncProjectState reconciles the daemon's local project registry
+  // against the server's authoritative list. Called by the daemon every
+  // 60 s as a heartbeat. The response drives ProjectRemovalAware fan-out
+  // for any project the daemon tracks locally but the server no longer
+  // knows about. Idempotent — multiple daemons can call concurrently.
+  rpc SyncProjectState(SyncProjectStateRequest) returns (SyncProjectStateResponse);
+
+  // ProjectEvents pushes project-lifecycle events in real time. Server-
+  // streaming RPC; the stream stays open for the daemon's lifetime.
+  // Delivery is at-least-once; the daemon is responsible for dedup.
+  rpc ProjectEvents(ProjectEventsRequest) returns (stream ProjectEvent);
+}
+
+// ---- SyncProjectState messages ----------------------------------------
+
+message SyncProjectStateRequest {
+  // local_project_ids is the set of ProjectContext.ID values the daemon
+  // currently tracks (one entry per connected CC session). Order is not
+  // significant. Max 10 000 entries (server enforces the cap via
+  // INVALID_ARGUMENT).
+  repeated string local_project_ids = 1;
+
+  // client_id uniquely identifies this daemon instance for audit logging.
+  // Typically `${daemon_pid}-${daemon_start_unix}`.
+  string client_id = 2;
+}
+
+message SyncProjectStateResponse {
+  // removed lists project IDs that the daemon has locally but the server
+  // has no record of (removed_at IS NOT NULL or not in table). The daemon
+  // fans these out to every registered ProjectRemovalAware module.
+  repeated string removed = 1;
+
+  // unknown lists project IDs that the server HAS a record of but that
+  // look orphaned (last heartbeat > 24h ago AND removed_at IS NULL). The
+  // daemon MAY log these for operator attention but does NOT fan them out
+  // — only `removed` is authoritative.
+  repeated string unknown = 2;
+
+  // server_time_unix_ms is the server's wall clock at the time the
+  // response was built. The daemon uses it for clock-skew detection.
+  int64 server_time_unix_ms = 3;
+}
+
+// ---- ProjectEvents messages -------------------------------------------
+
+message ProjectEventsRequest {
+  // client_id uniquely identifies this daemon instance for audit logging.
+  // Same format as SyncProjectStateRequest.client_id.
+  string client_id = 1;
+
+  // since_event_id allows the daemon to resume from a specific event after
+  // reconnection. Empty string means "start from now; no replay".
+  //
+  // In v0.1.0 the server is NOT required to persist events for replay —
+  // this field is reserved for forward compatibility. A v0.1.0 server
+  // that receives a non-empty since_event_id MUST return OUT_OF_RANGE.
+  string since_event_id = 2;
+}
+
+message ProjectEvent {
+  // event_id is a monotonically increasing server-side identifier for this
+  // event. Opaque to the daemon; used only for since_event_id replay.
+  string event_id = 1;
+
+  // event_type is the canonical event category. v0.1.0 only emits
+  // PROJECT_EVENT_TYPE_REMOVED; the field is forward-compatible via the
+  // ProjectEventType enum below.
+  ProjectEventType event_type = 2;
+
+  // project_id is the canonical muxcore ProjectContext.ID value.
+  string project_id = 3;
+
+  // timestamp_unix_ms is the server-side wall clock when the event was
+  // generated.
+  int64 timestamp_unix_ms = 4;
+
+  // reason is a free-form server-provided explanation (e.g. "dashboard
+  // operator removed", "retention policy expired").
+  string reason = 5;
+
+  // metadata is a key-value map for forward-compatible extension. v0.1.0
+  // does NOT define any required keys.
+  map<string, string> metadata = 6;
+}
+
+enum ProjectEventType {
+  PROJECT_EVENT_TYPE_UNSPECIFIED = 0;
+  PROJECT_EVENT_TYPE_REMOVED     = 1;
+  PROJECT_EVENT_TYPE_CREATED     = 2; // reserved for v0.2.0
+  PROJECT_EVENT_TYPE_RENAMED     = 3; // reserved for v0.2.0
 }
 
 // CallToolRequest carries an MCP tool invocation.
