@@ -1,6 +1,8 @@
 package moduletest
 
 import (
+	"context"
+
 	"github.com/thebtf/engram/internal/module"
 )
 
@@ -32,4 +34,27 @@ func (h *Harness) TakeSnapshot() (map[string][]byte, error) {
 	})
 
 	return result, firstErr
+}
+
+// TakeSnapshotToDir runs SnapshotAll on the underlying pipeline, writing per-module
+// snapshot files and MANIFEST.json to dir. It is equivalent to the production
+// SnapshotAll call but scoped to the test harness.
+//
+// daemonVersion is embedded in MANIFEST.json for forensic purposes.
+//
+// Panics with a descriptive message if called before Freeze.
+func (h *Harness) TakeSnapshotToDir(dir string, daemonVersion string) error {
+	h.assertFrozen("TakeSnapshotToDir")
+	_, err := h.pipeline.SnapshotAll(context.Background(), dir, daemonVersion)
+	return err
+}
+
+// RestoreFromDir runs Restore on the underlying pipeline, reading snapshot
+// files from dir. It is equivalent to the production Restore call but scoped
+// to the test harness.
+//
+// Panics with a descriptive message if called before Freeze.
+func (h *Harness) RestoreFromDir(dir string) error {
+	h.assertFrozen("RestoreFromDir")
+	return h.pipeline.Restore(context.Background(), dir)
 }
