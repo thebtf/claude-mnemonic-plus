@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"net"
 	"os"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -35,9 +36,9 @@ func newFakeModule(name string) *fakeModule {
 	return &fakeModule{name: name, removals: make(chan string, 32)}
 }
 
-func (f *fakeModule) Name() string                           { return f.name }
+func (f *fakeModule) Name() string                                      { return f.name }
 func (f *fakeModule) Init(_ context.Context, _ module.ModuleDeps) error { return nil }
-func (f *fakeModule) Shutdown(_ context.Context) error               { return nil }
+func (f *fakeModule) Shutdown(_ context.Context) error                  { return nil }
 func (f *fakeModule) OnProjectRemoved(projectID string) {
 	select {
 	case f.removals <- projectID:
@@ -57,6 +58,26 @@ func buildRegistry(mods ...module.EngramModule) *registry.Registry {
 	return r
 }
 
+// fakeTracker is an in-memory ProjectTracker for test injection. It returns
+// a fixed snapshot of project IDs. Tests that don't care about the tracked
+// set can use newFakeTracker() with no args for an empty snapshot.
+type fakeTracker struct {
+	ids []string
+}
+
+func newFakeTracker(ids ...string) *fakeTracker {
+	return &fakeTracker{ids: ids}
+}
+
+func (t *fakeTracker) ConnectedProjectIDs() []string {
+	if t == nil {
+		return nil
+	}
+	out := make([]string, len(t.ids))
+	copy(out, t.ids)
+	return out
+}
+
 // ---------------------------------------------------------------------------
 // Fake gRPC server
 // ---------------------------------------------------------------------------
@@ -68,20 +89,49 @@ type fakeEngramServer struct {
 
 	// eventCh allows tests to push events to connected stream clients.
 	eventCh chan *pb.ProjectEvent
-	// syncResp is the response returned by SyncProjectState.
+	// syncResp is the non-strict response returned by SyncProjectState.
+	// Ignored when syncStrict is true.
 	syncResp *pb.SyncProjectStateResponse
 	// syncCalled counts SyncProjectState invocations.
 	syncCalled atomic.Int32
 	// drop, when true, causes the next stream send to return an error
 	// (simulates server-side drop for reconnect tests).
 	drop atomic.Bool
+
+	// syncStrict, when true, enables intersection semantics in SyncProjectState:
+	// only IDs present in BOTH the request's local_project_ids AND the
+	// serverRemoved set are returned as removed. This matches the real
+	// engram-server implementation of FR-6. When false, syncResp is returned
+	// verbatim (legacy/dedup test behaviour).
+	syncStrict bool
+	// serverRemoved is the set of project IDs the server considers removed.
+	// Used only in strict mode.
+	serverRemoved map[string]struct{}
+
+	// syncReceivedMu protects syncReceived.
+	syncReceivedMu sync.Mutex
+	// syncReceived records every project ID ever sent in a SyncProjectState
+	// request's local_project_ids field. Tests use syncSawProject() to assert
+	// the bridge actually queried its ProjectTracker.
+	syncReceived map[string]struct{}
 }
 
 func newFakeServer() *fakeEngramServer {
 	return &fakeEngramServer{
-		eventCh:  make(chan *pb.ProjectEvent, 32),
-		syncResp: &pb.SyncProjectStateResponse{},
+		eventCh:      make(chan *pb.ProjectEvent, 32),
+		syncResp:     &pb.SyncProjectStateResponse{},
+		syncReceived: make(map[string]struct{}),
 	}
+}
+
+// syncSawProject reports whether the server ever received a SyncProjectState
+// request containing the given project ID in local_project_ids. Used by
+// regression tests to assert the bridge correctly queried its ProjectTracker.
+func (s *fakeEngramServer) syncSawProject(id string) bool {
+	s.syncReceivedMu.Lock()
+	defer s.syncReceivedMu.Unlock()
+	_, ok := s.syncReceived[id]
+	return ok
 }
 
 func (s *fakeEngramServer) ProjectEvents(req *pb.ProjectEventsRequest, stream pb.EngramService_ProjectEventsServer) error {
@@ -103,9 +153,32 @@ func (s *fakeEngramServer) ProjectEvents(req *pb.ProjectEventsRequest, stream pb
 	}
 }
 
-func (s *fakeEngramServer) SyncProjectState(_ context.Context, _ *pb.SyncProjectStateRequest) (*pb.SyncProjectStateResponse, error) {
+func (s *fakeEngramServer) SyncProjectState(_ context.Context, req *pb.SyncProjectStateRequest) (*pb.SyncProjectStateResponse, error) {
 	s.syncCalled.Add(1)
-	return s.syncResp, nil
+
+	// Record every incoming ID so tests can assert the bridge queried its
+	// ProjectTracker correctly.
+	s.syncReceivedMu.Lock()
+	for _, id := range req.GetLocalProjectIds() {
+		s.syncReceived[id] = struct{}{}
+	}
+	s.syncReceivedMu.Unlock()
+
+	if !s.syncStrict {
+		// Legacy/dedup test mode: return the pre-configured response verbatim.
+		return s.syncResp, nil
+	}
+
+	// Strict mode: intersect request IDs against serverRemoved. This matches
+	// the real engram-server FR-6 semantics: only IDs that are both in the
+	// client's local set AND in the server's removed set are returned.
+	resp := &pb.SyncProjectStateResponse{}
+	for _, id := range req.GetLocalProjectIds() {
+		if _, removed := s.serverRemoved[id]; removed {
+			resp.Removed = append(resp.Removed, id)
+		}
+	}
+	return resp, nil
 }
 
 // ---------------------------------------------------------------------------
@@ -168,7 +241,7 @@ func TestBridge_HappyPath_StreamEvent(t *testing.T) {
 	defer cleanup()
 
 	logger := testLogger()
-	bridge := NewBridge(logger, reg, client)
+	bridge := NewBridge(logger, reg, newFakeTracker(), client)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -209,7 +282,7 @@ func TestBridge_Reconnect(t *testing.T) {
 	defer cleanup()
 
 	logger := testLogger()
-	bridge := NewBridge(logger, reg, client)
+	bridge := NewBridge(logger, reg, newFakeTracker(), client)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -297,7 +370,7 @@ func TestBridge_DedupAcrossStreamAndHeartbeat(t *testing.T) {
 	defer cleanup()
 
 	logger := testLogger()
-	bridge := NewBridge(logger, reg, client)
+	bridge := NewBridge(logger, reg, newFakeTracker(), client)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -336,16 +409,24 @@ func TestBridge_DedupAcrossStreamAndHeartbeat(t *testing.T) {
 	bridge.Stop()
 }
 
-// TestBridge_HeartbeatCatchesMissed verifies that when the stream is down
-// but a removal was emitted, the heartbeat eventually catches it.
+// TestBridge_HeartbeatCatchesMissed verifies the full heartbeat safety net:
+// the bridge's fakeTracker is seeded with a live project ID, the fake server
+// is configured to intersect that ID against the incoming local_project_ids
+// list (matching real SyncProjectState semantics), and the bridge should fan
+// out OnProjectRemoved for the intersection. This test is the regression
+// guard for the CRIT finding on PR #171: previously the bridge tracked
+// projects only from REMOVED stream events, so heartbeat calls went out with
+// an empty local_project_ids and could never catch anything. The fix was to
+// have the bridge query dispatcher.ConnectedProjectIDs() on each tick; this
+// test proves the end-to-end contract works with a properly-behaving server.
 func TestBridge_HeartbeatCatchesMissed(t *testing.T) {
 	t.Parallel()
 
+	// Use a strict fake server that only reports IDs the bridge sent.
 	srv := newFakeServer()
-	// No stream events — heartbeat is the only delivery path.
-	srv.syncResp = &pb.SyncProjectStateResponse{
-		Removed: []string{"proj-missed"},
-	}
+	srv.syncStrict = true
+	// Pre-mark "proj-missed" as removed on the server side.
+	srv.serverRemoved = map[string]struct{}{"proj-missed": {}}
 
 	mod := newFakeModule("loom")
 	reg := buildRegistry(mod)
@@ -354,7 +435,10 @@ func TestBridge_HeartbeatCatchesMissed(t *testing.T) {
 	defer cleanup()
 
 	logger := testLogger()
-	bridge := NewBridge(logger, reg, client)
+	// Seed the bridge tracker with the live project — this is what the real
+	// dispatcher would have after OnProjectConnect("proj-missed").
+	tracker := newFakeTracker("proj-missed")
+	bridge := NewBridge(logger, reg, tracker, client)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -372,6 +456,15 @@ func TestBridge_HeartbeatCatchesMissed(t *testing.T) {
 	case <-time.After(500 * time.Millisecond):
 		t.Fatal("heartbeat did not fan out OnProjectRemoved")
 	}
+
+	// Sanity: the fake server should have recorded the request and confirmed
+	// that proj-missed was actually sent in local_project_ids.
+	if srv.syncCalled.Load() != 1 {
+		t.Errorf("expected exactly 1 SyncProjectState call, got %d", srv.syncCalled.Load())
+	}
+	if !srv.syncSawProject("proj-missed") {
+		t.Error("server never received proj-missed in local_project_ids — bridge did not query tracker")
+	}
 }
 
 // TestBridge_StopExitsCleanly verifies that Stop() unblocks within 5 s (NFR-9
@@ -387,7 +480,7 @@ func TestBridge_StopExitsCleanly(t *testing.T) {
 	defer cleanup()
 
 	logger := testLogger()
-	bridge := NewBridge(logger, reg, client)
+	bridge := NewBridge(logger, reg, newFakeTracker(), client)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

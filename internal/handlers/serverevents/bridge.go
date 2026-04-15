@@ -35,36 +35,49 @@ const (
 	heartbeatJitter = 10 * time.Second
 )
 
+// ProjectTracker is the read-only accessor for the set of currently-connected
+// project IDs on the daemon. The dispatcher.Dispatcher satisfies this
+// interface natively — its OnProjectConnect/Disconnect callbacks maintain
+// the underlying sync.Map. Tests inject a fake tracker to seed arbitrary
+// project sets.
+//
+// The bridge calls ConnectedProjectIDs on every heartbeat tick to build the
+// SyncProjectState request. Returning an empty slice is valid (no sessions).
+type ProjectTracker interface {
+	ConnectedProjectIDs() []string
+}
+
 // Bridge consumes engram-server's ProjectEvents stream and fans out
 // OnProjectRemoved to all ProjectRemovalAware modules in the daemon.
 //
 // Two concurrent paths provide at-least-once delivery:
-//   1. runEventStream — persistent gRPC server-streaming RPC with reconnect.
-//   2. runSyncTicker  — 60s ± 5s heartbeat via SyncProjectState.
+//  1. runEventStream — persistent gRPC server-streaming RPC with reconnect.
+//  2. runSyncTicker  — 60s ± 5s heartbeat via SyncProjectState.
 //
 // Events from both paths are deduplicated via an in-memory LRU so that
 // OnProjectRemoved fires exactly once per project per removal.
 //
-// Tracked-project option choice: **Option C** — the bridge maintains its
-// own sync.Map seeded by incoming ProjectEvents. It does NOT hook into the
-// dispatcher's OnProjectConnect/Disconnect because:
-//   a) The dispatcher does not expose connection hooks that the bridge can
-//      subscribe to (only module.ProjectLifecycle callbacks are available,
-//      which would require the bridge to be a full EngramModule).
-//   b) The loom module's tracked projects already drive cancellation via
-//      OnProjectRemoved; the bridge's SyncProjectState call is a safety net
-//      for missed events, not a primary source of truth.
-//   c) Starting with an empty local set is safe: the first ProjectEvents
-//      message seeds the tracker; the heartbeat catches everything after.
+// Tracked-project source: **Option A (revised 2026-04-15 for CRIT fix)** —
+// the bridge queries dispatcher.ConnectedProjectIDs() on every heartbeat to
+// get the authoritative local project set. The dispatcher already tracks
+// sessions via OnProjectConnect/Disconnect (added in Phase 5); exposing a
+// read-only accessor is a minimal framework change and lets the heartbeat
+// genuinely catch events missed during a stream drop.
+//
+// A previous implementation seeded a bridge-local sync.Map from
+// ProjectEvents stream messages, but that had a correctness bug: projects
+// that were only ever CONNECTED (never REMOVED) never entered the local
+// set, so the heartbeat could not report them to the server for
+// reconciliation. This was caught in PR #171 review.
 type Bridge struct {
 	clientID  string // "${pid}-${startUnix}" per proto-extensions.md
 	token     string // ENGRAM_API_TOKEN; empty = no auth
 	serverURL string // ENGRAM_SERVER_URL
 	logger    *slog.Logger
 	reg       *registry.Registry
+	tracker   ProjectTracker // live project IDs from the dispatcher (or fake in tests)
 	dedup     *lru
-	tracked   sync.Map     // projectID (string) → struct{} — seeded by stream events
-	client    EventsClient // injectable for tests
+	client    EventsClient     // injectable for tests
 	conn      *grpc.ClientConn // owned gRPC conn (nil when client is injected for tests)
 
 	cancel context.CancelFunc
@@ -80,9 +93,13 @@ type Bridge struct {
 // The logger should be scoped to the caller; the bridge prefixes its own
 // log entries with component="serverevents-bridge".
 //
+// The tracker parameter exposes the daemon's set of currently-connected
+// project IDs for the heartbeat path. In production it's the dispatcher
+// (which implements ConnectedProjectIDs natively). In tests inject a fake.
+//
 // The client parameter is used for test injection; pass nil for production
 // (the bridge will dial its own gRPC connection using serverURL + token).
-func NewBridge(logger *slog.Logger, reg *registry.Registry, client EventsClient) *Bridge {
+func NewBridge(logger *slog.Logger, reg *registry.Registry, tracker ProjectTracker, client EventsClient) *Bridge {
 	pid := os.Getpid()
 	startUnix := time.Now().Unix()
 	clientID := fmt.Sprintf("%d-%d", pid, startUnix)
@@ -99,6 +116,7 @@ func NewBridge(logger *slog.Logger, reg *registry.Registry, client EventsClient)
 		serverURL: serverURL,
 		logger:    logger.With("component", "serverevents-bridge", "client_id", clientID),
 		reg:       reg,
+		tracker:   tracker,
 		dedup:     newLRU(dedupCapacity),
 		client:    client,
 	}
@@ -241,9 +259,6 @@ func (b *Bridge) handleEvent(ev *pb.ProjectEvent) {
 		return
 	}
 
-	// Seed the local tracker so SyncProjectState heartbeat knows about this project.
-	b.tracked.Store(projectID, struct{}{})
-
 	// Use a stable, lowercase event type name for dedup so that stream events
 	// (which carry the proto enum) and heartbeat events (which use the literal
 	// string "removed") share the same key space.
@@ -341,17 +356,16 @@ func (b *Bridge) fanOutRemoval(projectID string) {
 	})
 }
 
-// localProjectIDs returns a snapshot of all project IDs the bridge currently
-// tracks (seeded by incoming stream events).
+// localProjectIDs returns a snapshot of all project IDs the daemon currently
+// has active sessions for, via the injected ProjectTracker. In production
+// this is dispatcher.ConnectedProjectIDs(), which is populated by
+// OnProjectConnect / OnProjectDisconnect callbacks. Returns an empty slice
+// if no sessions are active OR if the tracker is nil (defensive).
 func (b *Bridge) localProjectIDs() []string {
-	var ids []string
-	b.tracked.Range(func(k, _ any) bool {
-		if id, ok := k.(string); ok {
-			ids = append(ids, id)
-		}
-		return true
-	})
-	return ids
+	if b.tracker == nil {
+		return nil
+	}
+	return b.tracker.ConnectedProjectIDs()
 }
 
 // outgoingContext returns a derived context with the Bearer token attached

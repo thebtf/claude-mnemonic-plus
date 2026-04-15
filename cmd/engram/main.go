@@ -136,7 +136,11 @@ func main() {
 	// fan-outs complete before modules begin tearing down.
 	//
 	// If ENGRAM_SERVER_URL is not set the bridge logs a warning and is a no-op.
-	sevBridge := serverevents.NewBridge(logger, reg, nil /* production: dial own conn */)
+	// The dispatcher satisfies serverevents.ProjectTracker via its
+	// ConnectedProjectIDs() method, populated by OnProjectConnect /
+	// OnProjectDisconnect callbacks. This gives the heartbeat path real
+	// visibility into active sessions (Phase 5 CRIT fix from PR #171 review).
+	sevBridge := serverevents.NewBridge(logger, reg, disp, nil /* production: dial own conn */)
 	sevBridge.Start(daemonCtx)
 
 	logger.Info("engram daemon ready", "version", daemonVersion)
