@@ -439,3 +439,69 @@ func TestHandleRequest_ParseError_Returns32700(t *testing.T) {
 		t.Errorf("expected -32700, got: %+v", r.Error)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// ConnectedProjectIDs — Option A accessor for serverevents bridge heartbeat
+// ---------------------------------------------------------------------------
+
+// TestConnectedProjectIDs_EmptyTracker verifies the initial state: no
+// sessions connected yet → empty slice.
+func TestConnectedProjectIDs_EmptyTracker(t *testing.T) {
+	d := buildDispatcher(t)
+	ids := d.ConnectedProjectIDs()
+	if len(ids) != 0 {
+		t.Errorf("expected empty, got %v", ids)
+	}
+}
+
+// TestConnectedProjectIDs_AfterConnect verifies that OnProjectConnect adds
+// the project ID to the snapshot returned by ConnectedProjectIDs.
+func TestConnectedProjectIDs_AfterConnect(t *testing.T) {
+	d := buildDispatcher(t)
+	d.OnProjectConnect(projectCtx("proj-alpha"))
+	d.OnProjectConnect(projectCtx("proj-beta"))
+
+	ids := d.ConnectedProjectIDs()
+	if len(ids) != 2 {
+		t.Fatalf("expected 2 tracked IDs, got %d (%v)", len(ids), ids)
+	}
+	got := map[string]bool{}
+	for _, id := range ids {
+		got[id] = true
+	}
+	if !got["proj-alpha"] || !got["proj-beta"] {
+		t.Errorf("missing expected IDs in %v", ids)
+	}
+}
+
+// TestConnectedProjectIDs_AfterDisconnect verifies that OnProjectDisconnect
+// removes the project ID from the snapshot.
+func TestConnectedProjectIDs_AfterDisconnect(t *testing.T) {
+	d := buildDispatcher(t)
+	d.OnProjectConnect(projectCtx("proj-a"))
+	d.OnProjectConnect(projectCtx("proj-b"))
+	d.OnProjectDisconnect("proj-a")
+
+	ids := d.ConnectedProjectIDs()
+	if len(ids) != 1 {
+		t.Fatalf("expected 1 tracked ID, got %d (%v)", len(ids), ids)
+	}
+	if ids[0] != "proj-b" {
+		t.Errorf("expected proj-b, got %s", ids[0])
+	}
+}
+
+// TestConnectedProjectIDs_Snapshot verifies the returned slice is a
+// snapshot — mutations to the underlying tracked map after the call must
+// not affect the already-returned slice.
+func TestConnectedProjectIDs_Snapshot(t *testing.T) {
+	d := buildDispatcher(t)
+	d.OnProjectConnect(projectCtx("proj-x"))
+
+	snapshot := d.ConnectedProjectIDs()
+	d.OnProjectDisconnect("proj-x") // mutate after snapshot
+
+	if len(snapshot) != 1 || snapshot[0] != "proj-x" {
+		t.Errorf("snapshot was affected by post-call mutation: %v", snapshot)
+	}
+}
