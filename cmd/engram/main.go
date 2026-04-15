@@ -1,44 +1,40 @@
-// Package main is the engram daemon — a muxcore-based MCP engine that
-// translates MCP JSON-RPC to gRPC calls against the engram server.
+// Package main is the engram daemon entry point for v4.3.0. It wires the
+// modular framework (internal/module + internal/module/registry +
+// internal/module/lifecycle + internal/module/dispatcher) to the muxcore
+// engine and runs until the process receives SIGINT / SIGTERM.
+//
+// v4.2.0 was a monolithic engramHandler implementing muxcore.SessionHandler
+// and muxcore.ProjectLifecycle inline. In v4.3.0 all that logic lives in
+// internal/handlers/engramcore wrapped as an EngramModule +
+// ProxyToolProvider + ProjectLifecycle tenant, registered here via
+// wiring.go.
+//
+// Design reference: design.md §4.1 (startup/shutdown sequence), plan.md
+// Phase 5 (US2 engramcore first tenant), tasks T040/T041.
 package main
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
-	"net/url"
+	"log/slog"
 	"os"
 	"os/signal"
 	"path/filepath"
-	"strings"
-	"sync"
+	"syscall"
 	"time"
 
-	"github.com/thebtf/engram/internal/proxy"
-	pb "github.com/thebtf/engram/proto/engram/v1"
-	muxcore "github.com/thebtf/mcp-mux/muxcore"
+	"github.com/thebtf/engram/internal/control"
+	"github.com/thebtf/engram/internal/module"
+	"github.com/thebtf/engram/internal/module/dispatcher"
+	"github.com/thebtf/engram/internal/module/lifecycle"
+	"github.com/thebtf/engram/internal/module/registry"
 	"github.com/thebtf/mcp-mux/muxcore/engine"
 	"github.com/thebtf/mcp-mux/muxcore/upgrade"
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials"
-	"google.golang.org/grpc/credentials/insecure"
-	"google.golang.org/grpc/keepalive"
-	"google.golang.org/grpc/metadata"
 )
 
-// engramHandler implements muxcore.SessionHandler and muxcore.ProjectLifecycle.
-// It holds a pool of gRPC connections (keyed by address+TLS mode) and a cache
-// of resolved project slugs (keyed by ProjectContext.ID).
-type engramHandler struct {
-	grpcConns sync.Map // connKey → *grpc.ClientConn
-	slugCache sync.Map // ProjectContext.ID → string (resolved slug)
-}
-
-// connKey is the cache key for gRPC connections.
-type connKey struct {
-	addr    string
-	tlsMode string // "custom-ca", "system-tls", "plaintext"
-}
+// daemonVersion is the string reported to gRPC Initialize and used in
+// structured logs. Tracks Constitution §15 unified engram + plugin version.
+const daemonVersion = "v4.3.0"
 
 func main() {
 	// Clean stale binaries from previous upgrades (.old.* files).
@@ -48,392 +44,239 @@ func main() {
 		}
 	}
 
-	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
-	defer cancel()
+	logger := newRootLogger()
 
+	// --- Framework wiring ------------------------------------------------
+	reg := registry.New()
+	if err := registerModules(reg); err != nil {
+		logger.Error("module registration failed", "error", err)
+		os.Exit(1)
+	}
+	reg.Freeze()
+
+	logger.Info("module registry frozen",
+		"modules", reg.ListNames(),
+		"version", daemonVersion,
+	)
+
+	disp := dispatcher.New(reg, logger)
+	pipeline := lifecycle.New(reg, logger)
+
+	// Init context is distinct from daemon context — see design.md §3.2
+	// and clarification C3 (Init ctx vs deps.DaemonCtx).
+	initCtx, initCancel := context.WithCancel(context.Background())
+	daemonCtx, daemonCancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer daemonCancel()
+
+	if err := pipeline.Start(initCtx, depsProviderFor(logger, daemonCtx)); err != nil {
+		initCancel()
+		logger.Error("lifecycle Start failed", "error", err)
+		os.Exit(1)
+	}
+	initCancel()
+
+	// --- Control socket --------------------------------------------------
+	// Must be started BEFORE engine.Run so that ensure-binary.js can
+	// connect immediately after the PID file appears. The socket path is
+	// ${ENGRAM_DATA_DIR}/run/engram.sock. On Windows the Start() call is a
+	// no-op (named-pipe support deferred to v4.4.0).
+	dd := dataDir()
+	sockPath := control.SocketPath(dd)
+	pidPath := control.PIDPath(dd)
+	if err := os.MkdirAll(control.SocketDir(dd), 0o700); err != nil {
+		logger.Warn("could not create run directory for control socket",
+			"dir", control.SocketDir(dd),
+			"error", err,
+		)
+	}
+	ctrlListener := control.NewListener(sockPath, pidPath,
+		func(cmd string) string {
+			switch cmd {
+			case "graceful-restart":
+				go handleGracefulRestart(logger, pipeline, disp, filepath.Join(dd, "modules"))
+				return "ACK"
+			default:
+				return "ERR unknown command"
+			}
+		},
+		logger,
+	)
+	if err := ctrlListener.Start(); err != nil {
+		// Non-fatal: daemon continues without graceful-restart support.
+		logger.Warn("control socket start failed — graceful-restart unavailable",
+			"error", err,
+		)
+	}
+	defer ctrlListener.Close()
+
+	// --- muxcore engine boot ---------------------------------------------
+	// The dispatcher satisfies BOTH muxcore.SessionHandler (HandleRequest)
+	// and muxcore.ProjectLifecycle (OnProjectConnect/OnProjectDisconnect).
+	// muxcore type-asserts on the SessionHandler to detect the optional
+	// lifecycle methods — see muxcore.ProjectLifecycle docs.
 	eng, err := engine.New(engine.Config{
 		Name:           "engram",
 		Persistent:     true,
-		SessionHandler: &engramHandler{},
+		SessionHandler: disp,
 	})
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "[engram] engine error: %v\n", err)
+		logger.Error("engine.New failed", "error", err)
+		_ = pipeline.ShutdownAll(daemonCtx)
 		os.Exit(1)
 	}
 
-	if err := eng.Run(ctx); err != nil && err != context.Canceled {
-		fmt.Fprintf(os.Stderr, "[engram] fatal: %v\n", err)
+	logger.Info("engram daemon ready", "version", daemonVersion)
+
+	if err := eng.Run(daemonCtx); err != nil && err != context.Canceled {
+		logger.Error("engine.Run terminated", "error", err)
+		_ = pipeline.ShutdownAll(daemonCtx)
 		os.Exit(1)
 	}
+
+	logger.Info("engram daemon shutting down")
+	if err := pipeline.ShutdownAll(daemonCtx); err != nil {
+		logger.Error("lifecycle Shutdown error", "error", err)
+	}
 }
 
-// ---------------------------------------------------------------------------
-// SessionHandler implementation
-// ---------------------------------------------------------------------------
-
-// HandleRequest processes one MCP JSON-RPC request per session.
-// Implements muxcore.SessionHandler.
-func (h *engramHandler) HandleRequest(ctx context.Context, p muxcore.ProjectContext, request []byte) ([]byte, error) {
-	serverURL := envOrDefault(p.Env, "ENGRAM_URL")
-	if serverURL == "" {
-		return nil, fmt.Errorf("ENGRAM_URL not set")
-	}
-	token := envOrDefault(p.Env, "ENGRAM_API_TOKEN")
-	project := h.resolveProject(p)
-
-	conn, err := h.getOrDialGRPC(serverURL, token)
-	if err != nil {
-		return nil, fmt.Errorf("gRPC connect: %w", err)
-	}
-
-	client := pb.NewEngramServiceClient(conn)
-
-	var req jsonrpcRequest
-	if err := json.Unmarshal(request, &req); err != nil {
-		resp := jsonrpcResponse{
-			JSONRPC: "2.0",
-			ID:      req.ID,
-			Error:   &jsonrpcError{Code: -32700, Message: "Parse error"},
-		}
-		return json.Marshal(resp)
-	}
-
-	resp := handleJSONRPC(ctx, client, &req, project)
-	return json.Marshal(resp)
-}
-
-// OnProjectConnect is called when a CC session connects.
-// Implements muxcore.ProjectLifecycle.
-func (h *engramHandler) OnProjectConnect(p muxcore.ProjectContext) {
-	id, displayName, _, _ := proxy.ResolveProjectSlug(p.Cwd)
-	if id == "" {
-		id = p.ID
-		displayName = filepath.Base(p.Cwd)
-	}
-	fmt.Fprintf(os.Stderr, "[engram] session connected: project=%s (%s), cwd=%s\n", displayName, id, p.Cwd)
-}
-
-// OnProjectDisconnect is called when a CC session disconnects.
-// Implements muxcore.ProjectLifecycle.
-func (h *engramHandler) OnProjectDisconnect(projectID string) {
-	fmt.Fprintf(os.Stderr, "[engram] session disconnected: project=%s\n", projectID)
-}
-
-// ---------------------------------------------------------------------------
-// Helper methods
-// ---------------------------------------------------------------------------
-
-// envOrDefault returns the value from the session env map if present,
-// falling back to os.Getenv. Session env takes priority (per-project config).
-func envOrDefault(env map[string]string, key string) string {
-	if env != nil {
-		if v, ok := env[key]; ok && v != "" {
-			return v
-		}
-	}
-	return os.Getenv(key)
-}
-
-// resolveProject returns the engram project ID for the given session.
-// Result is cached per ProjectContext.ID to avoid repeated git operations.
-func (h *engramHandler) resolveProject(p muxcore.ProjectContext) string {
-	if cached, ok := h.slugCache.Load(p.ID); ok {
-		return cached.(string)
-	}
-	id, displayName, remote, err := proxy.ResolveProjectSlug(p.Cwd)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "[engram] warning: project identity failed for %s: %v\n", p.Cwd, err)
-		id = p.ID
-		displayName = filepath.Base(p.Cwd)
-	}
-	if remote != "" {
-		fmt.Fprintf(os.Stderr, "[engram] project: %s (%s, remote: %s)\n", displayName, id, safeRemoteURL(remote))
-	} else {
-		fmt.Fprintf(os.Stderr, "[engram] project: %s (%s)\n", displayName, id)
-	}
-	h.slugCache.Store(p.ID, id)
-	return id
-}
-
-// getOrDialGRPC returns a pooled gRPC connection for the given server URL.
-// Connections are created on first use and shared across sessions.
-func (h *engramHandler) getOrDialGRPC(serverURL, token string) (*grpc.ClientConn, error) {
-	grpcAddr, err := parseGRPCAddr(serverURL)
-	if err != nil {
-		return nil, fmt.Errorf("parse server URL: %w", err)
-	}
-
-	tlsMode := "plaintext"
-	if os.Getenv("ENGRAM_TLS_CA") != "" {
-		tlsMode = "custom-ca"
-	} else if strings.HasPrefix(serverURL, "https") {
-		tlsMode = "system-tls"
-	}
-
-	key := connKey{addr: grpcAddr, tlsMode: tlsMode}
-	if existing, ok := h.grpcConns.Load(key); ok {
-		return existing.(*grpc.ClientConn), nil
-	}
-
-	conn, err := dialGRPC(grpcAddr, serverURL, token)
-	if err != nil {
-		return nil, err
-	}
-
-	actual, loaded := h.grpcConns.LoadOrStore(key, conn)
-	if loaded {
-		// Another goroutine created the connection first — close ours.
-		conn.Close()
-		return actual.(*grpc.ClientConn), nil
-	}
-	return conn, nil
-}
-
-// ---------------------------------------------------------------------------
-// gRPC transport helpers
-// ---------------------------------------------------------------------------
-
-// parseGRPCAddr extracts host:port from a URL.
-// Example: "http://unleashed.lan:37777" → "unleashed.lan:37777".
-func parseGRPCAddr(serverURL string) (string, error) {
-	u, err := url.Parse(serverURL)
-	if err != nil {
-		return "", err
-	}
-	host := u.Hostname()
-	port := u.Port()
-	if port == "" {
-		switch u.Scheme {
-		case "https":
-			port = "443"
-		default:
-			port = "37777" // default engram gRPC port
-		}
-	}
-	return host + ":" + port, nil
-}
-
-// dialGRPC creates a gRPC client connection with keepalive and TLS settings.
+// handleGracefulRestart executes the full graceful-restart sequence:
+//  1. Log INFO
+//  2. Drain — stop accepting new tool calls (5 s sleep)
+//  3. SnapshotAll — persist module state
+//  4. ShutdownAll — clean module shutdown
+//  5. Check for a .new binary written by ensure-binary.js
+//  6. upgrade.Swap(currentExe, newExe) — atomic rename
+//  7. execReplace — exec-in-place (Unix) or spawn+exit (Windows)
 //
-// TLS is determined by the URL scheme:
-//  1. ENGRAM_TLS_CA set → TLS with custom CA file (overrides scheme)
-//  2. https:// → TLS with system CA pool
-//  3. http:// or no scheme → plaintext (no TLS)
-func dialGRPC(addr, serverURL, token string) (*grpc.ClientConn, error) {
-	opts := []grpc.DialOption{
-		grpc.WithKeepaliveParams(keepalive.ClientParameters{
-			Time:                30 * time.Second,
-			Timeout:             10 * time.Second,
-			PermitWithoutStream: true,
-		}),
-		grpc.WithDefaultCallOptions(
-			grpc.MaxCallRecvMsgSize(16<<20), // 16 MB
-			grpc.MaxCallSendMsgSize(16<<20),
-		),
+// Each phase is best-effort: failures are logged but do not abort later
+// phases. The whole sequence runs under a 60 s hard deadline so a stuck
+// module cannot hold up the restart indefinitely.
+//
+// Step 5 allows the command to be used even when no .new file exists (e.g.
+// admin-triggered restart or test). In that case steps 1–4 execute cleanly and
+// the daemon exits, leaving supervisor to restart it on the next CC session.
+//
+// Design reference: tasks.md T058.
+func handleGracefulRestart(
+	logger *slog.Logger,
+	pipeline *lifecycle.Pipeline,
+	disp *dispatcher.Dispatcher,
+	storageDir string,
+) {
+	const hardDeadline = 60 * time.Second
+
+	ctx, cancel := context.WithTimeout(context.Background(), hardDeadline)
+	defer cancel()
+
+	logger.Info("graceful restart initiated", "budget_s", hardDeadline.Seconds())
+
+	// Phase 1 — Drain: refuse new tool calls, wait for in-flight to finish.
+	if err := pipeline.Drain(ctx, disp, 5*time.Second); err != nil {
+		logger.Warn("Drain error (continuing)", "error", err)
 	}
 
-	tlsCA := os.Getenv("ENGRAM_TLS_CA")
-
-	switch {
-	case tlsCA != "":
-		creds, err := credentials.NewClientTLSFromFile(tlsCA, "")
-		if err != nil {
-			return nil, fmt.Errorf("load TLS CA: %w", err)
-		}
-		opts = append(opts, grpc.WithTransportCredentials(creds))
-		fmt.Fprintf(os.Stderr, "[engram] gRPC: TLS with custom CA\n")
-
-	case strings.HasPrefix(serverURL, "https"):
-		creds := credentials.NewClientTLSFromCert(nil, "")
-		opts = append(opts, grpc.WithTransportCredentials(creds))
-		fmt.Fprintf(os.Stderr, "[engram] gRPC: TLS with system CA\n")
-
-	default:
-		// http:// or no scheme → plaintext
-		opts = append(opts, grpc.WithTransportCredentials(insecure.NewCredentials()))
-		fmt.Fprintf(os.Stderr, "[engram] gRPC: plaintext\n")
+	// Phase 2 — Snapshot: persist module state.
+	if _, err := pipeline.SnapshotAll(ctx, storageDir, daemonVersion); err != nil {
+		logger.Warn("SnapshotAll error (continuing)", "error", err)
 	}
 
-	if token != "" {
-		opts = append(opts, grpc.WithUnaryInterceptor(tokenInterceptor(token)))
+	// Phase 3 — Shutdown: clean module teardown.
+	if err := pipeline.ShutdownAll(ctx); err != nil {
+		logger.Warn("ShutdownAll error (continuing)", "error", err)
 	}
 
-	return grpc.NewClient(addr, opts...)
-}
-
-// tokenInterceptor injects the Bearer token into every outgoing RPC.
-func tokenInterceptor(token string) grpc.UnaryClientInterceptor {
-	return func(ctx context.Context, method string, req, reply any, cc *grpc.ClientConn, invoker grpc.UnaryInvoker, opts ...grpc.CallOption) error {
-		ctx = metadata.AppendToOutgoingContext(ctx, "authorization", "Bearer "+token)
-		return invoker(ctx, method, req, reply, cc, opts...)
-	}
-}
-
-// ---------------------------------------------------------------------------
-// MCP JSON-RPC types
-// ---------------------------------------------------------------------------
-
-// jsonrpcRequest is a minimal MCP JSON-RPC 2.0 request envelope.
-type jsonrpcRequest struct {
-	JSONRPC string          `json:"jsonrpc"`
-	ID      json.RawMessage `json:"id"`
-	Method  string          `json:"method"`
-	Params  json.RawMessage `json:"params,omitempty"`
-}
-
-// jsonrpcResponse is a minimal MCP JSON-RPC 2.0 response envelope.
-type jsonrpcResponse struct {
-	JSONRPC string          `json:"jsonrpc"`
-	ID      json.RawMessage `json:"id"`
-	Result  json.RawMessage `json:"result,omitempty"`
-	Error   *jsonrpcError   `json:"error,omitempty"`
-}
-
-// jsonrpcError is the standard JSON-RPC error object.
-type jsonrpcError struct {
-	Code    int    `json:"code"`
-	Message string `json:"message"`
-}
-
-// ---------------------------------------------------------------------------
-// JSON-RPC dispatch
-// ---------------------------------------------------------------------------
-
-// handleJSONRPC dispatches a single JSON-RPC request to the appropriate handler.
-func handleJSONRPC(ctx context.Context, client pb.EngramServiceClient, req *jsonrpcRequest, project string) jsonrpcResponse {
-	switch req.Method {
-	case "initialize":
-		return handleInitialize(ctx, client, req, project)
-	case "tools/list":
-		return handleToolsList(ctx, client, req, project)
-	case "tools/call":
-		return handleToolsCall(ctx, client, req, project)
-	case "ping":
-		return handlePing(ctx, client, req)
-	case "notifications/initialized":
-		// Client notification — acknowledge with empty result.
-		return jsonrpcResponse{JSONRPC: "2.0", ID: req.ID, Result: json.RawMessage(`{}`)}
-	default:
-		return jsonrpcResponse{
-			JSONRPC: "2.0",
-			ID:      req.ID,
-			Error:   &jsonrpcError{Code: -32601, Message: fmt.Sprintf("method not found: %s", req.Method)},
-		}
-	}
-}
-
-// handleInitialize handles the MCP initialize request by calling the gRPC
-// Initialize RPC and returning the MCP capability negotiation response.
-func handleInitialize(ctx context.Context, client pb.EngramServiceClient, req *jsonrpcRequest, project string) jsonrpcResponse {
-	resp, err := client.Initialize(ctx, &pb.InitializeRequest{
-		ClientName:    "engram-daemon",
-		ClientVersion: "1.0.0",
-		Project:       project,
-	})
+	// Phase 4 — Find new binary.
+	currentExe, err := os.Executable()
 	if err != nil {
-		return grpcErrorResponse(req.ID, err)
+		logger.Error("os.Executable failed — cannot swap binary", "error", err)
+		os.Exit(1) // Signal failure to supervisor.
+		return
+	}
+	newExe := currentExe + ".new"
+
+	if _, statErr := os.Stat(newExe); os.IsNotExist(statErr) {
+		logger.Warn("no .new binary found — exiting for supervisor restart",
+			"looked_for", newExe,
+		)
+		os.Exit(0)
+		return
 	}
 
-	result := map[string]any{
-		"protocolVersion": "2024-11-05",
-		"capabilities": map[string]any{
-			"tools": map[string]any{},
-		},
-		"serverInfo": map[string]any{
-			"name":    resp.ServerName,
-			"version": resp.ServerVersion,
-		},
+	// Phase 5 — Atomic swap.
+	oldPath, swapErr := upgrade.Swap(currentExe, newExe)
+	if swapErr != nil {
+		logger.Error("upgrade.Swap failed — exiting for supervisor restart",
+			"current", currentExe,
+			"new", newExe,
+			"error", swapErr,
+		)
+		os.Exit(1) // Signal failure to supervisor.
+		return
 	}
-	resultJSON, _ := json.Marshal(result)
-	return jsonrpcResponse{JSONRPC: "2.0", ID: req.ID, Result: resultJSON}
+	logger.Info("binary swapped",
+		"old_backed_up_as", oldPath,
+		"new_active", currentExe,
+	)
+
+	// Phase 6 — Exec-replace.
+	if err := execReplace(currentExe, logger); err != nil {
+		logger.Error("exec-replace failed — supervisor will restart on next session",
+			"binary", currentExe,
+			"error", err,
+		)
+		os.Exit(1) // Signal failure to supervisor.
+	}
 }
 
-// handleToolsList handles the MCP tools/list request. It reuses the Initialize
-// RPC since that returns the tool list alongside server info.
-func handleToolsList(ctx context.Context, client pb.EngramServiceClient, req *jsonrpcRequest, project string) jsonrpcResponse {
-	resp, err := client.Initialize(ctx, &pb.InitializeRequest{Project: project})
-	if err != nil {
-		return grpcErrorResponse(req.ID, err)
+// newRootLogger returns a JSON-format slog logger by default, or a text
+// logger when ENGRAM_LOG_FORMAT=text is set. Structured by design decision
+// D12 and NFR-4 (structured logging).
+func newRootLogger() *slog.Logger {
+	var handler slog.Handler
+	if os.Getenv("ENGRAM_LOG_FORMAT") == "text" {
+		handler = slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo})
+	} else {
+		handler = slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo})
 	}
-
-	tools := make([]map[string]any, len(resp.Tools))
-	for i, t := range resp.Tools {
-		tool := map[string]any{
-			"name":        t.Name,
-			"description": t.Description,
-		}
-		if len(t.InputSchemaJson) > 0 {
-			var schema any
-			_ = json.Unmarshal(t.InputSchemaJson, &schema)
-			tool["inputSchema"] = schema
-		}
-		tools[i] = tool
-	}
-
-	result := map[string]any{"tools": tools}
-	resultJSON, _ := json.Marshal(result)
-	return jsonrpcResponse{JSONRPC: "2.0", ID: req.ID, Result: resultJSON}
+	return slog.New(handler).With("component", "engram-daemon", "version", daemonVersion)
 }
 
-// handleToolsCall handles the MCP tools/call request by invoking the gRPC
-// CallTool RPC and wrapping the result in the MCP content envelope.
-func handleToolsCall(ctx context.Context, client pb.EngramServiceClient, req *jsonrpcRequest, project string) jsonrpcResponse {
-	var params struct {
-		Name      string          `json:"name"`
-		Arguments json.RawMessage `json:"arguments"`
-	}
-	if err := json.Unmarshal(req.Params, &params); err != nil {
-		return jsonrpcResponse{
-			JSONRPC: "2.0",
-			ID:      req.ID,
-			Error:   &jsonrpcError{Code: -32602, Message: "invalid params"},
+// depsProviderFor returns a closure that builds a ModuleDeps value per
+// module. Each module gets its own slog.Logger (with the "module" field
+// attached), a private storage directory under $ENGRAM_DATA_DIR/modules/,
+// and a shared DaemonCtx that is cancelled on SIGINT/SIGTERM.
+//
+// Storage dir convention (clarification C5): ${DATA_DIR}/modules/${moduleName}/
+// with 0700 permissions. Created lazily on first module that needs it.
+func depsProviderFor(root *slog.Logger, daemonCtx context.Context) func(name string) module.ModuleDeps {
+	return func(name string) module.ModuleDeps {
+		storageDir := filepath.Join(dataDir(), "modules", name)
+		if err := os.MkdirAll(storageDir, 0o700); err != nil {
+			root.Warn("failed to create module storage dir",
+				"module", name,
+				"path", storageDir,
+				"error", err,
+			)
+		}
+		return module.ModuleDeps{
+			Logger:     root.With("module", name),
+			DaemonCtx:  daemonCtx,
+			StorageDir: storageDir,
+			Config:     nil, // module-specific config comes from env in v0.1.0
+			Notifier:   nil, // muxcore notifier wiring deferred to Phase 6
+			Lookup:     nil, // cross-module lookup not used by engramcore
 		}
 	}
-
-	resp, err := client.CallTool(ctx, &pb.CallToolRequest{
-		ToolName:      params.Name,
-		ArgumentsJson: params.Arguments,
-		Project:       project,
-	})
-	if err != nil {
-		return grpcErrorResponse(req.ID, err)
-	}
-
-	result := map[string]any{
-		"content": []map[string]any{
-			{"type": "text", "text": string(resp.ContentJson)},
-		},
-		"isError": resp.IsError,
-	}
-	resultJSON, _ := json.Marshal(result)
-	return jsonrpcResponse{JSONRPC: "2.0", ID: req.ID, Result: resultJSON}
 }
 
-// handlePing handles the MCP ping request via the gRPC Ping RPC.
-func handlePing(ctx context.Context, client pb.EngramServiceClient, req *jsonrpcRequest) jsonrpcResponse {
-	_, err := client.Ping(ctx, &pb.PingRequest{})
-	if err != nil {
-		return grpcErrorResponse(req.ID, err)
+// dataDir returns the engram data directory. Honors ENGRAM_DATA_DIR env var
+// with a sensible fallback under the user's home directory.
+func dataDir() string {
+	if dir := os.Getenv("ENGRAM_DATA_DIR"); dir != "" {
+		return dir
 	}
-	return jsonrpcResponse{JSONRPC: "2.0", ID: req.ID, Result: json.RawMessage(`{}`)}
-}
-
-// grpcErrorResponse wraps a gRPC error as a JSON-RPC internal error response.
-func grpcErrorResponse(id json.RawMessage, err error) jsonrpcResponse {
-	return jsonrpcResponse{
-		JSONRPC: "2.0",
-		ID:      id,
-		Error:   &jsonrpcError{Code: -32603, Message: err.Error()},
+	if home, err := os.UserHomeDir(); err == nil {
+		return filepath.Join(home, ".engram")
 	}
-}
-
-// safeRemoteURL strips any embedded userinfo (e.g. tokens in
-// https://token@host/path) before the URL is written to logs.
-func safeRemoteURL(raw string) string {
-	u, err := url.Parse(raw)
-	if err != nil {
-		return raw
-	}
-	u.User = nil
-	return u.String()
+	return filepath.Join(os.TempDir(), "engram")
 }

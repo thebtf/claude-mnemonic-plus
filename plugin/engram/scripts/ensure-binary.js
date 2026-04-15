@@ -126,6 +126,95 @@ async function main() {
 
   fs.writeFileSync(versionFile, desiredVersion);
   process.stderr.write(`[engram] installed v${desiredVersion} → ${binaryPath}\n`);
+
+  // Signal the running daemon to gracefully restart so it picks up the new
+  // binary without waiting for the next Claude Code session start.
+  await notifyDaemonRestart(pluginData, platform);
+}
+
+// notifyDaemonRestart sends the "graceful-restart" command to the running
+// daemon via the engram control socket, then waits for ACK.
+//
+// Failure modes are all non-fatal (return without throwing) so a failed
+// notification never prevents the plugin from continuing.
+//
+// Platform support:
+//   - Linux / macOS: connects to ${ENGRAM_DATA_DIR}/run/engram.sock
+//   - Windows: named-pipe support deferred to v4.4.0 — logs WARN and returns
+async function notifyDaemonRestart(pluginData, platform) {
+  // The ENGRAM_DATA_DIR env var controls where the daemon stores its files.
+  // Fall back to ${pluginData} (plugin's persistent data dir) if unset —
+  // this mirrors the daemon's own dataDir() fallback logic in main.go.
+  const engramDataDir = process.env.ENGRAM_DATA_DIR || pluginData;
+  const pidPath = path.join(engramDataDir, "run", "engram.pid");
+  const sockPath = path.join(engramDataDir, "run", "engram.sock");
+
+  // Windows: named-pipe support deferred to v4.4.0 (no dependency on
+  // third-party named-pipe helpers). The daemon will be restarted by the
+  // supervisor on the next Claude Code session start.
+  if (platform === "win32") {
+    process.stderr.write(
+      "[engram] graceful-restart skipped on Windows (named-pipe support deferred to v4.4.0)\n"
+    );
+    return;
+  }
+
+  // If the PID file is missing the daemon is not running — first install.
+  if (!fs.existsSync(pidPath)) {
+    return; // First install — nothing to restart.
+  }
+
+  try {
+    const ack = await sendControlCommand(sockPath, "graceful-restart");
+    if (ack === "ACK") {
+      process.stderr.write("[engram] graceful-restart acknowledged by daemon\n");
+    } else {
+      process.stderr.write(`[engram] warn: unexpected daemon response: ${ack}\n`);
+    }
+  } catch (err) {
+    // ECONNREFUSED or ENOENT → daemon already shut down or socket gone.
+    // This is expected during first-time installs or if the daemon crashed.
+    process.stderr.write(
+      `[engram] warn: could not reach daemon control socket (${err.code || err.message}) — daemon will restart on next session\n`
+    );
+  }
+}
+
+// sendControlCommand connects to the Unix domain socket at sockPath, sends
+// command + "\n", reads the response line, and returns it (without "\n").
+// Rejects on connect failure, timeout, or socket errors.
+function sendControlCommand(sockPath, command) {
+  return new Promise((resolve, reject) => {
+    const net = require("net");
+    const conn = net.createConnection(sockPath);
+
+    // 3-second timeout — the daemon should respond almost instantly.
+    conn.setTimeout(3000);
+
+    let buf = "";
+
+    conn.on("connect", () => {
+      conn.write(command + "\n");
+    });
+
+    conn.on("data", (chunk) => {
+      buf += chunk.toString();
+      const newlineIdx = buf.indexOf("\n");
+      if (newlineIdx !== -1) {
+        const line = buf.slice(0, newlineIdx).replace(/\r$/, "");
+        conn.destroy();
+        resolve(line);
+      }
+    });
+
+    conn.on("timeout", () => {
+      conn.destroy(new Error("socket timeout"));
+    });
+
+    conn.on("error", (err) => {
+      reject(err);
+    });
+  });
 }
 
 // Follow redirects (GitHub releases redirect to S3)
