@@ -57,14 +57,15 @@ const (
 //   c) Starting with an empty local set is safe: the first ProjectEvents
 //      message seeds the tracker; the heartbeat catches everything after.
 type Bridge struct {
-	clientID    string // "${pid}-${startUnix}" per proto-extensions.md
-	token       string // ENGRAM_API_TOKEN; empty = no auth
-	serverURL   string // ENGRAM_SERVER_URL
-	logger      *slog.Logger
-	reg         *registry.Registry
-	dedup       *lru
-	tracked     sync.Map  // projectID (string) → struct{} — seeded by stream events
-	client      EventsClient // injectable for tests
+	clientID  string // "${pid}-${startUnix}" per proto-extensions.md
+	token     string // ENGRAM_API_TOKEN; empty = no auth
+	serverURL string // ENGRAM_SERVER_URL
+	logger    *slog.Logger
+	reg       *registry.Registry
+	dedup     *lru
+	tracked   sync.Map     // projectID (string) → struct{} — seeded by stream events
+	client    EventsClient // injectable for tests
+	conn      *grpc.ClientConn // owned gRPC conn (nil when client is injected for tests)
 
 	cancel context.CancelFunc
 	wg     sync.WaitGroup
@@ -117,12 +118,14 @@ func (b *Bridge) Start(ctx context.Context) {
 	}
 
 	// If no client was injected (production path), dial our own connection.
+	// Store the conn so Stop() can close it and release OS resources.
 	if b.client == nil {
 		conn, err := b.dialGRPC()
 		if err != nil {
 			b.logger.Error("serverevents bridge: failed to dial gRPC", "error", err)
 			return
 		}
+		b.conn = conn
 		b.client = newGRPCEventsClient(conn)
 	}
 
@@ -152,6 +155,11 @@ func (b *Bridge) Stop() {
 		b.cancel()
 	}
 	b.wg.Wait()
+	// Close the owned gRPC connection (only set when the bridge dialled itself).
+	// Test-injected clients manage their own connection lifetime.
+	if b.conn != nil {
+		_ = b.conn.Close()
+	}
 	b.logger.Info("serverevents bridge stopped")
 }
 
