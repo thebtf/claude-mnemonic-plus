@@ -124,20 +124,21 @@ func NewBridge(logger *slog.Logger, reg *registry.Registry, tracker ProjectTrack
 
 // Start launches the runEventStream and runSyncTicker goroutines under the
 // given parent context. It is safe to call exactly once. If the bridge has
-// no server URL configured it logs a warning and returns immediately.
+// no server URL configured AND no test client was injected, it logs a
+// warning and returns immediately (production no-op path).
 //
 // The bridge does NOT own the parent context — the caller (main.go) owns the
 // daemon context and passes it in. Stop() cancels the bridge's internal
 // derived context.
 func (b *Bridge) Start(ctx context.Context) {
-	if b.serverURL == "" {
-		b.logger.Warn("serverevents bridge disabled: ENGRAM_SERVER_URL not set")
-		return
-	}
-
-	// If no client was injected (production path), dial our own connection.
-	// Store the conn so Stop() can close it and release OS resources.
+	// A test-injected client bypasses the serverURL check: tests create a
+	// bufconn-backed EventsClient and never set ENGRAM_SERVER_URL. Only the
+	// production path (no injected client) requires a configured URL.
 	if b.client == nil {
+		if b.serverURL == "" {
+			b.logger.Warn("serverevents bridge disabled: ENGRAM_SERVER_URL not set")
+			return
+		}
 		conn, err := b.dialGRPC()
 		if err != nil {
 			b.logger.Error("serverevents bridge: failed to dial gRPC", "error", err)
