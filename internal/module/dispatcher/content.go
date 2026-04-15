@@ -68,12 +68,26 @@ func (d *Dispatcher) handleToolsList(ctx context.Context, p muxcore.ProjectConte
 // found, return JSON-RPC -32601. If found, call the owning module's
 // HandleTool under a 30 s hard cap with panic recovery.
 //
+// Drain mode (T057): when d.draining is set, new tool-call requests are
+// rejected immediately with JSON-RPC -32603 "daemon draining, retry after
+// restart". In-flight calls that already passed this check are unaffected.
+//
 // Error taxonomy (design.md Section 3.4):
 //   - Protocol errors (-32xxx): returned as JSON-RPC "error" field.
 //   - Module errors (*module.ModuleError): returned as JSON-RPC "result" with
 //     isError=true in the content block. NOT as JSON-RPC error — per FR-12.
 //   - Internal errors (panic, timeout): mapped to -32603 internal error.
 func (d *Dispatcher) handleToolsCall(ctx context.Context, p muxcore.ProjectContext, req *jsonrpcRequest) ([]byte, error) {
+	// Drain guard: reject new calls while daemon is preparing to restart.
+	// This check is intentionally BEFORE parameter parsing so that the -32603
+	// response is emitted as cheaply as possible. The ID may be null if parsing
+	// has not happened yet; we do a best-effort parse of the ID from the raw
+	// request params inside the existing req struct (already parsed by
+	// HandleRequest).
+	if d.draining.Load() {
+		return marshalError(req.ID, -32603, "daemon draining, retry after restart"), nil
+	}
+
 	var params struct {
 		Name      string          `json:"name"`
 		Arguments json.RawMessage `json:"arguments"`

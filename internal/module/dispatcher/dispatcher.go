@@ -11,6 +11,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"sync/atomic"
 
 	"github.com/thebtf/engram/internal/module"
 	"github.com/thebtf/engram/internal/module/registry"
@@ -29,9 +30,14 @@ import (
 // Design decision D18: no sync.Mutex — the freeze-then-read contract provides
 // thread safety. See design.md Section 5.9 (dispatcher safety) for the
 // composition rule.
+//
+// draining is an atomic flag (see drain.go) that, when set, causes
+// handleToolsCall to reject new requests. It is the only mutable field; all
+// accesses go through atomic.Bool so no mutex is needed.
 type Dispatcher struct {
-	reg    *registry.Registry
-	logger *slog.Logger
+	reg      *registry.Registry
+	logger   *slog.Logger
+	draining atomic.Bool
 }
 
 // New creates a Dispatcher bound to the given frozen registry and logger.
