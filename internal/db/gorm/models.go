@@ -367,12 +367,16 @@ func (TelemetrySnapshot) TableName() string { return "telemetry_snapshots" }
 // Maps a canonical git-remote-based project ID to optional legacy path-based aliases,
 // enabling zero-downtime migration when clients upgrade to git-remote IDs.
 type Project struct {
-	GitRemote    sql.NullString `gorm:"column:git_remote;index"`
-	RelativePath sql.NullString `gorm:"column:relative_path"`
-	DisplayName  sql.NullString `gorm:"column:display_name"`
-	LegacyIDs    pq.StringArray `gorm:"column:legacy_ids;type:text[]"`
-	ID           string         `gorm:"primaryKey"`
-	CreatedAt    time.Time      `gorm:"autoCreateTime"`
+	GitRemote     sql.NullString `gorm:"column:git_remote;index"`
+	RelativePath  sql.NullString `gorm:"column:relative_path"`
+	DisplayName   sql.NullString `gorm:"column:display_name"`
+	// RemovedAt marks the project as soft-deleted. NULL means live. Set by DELETE /api/projects/{id}.
+	RemovedAt     *time.Time     `gorm:"column:removed_at;default:null"`
+	// LastHeartbeat records the last SyncProjectState call from a daemon tracking this project.
+	LastHeartbeat *time.Time     `gorm:"column:last_heartbeat"`
+	LegacyIDs     pq.StringArray `gorm:"column:legacy_ids;type:text[]"`
+	ID            string         `gorm:"primaryKey"`
+	CreatedAt     time.Time      `gorm:"autoCreateTime"`
 }
 
 func (Project) TableName() string { return "projects" }

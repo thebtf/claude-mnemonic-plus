@@ -2666,6 +2666,41 @@ WHERE utility_propagated_at IS NOT NULL`).Error
 				return nil
 			},
 		},
+
+		// Migration 082: Project lifecycle columns for soft-delete and heartbeat tracking.
+		// Adds removed_at (soft-delete timestamp) and last_heartbeat (daemon activity tracking)
+		// to the projects table. Strictly additive — no data is modified.
+		{
+			ID: "082_projects_lifecycle",
+			Migrate: func(tx *gorm.DB) error {
+				sqls := []string{
+					`ALTER TABLE projects ADD COLUMN IF NOT EXISTS removed_at TIMESTAMPTZ NULL`,
+					`ALTER TABLE projects ADD COLUMN IF NOT EXISTS last_heartbeat TIMESTAMPTZ DEFAULT NOW()`,
+					`CREATE INDEX IF NOT EXISTS idx_projects_removed_at ON projects(removed_at) WHERE removed_at IS NOT NULL`,
+					`CREATE INDEX IF NOT EXISTS idx_projects_last_heartbeat ON projects(last_heartbeat)`,
+				}
+				for _, s := range sqls {
+					if err := tx.Exec(s).Error; err != nil {
+						return fmt.Errorf("migration 082: %w", err)
+					}
+				}
+				return nil
+			},
+			Rollback: func(tx *gorm.DB) error {
+				sqls := []string{
+					`DROP INDEX IF EXISTS idx_projects_last_heartbeat`,
+					`DROP INDEX IF EXISTS idx_projects_removed_at`,
+					`ALTER TABLE projects DROP COLUMN IF EXISTS last_heartbeat`,
+					`ALTER TABLE projects DROP COLUMN IF EXISTS removed_at`,
+				}
+				for _, s := range sqls {
+					if err := tx.Exec(s).Error; err != nil {
+						return fmt.Errorf("migration 082 rollback: %w", err)
+					}
+				}
+				return nil
+			},
+		},
 	})
 	if err := m.Migrate(); err != nil {
 		return fmt.Errorf("run gormigrate migrations: %w", err)
