@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"log/slog"
 
+	"github.com/thebtf/engram/internal/module"
 	"github.com/thebtf/engram/internal/module/registry"
 	muxcore "github.com/thebtf/mcp-mux/muxcore"
 )
@@ -37,6 +38,41 @@ type Dispatcher struct {
 // The registry MUST be frozen before the dispatcher processes any requests.
 func New(r *registry.Registry, logger *slog.Logger) *Dispatcher {
 	return &Dispatcher{reg: r, logger: logger}
+}
+
+// OnProjectConnect implements muxcore.ProjectLifecycle. It fans out the
+// session-connect event to every module that implements
+// module.ProjectLifecycle, preserving registration order.
+//
+// Panic isolation (FR-15): each module callback runs under
+// recoverLifecycleCallback so a crashy module cannot stall session setup.
+func (d *Dispatcher) OnProjectConnect(p muxcore.ProjectContext) {
+	d.reg.ForEachLifecycleHandler(func(h module.ProjectLifecycle) {
+		recoverLifecycleCallback(
+			"", // name resolution deferred — logger field comes from d.logger
+			"OnSessionConnect",
+			d.logger,
+			func() { h.OnSessionConnect(p) },
+		)
+	})
+}
+
+// OnProjectDisconnect implements muxcore.ProjectLifecycle. It fans out the
+// session-disconnect event to every module that implements
+// module.ProjectLifecycle, preserving registration order.
+//
+// Per design.md §3.3 modules MUST NOT cancel long-running tasks on
+// disconnect — tasks outlive sessions. The dispatcher enforces nothing here
+// other than panic isolation.
+func (d *Dispatcher) OnProjectDisconnect(projectID string) {
+	d.reg.ForEachLifecycleHandler(func(h module.ProjectLifecycle) {
+		recoverLifecycleCallback(
+			"",
+			"OnSessionDisconnect",
+			d.logger,
+			func() { h.OnSessionDisconnect(projectID) },
+		)
+	})
 }
 
 // HandleRequest implements muxcore.SessionHandler. It parses the incoming

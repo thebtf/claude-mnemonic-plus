@@ -123,6 +123,19 @@ func (d *Dispatcher) handleToolsCall(ctx context.Context, p muxcore.ProjectConte
 			return marshalError(req.ID, -32603, "internal error: "+callErr.Error()), nil
 		}
 
+		// Priority 1.5: ProxyToolProvider-returned isError sentinel → emit the
+		// raw content block with isError:true per FR-11a NFR-5 byte identity.
+		// The proxy has already built a well-formed MCP content block; the
+		// dispatcher just wraps it in the envelope.
+		if piErr, isProxyIsErr := callErr.(*module.ProxyIsError); isProxyIsErr {
+			content := []json.RawMessage{piErr.RawContent}
+			result := map[string]any{
+				"content": content,
+				"isError": true,
+			}
+			return marshalResult(req.ID, result), nil
+		}
+
 		// Priority 2: module-returned structured error → result-level per FR-12.
 		// AI agents parse this structured error and decide retry strategy; the
 		// transport layer does NOT auto-retry (which is why this is NOT a
