@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"github.com/thebtf/engram/internal/control"
+	"github.com/thebtf/engram/internal/handlers/serverevents"
 	"github.com/thebtf/engram/internal/module"
 	"github.com/thebtf/engram/internal/module/dispatcher"
 	"github.com/thebtf/engram/internal/module/lifecycle"
@@ -125,15 +126,34 @@ func main() {
 		os.Exit(1)
 	}
 
+	// --- Serverevents bridge -----------------------------------------------
+	// Start the bridge that consumes engram-server's ProjectEvents gRPC stream
+	// and fans out OnProjectRemoved to all ProjectRemovalAware modules. The
+	// bridge runs in the background for the daemon's lifetime.
+	//
+	// The bridge is started after the muxcore engine is ready (modules are
+	// initialised) and stopped before pipeline.ShutdownAll so that in-flight
+	// fan-outs complete before modules begin tearing down.
+	//
+	// If ENGRAM_SERVER_URL is not set the bridge logs a warning and is a no-op.
+	// The dispatcher satisfies serverevents.ProjectTracker via its
+	// ConnectedProjectIDs() method, populated by OnProjectConnect /
+	// OnProjectDisconnect callbacks. This gives the heartbeat path real
+	// visibility into active sessions (Phase 5 CRIT fix from PR #171 review).
+	sevBridge := serverevents.NewBridge(logger, reg, disp, nil /* production: dial own conn */)
+	sevBridge.Start(daemonCtx)
+
 	logger.Info("engram daemon ready", "version", daemonVersion)
 
 	if err := eng.Run(daemonCtx); err != nil && err != context.Canceled {
 		logger.Error("engine.Run terminated", "error", err)
+		sevBridge.Stop()
 		_ = pipeline.ShutdownAll(daemonCtx)
 		os.Exit(1)
 	}
 
 	logger.Info("engram daemon shutting down")
+	sevBridge.Stop()
 	if err := pipeline.ShutdownAll(daemonCtx); err != nil {
 		logger.Error("lifecycle Shutdown error", "error", err)
 	}

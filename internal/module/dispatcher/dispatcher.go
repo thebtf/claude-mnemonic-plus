@@ -11,6 +11,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"sync"
 	"sync/atomic"
 
 	"github.com/thebtf/engram/internal/module"
@@ -19,26 +20,33 @@ import (
 	muxcore "github.com/thebtf/mcp-mux/muxcore"
 )
 
-// Dispatcher is a stateless MCP protocol handler. It holds only an immutable
-// reference to the frozen registry and dispatches incoming JSON-RPC requests
-// to the appropriate module.
+// Dispatcher is an MCP protocol handler that sits between muxcore's
+// SessionHandler contract and the module registry. It is mostly stateless —
+// the registry is immutable after Freeze and the toolIndex map is read-only —
+// but it tracks two pieces of lock-free mutable state:
+//
+//  1. draining (atomic.Bool, see drain.go) — when set, handleToolsCall
+//     rejects new requests for graceful restart.
+//  2. tracked (sync.Map) — maps projectID → struct{} for every project the
+//     dispatcher has seen via OnProjectConnect but not yet OnProjectDisconnect.
+//     Exposed read-only via ConnectedProjectIDs() for the serverevents
+//     bridge's SyncProjectState heartbeat (v4.4.0 US4).
+//
+// Design decision D18 (revised 2026-04-15 for Phase 5): "no mutex" now means
+// "no mutex in the hot HandleRequest path". The session-lifecycle callbacks
+// use sync.Map which is lock-free for reads and amortised O(1) for writes —
+// they are not in the tool-dispatch hot path.
 //
 // HandleRequest is safe for concurrent calls from multiple goroutines because:
 //   - The registry is immutable after Freeze.
 //   - The toolIndex map is read-only (no writes after Register).
-//   - No per-session or per-request state is stored.
-//
-// Design decision D18: no sync.Mutex — the freeze-then-read contract provides
-// thread safety. See design.md Section 5.9 (dispatcher safety) for the
-// composition rule.
-//
-// draining is an atomic flag (see drain.go) that, when set, causes
-// handleToolsCall to reject new requests. It is the only mutable field; all
-// accesses go through atomic.Bool so no mutex is needed.
+//   - draining is an atomic.Bool.
+//   - tracked is a sync.Map — the HandleRequest path never touches it.
 type Dispatcher struct {
 	reg      *registry.Registry
 	logger   *slog.Logger
 	draining atomic.Bool
+	tracked  sync.Map // projectID (string) → struct{} — active sessions per US4
 }
 
 // New creates a Dispatcher bound to the given frozen registry and logger.
@@ -47,13 +55,36 @@ func New(r *registry.Registry, logger *slog.Logger) *Dispatcher {
 	return &Dispatcher{reg: r, logger: logger}
 }
 
-// OnProjectConnect implements muxcore.ProjectLifecycle. It fans out the
-// session-connect event to every module that implements
+// ConnectedProjectIDs returns a snapshot of all project IDs with an active
+// session as observed by OnProjectConnect / OnProjectDisconnect callbacks.
+// Order is not stable (sync.Map iteration order). The snapshot is consistent
+// at the moment of the call — subsequent connect/disconnect events are not
+// reflected.
+//
+// This accessor is used by internal/handlers/serverevents/Bridge to populate
+// SyncProjectState heartbeat requests so the server can reconcile its
+// authoritative project list against the daemon's live set (v4.4.0 FR-9 +
+// US4). Returning an empty slice is valid (no active sessions).
+func (d *Dispatcher) ConnectedProjectIDs() []string {
+	var ids []string
+	d.tracked.Range(func(k, _ any) bool {
+		if id, ok := k.(string); ok {
+			ids = append(ids, id)
+		}
+		return true
+	})
+	return ids
+}
+
+// OnProjectConnect implements muxcore.ProjectLifecycle. It records the
+// project in the tracked set, increments the active-sessions metric, and
+// fans out the session-connect event to every module that implements
 // module.ProjectLifecycle, preserving registration order.
 //
 // Panic isolation (FR-15): each module callback runs under
 // recoverLifecycleCallback so a crashy module cannot stall session setup.
 func (d *Dispatcher) OnProjectConnect(p muxcore.ProjectContext) {
+	d.tracked.Store(p.ID, struct{}{})
 	obs.IncrementActiveSessions(context.Background())
 	d.reg.ForEachLifecycleHandler(func(h module.ProjectLifecycle) {
 		recoverLifecycleCallback(
@@ -65,14 +96,16 @@ func (d *Dispatcher) OnProjectConnect(p muxcore.ProjectContext) {
 	})
 }
 
-// OnProjectDisconnect implements muxcore.ProjectLifecycle. It fans out the
-// session-disconnect event to every module that implements
+// OnProjectDisconnect implements muxcore.ProjectLifecycle. It removes the
+// project from the tracked set, decrements the active-sessions metric, and
+// fans out the session-disconnect event to every module that implements
 // module.ProjectLifecycle, preserving registration order.
 //
 // Per design.md §3.3 modules MUST NOT cancel long-running tasks on
 // disconnect — tasks outlive sessions. The dispatcher enforces nothing here
 // other than panic isolation.
 func (d *Dispatcher) OnProjectDisconnect(projectID string) {
+	d.tracked.Delete(projectID)
 	obs.DecrementActiveSessions(context.Background())
 	d.reg.ForEachLifecycleHandler(func(h module.ProjectLifecycle) {
 		recoverLifecycleCallback(
