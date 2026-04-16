@@ -1103,14 +1103,6 @@ func buildHitRateAnalyticsResponse(rows []hitRateAnalyticsRow) map[string]any {
 	}
 }
 
-func (s *Service) handleMCPHitRateAnalytics(ctx context.Context, project string, limit int) (string, error) {
-	rows, err := s.queryHitRateAnalyticsRows(ctx, project, limit)
-	if err != nil {
-		return "", err
-	}
-	return formatHitRateAnalyticsMarkdown(rows), nil
-}
-
 func (s *Service) handleGetHitRateAnalytics(w http.ResponseWriter, r *http.Request) {
 	if s.observationStore == nil {
 		writeJSON(w, map[string]any{"high_value": 0, "noise_candidates": 0, "observations": []any{}, "total": 0})

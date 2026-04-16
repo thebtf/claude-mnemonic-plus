@@ -733,46 +733,6 @@ func applyActiveVersions(ctx context.Context, vs *gorm.VersionStore, observation
 	return result
 }
 
-// formatBulletOnly formats an observation as a minimal bullet point: "- [TYPE] title: key facts".
-// No narrative is included. Suitable for high-density injection where context space is limited.
-func formatBulletOnly(obs *models.Observation) string {
-	obsType := string(obs.Type)
-	title := ""
-	if obs.Title.Valid {
-		title = obs.Title.String
-	}
-	return "- [" + obsType + "] " + title
-}
-
-// formatConcise formats an observation with its title and the first 100 characters of the narrative.
-// Balances density and readability for medium-priority observations.
-func formatConcise(obs *models.Observation) string {
-	obsType := string(obs.Type)
-	title := ""
-	if obs.Title.Valid {
-		title = obs.Title.String
-	}
-	narrative := ""
-	if obs.Narrative.Valid {
-		n := obs.Narrative.String
-		if len(n) > 100 {
-			n = n[:100] + "..."
-		}
-		narrative = n
-	}
-	return "- [" + obsType + "] " + title + ": " + narrative
-}
-
-// formatStructured formats an observation as a structured XML-like tag.
-// Useful for strategies that want machine-parseable injection format.
-func formatStructured(obs *models.Observation) string {
-	narrative := ""
-	if obs.Narrative.Valid {
-		narrative = obs.Narrative.String
-	}
-	return "<observation type=\"" + string(obs.Type) + "\" id=\"" + strconv.FormatInt(obs.ID, 10) + "\">" + narrative + "</observation>"
-}
-
 // handleContextInject godoc
 // @Summary Inject context for session start
 // @Description Returns context for injection at session start. Response includes recent (last 5), relevant (top 10 semantic), and guidance sections. Supports GET (deprecated) and POST. Critical startup path — optimized for speed.

@@ -188,42 +188,6 @@ func (h *AuthHandlers) handleLogout(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// handleMe returns the current authenticated user from the engram_auth session cookie.
-func (h *AuthHandlers) handleMe(w http.ResponseWriter, r *http.Request) {
-	cookie, err := r.Cookie(authSessionCookieName)
-	if err != nil || cookie.Value == "" {
-		http.Error(w, `{"error":"not authenticated"}`, http.StatusUnauthorized)
-		return
-	}
-
-	sess, err := h.sessions.GetSession(cookie.Value)
-	if err != nil {
-		// Expired or invalid — clear the stale cookie.
-		http.SetCookie(w, &http.Cookie{
-			Name:     authSessionCookieName,
-			Value:    "",
-			Path:     "/",
-			MaxAge:   -1,
-			HttpOnly: true,
-		})
-		http.Error(w, `{"error":"session expired"}`, http.StatusUnauthorized)
-		return
-	}
-
-	user, err := h.users.GetUserByID(sess.UserID)
-	if err != nil || user.Disabled {
-		http.Error(w, `{"error":"account not found or disabled"}`, http.StatusForbidden)
-		return
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(map[string]any{
-		"user": map[string]any{"id": user.ID, "email": user.Email, "role": user.Role},
-	}); err != nil {
-		log.Error().Err(err).Msg("auth: failed to encode me response")
-	}
-}
-
 // handleCreateInvitation generates a new invitation code (admin only).
 func (h *AuthHandlers) handleCreateInvitation(w http.ResponseWriter, r *http.Request) {
 	role, _ := r.Context().Value(authRoleKey{}).(string)
