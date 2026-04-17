@@ -74,6 +74,12 @@ while [[ $# -gt 0 ]]; do
             ;;
         --phase=*)
             PHASE="${1#--phase=}"
+            case "${PHASE}" in
+                pre-us3|post-us3|auto) ;;
+                *)
+                    die_config "Invalid --phase value: ${PHASE} (allowed: pre-us3|post-us3|auto)"
+                    ;;
+            esac
             ;;
         --skip-pg)
             SKIP_PG="1"
@@ -107,6 +113,13 @@ fi
 # Load baseline
 # ---------------------------------------------------------------------------
 
+# Validate JSON structure BEFORE extracting fields — corrupt/invalid JSON
+# causes jq to return exit code 4, which under `set -euo pipefail` aborts
+# the script uncontrollably (bypasses our exit-code contract of 0/1/2).
+if ! jq -e . "${BASELINE_FILE}" >/dev/null 2>&1; then
+    die_config "Baseline file is not valid JSON: ${BASELINE_FILE}"
+fi
+
 SERVER_URL="$(jq -r '.server_url // empty' "${BASELINE_FILE}")"
 VAULT_FP="$(jq -r '.vault.fingerprint // empty' "${BASELINE_FILE}")"
 VAULT_CRED_COUNT="$(jq -r '.vault.credential_count // empty' "${BASELINE_FILE}")"
@@ -115,6 +128,17 @@ PG_CONTAINER="$(jq -r '.postgres.container // empty' "${BASELINE_FILE}")"
 PG_USER="$(jq -r '.postgres.user // empty' "${BASELINE_FILE}")"
 PG_DB="$(jq -r '.postgres.database // empty' "${BASELINE_FILE}")"
 POST_US3_CRED_COUNT="$(jq -r '.entities_post_us3.credentials.exact // empty' "${BASELINE_FILE}")"
+
+# Validate required fields are present (after fallback to empty). Postgres
+# fields only required when --skip-pg is NOT set.
+[[ -n "${SERVER_URL}" ]]        || die_config "Missing required baseline field: .server_url"
+[[ -n "${VAULT_FP}" ]]          || die_config "Missing required baseline field: .vault.fingerprint"
+[[ -n "${VAULT_CRED_COUNT}" ]]  || die_config "Missing required baseline field: .vault.credential_count"
+if [[ -z "${SKIP_PG}" ]]; then
+    [[ -n "${PG_CONTAINER}" ]] || die_config "Missing required baseline field: .postgres.container"
+    [[ -n "${PG_USER}" ]]      || die_config "Missing required baseline field: .postgres.user"
+    [[ -n "${PG_DB}" ]]        || die_config "Missing required baseline field: .postgres.database"
+fi
 
 # ---------------------------------------------------------------------------
 # Phase detection
