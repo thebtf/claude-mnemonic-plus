@@ -68,3 +68,65 @@ bash scripts/safety-gate_test.sh
 
 All tests are self-contained and use mock binaries; no real server or Postgres
 instance is required.
+
+---
+
+## Windows dev workstation (.ps1)
+
+`scripts/safety-gate.ps1` is the PowerShell 7+ sibling for Windows developers.
+
+Windows dev workstations have no Docker socket and therefore cannot run Postgres
+entity checks.  The `.ps1` script only validates the vault API (Gate 1) and skips
+Gate 2 entirely.  Run `safety-gate.sh` on CI or Unraid for the full entity check.
+
+### Quick start
+
+```powershell
+$env:ENGRAM_API_TOKEN = '<your-token>'
+pwsh scripts/safety-gate.ps1
+```
+
+The script exits 0 on success, 1 on any violated invariant, and 2 on a
+configuration or prerequisite error (missing token, unreachable server, etc.).
+
+### Options
+
+| Parameter | Description |
+|-----------|-------------|
+| `-Baseline <path>` | Override the baseline file (default: `scripts/safety-gate-baseline.json`) |
+| `-Phase auto\|pre-us3\|post-us3` | Which credentials invariant to apply. `auto` always resolves to `pre-us3` on Windows (no DB access). |
+| `-Help` | Print usage and exit 0 |
+
+### Environment variables
+
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `ENGRAM_API_TOKEN` | Yes | Bearer token for the engram API |
+
+### Exit codes
+
+| Code | Meaning |
+|------|---------|
+| 0 | All invariants satisfied |
+| 1 | One or more invariants violated (diff printed to stderr) |
+| 2 | Configuration or prerequisite error |
+
+### Running tests
+
+Requires Pester v5 (`Install-Module -Name Pester -Scope CurrentUser -Force -SkipPublisherCheck`).
+
+```powershell
+pwsh -NoProfile -Command "Invoke-Pester scripts/safety-gate.Tests.ps1 -Output Detailed"
+```
+
+Tests run entirely in-process child processes with a mock `Invoke-RestMethod` module
+injected per-test.  No real server or Postgres instance is required.
+
+### PSScriptAnalyzer
+
+```powershell
+Install-Module -Name PSScriptAnalyzer -Scope CurrentUser -Force
+Invoke-ScriptAnalyzer -Path scripts/safety-gate.ps1 -Severity Warning
+```
+
+Expected output: no warnings.
