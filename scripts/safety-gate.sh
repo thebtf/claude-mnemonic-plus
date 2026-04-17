@@ -107,14 +107,14 @@ fi
 # Load baseline
 # ---------------------------------------------------------------------------
 
-SERVER_URL="$(jq -r '.server_url' "${BASELINE_FILE}")"
-VAULT_FP="$(jq -r '.vault.fingerprint' "${BASELINE_FILE}")"
-VAULT_CRED_COUNT="$(jq -r '.vault.credential_count' "${BASELINE_FILE}")"
-VAULT_MISMATCH_MAX="$(jq -r '.vault.mismatch_count_max' "${BASELINE_FILE}")"
-PG_CONTAINER="$(jq -r '.postgres.container' "${BASELINE_FILE}")"
-PG_USER="$(jq -r '.postgres.user' "${BASELINE_FILE}")"
-PG_DB="$(jq -r '.postgres.database' "${BASELINE_FILE}")"
-POST_US3_CRED_COUNT="$(jq -r '.entities_post_us3.credentials.exact' "${BASELINE_FILE}")"
+SERVER_URL="$(jq -r '.server_url // empty' "${BASELINE_FILE}")"
+VAULT_FP="$(jq -r '.vault.fingerprint // empty' "${BASELINE_FILE}")"
+VAULT_CRED_COUNT="$(jq -r '.vault.credential_count // empty' "${BASELINE_FILE}")"
+VAULT_MISMATCH_MAX="$(jq -r '.vault.mismatch_count_max // 0' "${BASELINE_FILE}")"
+PG_CONTAINER="$(jq -r '.postgres.container // empty' "${BASELINE_FILE}")"
+PG_USER="$(jq -r '.postgres.user // empty' "${BASELINE_FILE}")"
+PG_DB="$(jq -r '.postgres.database // empty' "${BASELINE_FILE}")"
+POST_US3_CRED_COUNT="$(jq -r '.entities_post_us3.credentials.exact // empty' "${BASELINE_FILE}")"
 
 # ---------------------------------------------------------------------------
 # Phase detection
@@ -166,19 +166,21 @@ VAULT_RESPONSE="$(curl -sf \
     "${SERVER_URL}/api/vault/status" 2>/dev/null)" || {
     echo "SAFETY-GATE ERROR: Failed to reach ${SERVER_URL}/api/vault/status" >&2
     echo "  Verify the server is running and ENGRAM_API_TOKEN is valid." >&2
-    exit 1
+    exit 2
 }
 
-GOT_FP="$(echo "${VAULT_RESPONSE}" | jq -r '.fingerprint // empty')"
-GOT_CRED_COUNT="$(echo "${VAULT_RESPONSE}" | jq -r '.credential_count // empty')"
+GOT_FP="$(echo "${VAULT_RESPONSE}" | jq -r '.fingerprint // empty' 2>/dev/null || true)"
+GOT_CRED_COUNT="$(echo "${VAULT_RESPONSE}" | jq -r '.credential_count // empty' 2>/dev/null || true)"
 # Vault API (handlers_vault.go) emits `mismatch_count` ONLY when > 0.
 # Treat absent field as 0 (healthy state).
-GOT_MISMATCH="$(echo "${VAULT_RESPONSE}" | jq -r '.mismatch_count // 0')"
+# Use || true so a non-JSON response (proxy error page, empty body) leaves
+# GOT_MISMATCH empty rather than aborting under set -e with jq's exit 4.
+GOT_MISMATCH="$(echo "${VAULT_RESPONSE}" | jq -r '.mismatch_count // 0' 2>/dev/null || true)"
 
 if [[ -z "${GOT_FP}" || -z "${GOT_CRED_COUNT}" ]]; then
     echo "SAFETY-GATE ERROR: Unexpected vault response — missing required fields (fingerprint or credential_count)" >&2
     echo "  Response: ${VAULT_RESPONSE}" >&2
-    exit 1
+    exit 2
 fi
 
 # fingerprint
@@ -217,20 +219,17 @@ if [[ -n "${SKIP_PG}" ]]; then
 else
     echo "Checking Postgres entity counts (phase=${RESOLVED_PHASE}) ..."
 
-    # Entity table mapping: <baseline_key> <sql_table>
+    # Entity table mapping: parallel indexed arrays for Bash 3.x compatibility.
+    # (declare -A requires Bash 4+; macOS ships with Bash 3.2.)
+    # ENTITY_KEYS[i] and ENTITY_TABLES[i] are co-indexed: key → SQL table name.
     # Keys match .entities.<key> in baseline JSON.
-    declare -A ENTITY_TABLES
-    ENTITY_TABLES=(
-        [issues]="issues"
-        [api_tokens]="api_tokens"
-        [versioned_documents]="versioned_documents"
-        [documents]="documents"
-        [content]="content"
-    )
+    ENTITY_KEYS=(issues api_tokens versioned_documents documents content)
+    ENTITY_TABLES=(issues api_tokens versioned_documents documents content)
 
     # post-US3 adds credentials table
     if [[ "${RESOLVED_PHASE}" == "post-us3" ]]; then
-        ENTITY_TABLES[credentials]="credentials"
+        ENTITY_KEYS+=(credentials)
+        ENTITY_TABLES+=(credentials)
     fi
 
     check_entity() {
@@ -283,8 +282,8 @@ else
         fi
     }
 
-    for k in "${!ENTITY_TABLES[@]}"; do
-        check_entity "${k}" "${ENTITY_TABLES[${k}]}"
+    for i in "${!ENTITY_KEYS[@]}"; do
+        check_entity "${ENTITY_KEYS[i]}" "${ENTITY_TABLES[i]}"
     done
 fi
 
@@ -301,9 +300,9 @@ if [[ ${#FAILURES[@]} -gt 0 ]]; then
     exit 1
 fi
 
-OLDIFS="${IFS:-}"
-IFS=', '
-SUMMARY="${SUMMARY_PARTS[*]}"
-IFS="${OLDIFS}"
+# Use printf to join with ", " — IFS-based join only uses the FIRST character
+# of IFS, so `IFS=', '` would produce "a,b,c" not "a, b, c".
+SUMMARY=$(printf "%s, " "${SUMMARY_PARTS[@]}")
+SUMMARY="${SUMMARY%, }"
 echo "SAFETY-GATE: OK (${SUMMARY})"
 exit 0
