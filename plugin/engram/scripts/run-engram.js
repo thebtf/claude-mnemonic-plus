@@ -45,9 +45,9 @@ if (!process.env.ENGRAM_URL) {
 }
 if (!process.env.ENGRAM_API_TOKEN) {
   process.stderr.write(
-    "[engram] WARN: ENGRAM_API_TOKEN is empty. Set via /config or add ENGRAM_API_TOKEN " +
-    "to the env section of ~/.claude/settings.json (recommended — survives CC credential " +
-    "store races, see engram issue #83).\n"
+    "[engram] WARN: ENGRAM_API_TOKEN is empty. If your server requires authentication, " +
+    "set it via /config or follow /engram:setup to add it to ~/.claude/settings.json " +
+    "(recommended — survives CC credential store races, see engram issue #83).\n"
   );
 }
 
