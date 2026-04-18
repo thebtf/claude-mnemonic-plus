@@ -39,8 +39,17 @@ func (s *BehavioralRulesStore) Create(ctx context.Context, rule *models.Behavior
 	}
 
 	now := time.Now().UTC()
+
+	// Copy the nullable project string to prevent the caller's pointer from aliasing
+	// the row stored in the database — immutability contract: caller's input is never mutated.
+	var project *string
+	if rule.Project != nil {
+		p := *rule.Project
+		project = &p
+	}
+
 	row := &BehavioralRule{
-		Project:   rule.Project,
+		Project:   project,
 		Content:   rule.Content,
 		Priority:  rule.Priority,
 		EditedBy:  rule.EditedBy,
