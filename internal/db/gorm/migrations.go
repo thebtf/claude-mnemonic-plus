@@ -2728,6 +2728,369 @@ WHERE utility_propagated_at IS NOT NULL`).Error
 				return tx.Exec(`ALTER TABLE search_query_log ADD COLUMN IF NOT EXISTS used_vector BOOL NOT NULL DEFAULT false`).Error
 			},
 		},
+
+		// Migration 087: create dedicated credentials table (US3 — vault location correction).
+		//
+		// Background (spec.md §C5 / §S16): pre-v5 vault credentials were stored as rows
+		// in the observations table (type='credential') using two special columns added by
+		// migrations 1078–1079 (encrypted_secret BYTEA + encryption_key_fingerprint TEXT).
+		// v5 splits observations into purpose-built tables; this migration creates the
+		// credentials table that will receive those rows in a later migration (088+).
+		//
+		// NOTE on migration ID: spec.md text says "077_credentials" but that ID is already
+		// taken (077_relations_constraints_update). US1+US2 consumed 083–086 (bumped from
+		// original 081–084 because 081+082 were also taken). This PR uses 087 as the
+		// next-free ID. Downstream migrations (data migration, observations drop) use 088+.
+		//
+		// Schema source: spec.md §Data Model §credentials (authoritative).
+		// Column names match existing observations.encrypted_secret /
+		// observations.encryption_key_fingerprint verbatim so the future data migration
+		// (088) can COPY the bytes directly without re-encryption.
+		{
+			ID: "087_credentials",
+			Migrate: func(tx *gorm.DB) error {
+				sqls := []string{
+					// Main table — UNIQUE(project, key) prevents duplicate credential names
+					// per project. deleted_at NULL = active row; soft-delete sets it to NOW().
+					`CREATE TABLE IF NOT EXISTS credentials (
+						id                        BIGSERIAL PRIMARY KEY,
+						project                   TEXT NOT NULL,
+						key                       TEXT NOT NULL,
+						encrypted_secret          BYTEA NOT NULL,
+						encryption_key_fingerprint TEXT NOT NULL,
+						scope                     TEXT,
+						version                   INTEGER NOT NULL DEFAULT 1,
+						edited_by                 TEXT,
+						created_at                TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+						updated_at                TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+						deleted_at                TIMESTAMPTZ,
+						UNIQUE(project, key)
+					)`,
+					// Partial index on project — only active rows (deleted_at IS NULL).
+					// Supports per-project list queries efficiently.
+					`CREATE INDEX IF NOT EXISTS idx_credentials_project
+						ON credentials (project)
+						WHERE deleted_at IS NULL`,
+					// Partial index on fingerprint — supports vault key rotation checks
+					// (count / delete rows whose fingerprint differs from the current key).
+					`CREATE INDEX IF NOT EXISTS idx_credentials_fingerprint
+						ON credentials (encryption_key_fingerprint)
+						WHERE deleted_at IS NULL`,
+				}
+				for _, s := range sqls {
+					if err := tx.Exec(s).Error; err != nil {
+						return fmt.Errorf("migration 087_credentials: %w", err)
+					}
+				}
+				return nil
+			},
+			Rollback: func(tx *gorm.DB) error {
+				sqls := []string{
+					`DROP INDEX IF EXISTS idx_credentials_fingerprint`,
+					`DROP INDEX IF EXISTS idx_credentials_project`,
+					`DROP TABLE IF EXISTS credentials`,
+				}
+				for _, s := range sqls {
+					if err := tx.Exec(s).Error; err != nil {
+						return fmt.Errorf("migration 087_credentials rollback: %w", err)
+					}
+				}
+				return nil
+			},
+		},
+
+		// Migration 088: memories table (CREATE TABLE only — data migration from
+		// observations happens in a later commit per US3 scope boundary).
+		//
+		// NOTE on migration ID: spec.md text says "078_memories" but that ID is already
+		// taken. Commit A (087_credentials) consumed the next-free slot after US1+US2.
+		// This PR uses 088 as the next-free ID. 089 is behavioral_rules.
+		//
+		// Schema source: spec.md §Data Model §memories (authoritative — Option C extended).
+		// Dual-dictionary search_vector (english + simple) per migration 076 pattern.
+		// No importance_score / effectiveness_* / inject_count — per S1 (scoring dropped).
+		{
+			ID: "088_memories",
+			Migrate: func(tx *gorm.DB) error {
+				sqls := []string{
+					// Main table — project-scoped, soft-delete via deleted_at.
+					// search_vector is a GENERATED ALWAYS AS STORED tsvector using dual
+					// dictionary (english + simple) for multilingual support.
+					`CREATE TABLE IF NOT EXISTS memories (
+						id            BIGSERIAL PRIMARY KEY,
+						project       TEXT NOT NULL,
+						content       TEXT NOT NULL,
+						tags          JSONB NOT NULL DEFAULT '[]',
+						source_agent  TEXT,
+						version       INTEGER NOT NULL DEFAULT 1,
+						edited_by     TEXT,
+						created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+						updated_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+						deleted_at    TIMESTAMPTZ,
+						search_vector tsvector GENERATED ALWAYS AS (
+							to_tsvector('english', COALESCE(content, '')) ||
+							to_tsvector('simple',  COALESCE(content, ''))
+						) STORED
+					)`,
+					// Partial composite index on (project, created_at DESC) — only active rows.
+					// Supports per-project recency queries efficiently (session-start top-N).
+					`CREATE INDEX IF NOT EXISTS idx_memories_project_created
+						ON memories (project, created_at DESC)
+						WHERE deleted_at IS NULL`,
+					// GIN index on search_vector for full-text search.
+					`CREATE INDEX IF NOT EXISTS idx_memories_fts
+						ON memories USING GIN (search_vector)`,
+					// GIN index on tags JSONB for tag-based filtering.
+					`CREATE INDEX IF NOT EXISTS idx_memories_tags
+						ON memories USING GIN (tags)`,
+				}
+				for _, s := range sqls {
+					if err := tx.Exec(s).Error; err != nil {
+						return fmt.Errorf("migration 088_memories: %w", err)
+					}
+				}
+				return nil
+			},
+			Rollback: func(tx *gorm.DB) error {
+				sqls := []string{
+					`DROP INDEX IF EXISTS idx_memories_tags`,
+					`DROP INDEX IF EXISTS idx_memories_fts`,
+					`DROP INDEX IF EXISTS idx_memories_project_created`,
+					`DROP TABLE IF EXISTS memories`,
+				}
+				for _, s := range sqls {
+					if err := tx.Exec(s).Error; err != nil {
+						return fmt.Errorf("migration 088_memories rollback: %w", err)
+					}
+				}
+				return nil
+			},
+		},
+
+		// Migration 089: behavioral_rules table (CREATE TABLE only — data migration from
+		// observations happens in a later commit per US3 scope boundary).
+		//
+		// NOTE on migration ID: spec.md text says "079_behavioral_rules" but that ID is
+		// taken. Uses 089 as the next-free ID after 088_memories.
+		//
+		// Schema source: spec.md §Data Model §behavioral_rules (authoritative — Option C extended).
+		// project is NULLable: NULL = global rule (applies to every session regardless of project).
+		// priority determines order in session-start inject (higher first); default 0 = unordered.
+		// No FTS — rules are pushed unconditionally at session-start, not searched.
+		{
+			ID: "089_behavioral_rules",
+			Migrate: func(tx *gorm.DB) error {
+				sqls := []string{
+					// Main table — project NULLable (NULL = global), soft-delete via deleted_at.
+					`CREATE TABLE IF NOT EXISTS behavioral_rules (
+						id         BIGSERIAL PRIMARY KEY,
+						project    TEXT,
+						content    TEXT NOT NULL,
+						priority   INTEGER NOT NULL DEFAULT 0,
+						version    INTEGER NOT NULL DEFAULT 1,
+						edited_by  TEXT,
+						created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+						updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+						deleted_at TIMESTAMPTZ
+					)`,
+					// Partial composite index on (project, priority DESC, created_at DESC)
+					// for active project-scoped rules — supports session-start inject ordering.
+					`CREATE INDEX IF NOT EXISTS idx_behavioral_rules_project_priority
+						ON behavioral_rules (project, priority DESC, created_at DESC)
+						WHERE deleted_at IS NULL`,
+					// Partial index on global rules (project IS NULL) — supports
+					// cross-project inject of rules that apply to every session.
+					`CREATE INDEX IF NOT EXISTS idx_behavioral_rules_global
+						ON behavioral_rules (priority DESC, created_at DESC)
+						WHERE project IS NULL AND deleted_at IS NULL`,
+				}
+				for _, s := range sqls {
+					if err := tx.Exec(s).Error; err != nil {
+						return fmt.Errorf("migration 089_behavioral_rules: %w", err)
+					}
+				}
+				return nil
+			},
+			Rollback: func(tx *gorm.DB) error {
+				sqls := []string{
+					`DROP INDEX IF EXISTS idx_behavioral_rules_global`,
+					`DROP INDEX IF EXISTS idx_behavioral_rules_project_priority`,
+					`DROP TABLE IF EXISTS behavioral_rules`,
+				}
+				for _, s := range sqls {
+					if err := tx.Exec(s).Error; err != nil {
+						return fmt.Errorf("migration 089_behavioral_rules rollback: %w", err)
+					}
+				}
+				return nil
+			},
+		},
+
+		// Migration 090: 3-way data split observations → credentials + behavioral_rules + memories.
+		//
+		// NOTE on migration ID: plan.md §Phase 5 originally drafted this as 080_...; actual
+		// next-free ID is 090 (US1+US2 consumed 083-086; Commit A=087, Commit B=088+089).
+		//
+		// NOTE on column mapping: plan.md §Phase 5 Amendment 2026-04-18 corrected column
+		// references — the original draft assumed columns that do not exist on observations.
+		// See `.agent/specs/engram-v5-baseline/plan.md` §Amendment 2026-04-18 for the full
+		// mapping table (content→narrative/title, always_inject→concepts JSONB predicate,
+		// tags→concepts, source_agent→agent_source, creation_path filter dropped, etc.).
+		//
+		// Anti-stub: swap any INSERT body → the sanity-check DO block RAISE EXCEPTION will
+		// fire (credential-count mismatch for credentials; 50% floor for memories/rules).
+		//
+		// SCOPE: this migration copies data. observations table itself is NOT dropped here —
+		// that happens in Commit G (migration 091) AFTER Commit F-1 decrypt round-trip gate.
+		{
+			ID: "090_observations_to_static_entities",
+			Migrate: func(tx *gorm.DB) error {
+				// 1. Migrate vault credentials FIRST — preserve ciphertext + fingerprint bytes verbatim.
+				//    credential name lives in observation.title per ObservationStore.GetCredential.
+				//    observations.created_at_epoch is BIGINT (unix milliseconds, set via time.Now().UnixMilli()).
+				//    TO_TIMESTAMP expects seconds — divide by 1000.0 for correct conversion.
+				if err := tx.Exec(`
+					INSERT INTO credentials (project, key, encrypted_secret, encryption_key_fingerprint, scope, created_at, updated_at)
+					SELECT
+						project,
+						title AS key,
+						encrypted_secret,
+						encryption_key_fingerprint,
+						COALESCE(NULLIF(scope, ''), 'project') AS scope,
+						TO_TIMESTAMP(created_at_epoch / 1000.0) AS created_at,
+						TO_TIMESTAMP(created_at_epoch / 1000.0) AS updated_at
+					FROM observations
+					WHERE type = 'credential'
+					  AND encrypted_secret IS NOT NULL
+					  AND encryption_key_fingerprint IS NOT NULL
+					  AND title IS NOT NULL AND title != ''
+					  AND is_suppressed = false
+					  AND COALESCE(is_archived, 0) = 0
+					  AND COALESCE(is_superseded, 0) = 0
+				`).Error; err != nil {
+					return fmt.Errorf("migration 090_observations_to_static_entities: credentials INSERT: %w", err)
+				}
+
+				// 2. Migrate always-inject rows (excluding credentials) → behavioral_rules.
+				//    "always-inject" is a concepts JSONB array entry, not a boolean column.
+				//    priority is derived from importance_score tiers (observations has no priority col).
+				if err := tx.Exec(`
+					INSERT INTO behavioral_rules (project, content, priority, created_at, updated_at)
+					SELECT
+						project,
+						COALESCE(NULLIF(TRIM(narrative), ''), title, '') AS content,
+						CASE
+							WHEN importance_score >= 0.8 THEN 10
+							WHEN importance_score >= 0.5 THEN 5
+							ELSE 0
+						END AS priority,
+						TO_TIMESTAMP(created_at_epoch / 1000.0) AS created_at,
+						TO_TIMESTAMP(created_at_epoch / 1000.0) AS updated_at
+					FROM observations
+					WHERE concepts @> '["always-inject"]'::jsonb
+					  AND type != 'credential'
+					  AND COALESCE(NULLIF(TRIM(narrative), ''), NULLIF(TRIM(title), '')) IS NOT NULL
+					  AND is_suppressed = false
+					  AND COALESCE(is_archived, 0) = 0
+					  AND COALESCE(is_superseded, 0) = 0
+				`).Error; err != nil {
+					return fmt.Errorf("migration 090_observations_to_static_entities: behavioral_rules INSERT: %w", err)
+				}
+
+				// 3. Migrate remaining non-credential, non-always-inject observations → memories.
+				//    Plan-v1 filtered by creation_path IN (...); column does not exist — amendment drops filter.
+				//    memories.project is NOT NULL (per migration 088); legacy rows with NULL project → '' fallback.
+				if err := tx.Exec(`
+					INSERT INTO memories (project, content, tags, source_agent, created_at, updated_at)
+					SELECT
+						COALESCE(project, '')                            AS project,
+						COALESCE(NULLIF(TRIM(narrative), ''), title, '') AS content,
+						COALESCE(concepts, '[]'::jsonb)                  AS tags,
+						COALESCE(NULLIF(agent_source, ''), 'unknown')    AS source_agent,
+						TO_TIMESTAMP(created_at_epoch / 1000.0)          AS created_at,
+						TO_TIMESTAMP(created_at_epoch / 1000.0)          AS updated_at
+					FROM observations
+					WHERE type != 'credential'
+					  AND NOT COALESCE(concepts @> '["always-inject"]'::jsonb, false)
+					  AND COALESCE(NULLIF(TRIM(narrative), ''), NULLIF(TRIM(title), '')) IS NOT NULL
+					  AND is_suppressed = false
+					  AND COALESCE(is_archived, 0) = 0
+					  AND COALESCE(is_superseded, 0) = 0
+				`).Error; err != nil {
+					return fmt.Errorf("migration 090_observations_to_static_entities: memories INSERT: %w", err)
+				}
+
+				// 4. Sanity check — two invariants.
+				//    Invariant (a): sum of static entities >= 50% of live observations count.
+				//    Invariant (b): credentials count == live observations WHERE type='credential' (EXACT — no credential loss).
+				//    Anti-stub: swap any INSERT body above → (b) fires for credentials; (a) fires for memories/rules.
+				if err := tx.Exec(`
+					DO $$
+					DECLARE
+						src_count       INT;
+						dst_count       INT;
+						cred_count      INT;
+						cred_live_count INT;
+					BEGIN
+						SELECT COUNT(*) INTO src_count
+						FROM observations
+						WHERE is_suppressed = false
+						  AND COALESCE(is_archived, 0) = 0
+						  AND COALESCE(is_superseded, 0) = 0;
+
+						SELECT (SELECT COUNT(*) FROM credentials)
+							 + (SELECT COUNT(*) FROM memories)
+							 + (SELECT COUNT(*) FROM behavioral_rules)
+						INTO dst_count;
+
+						IF src_count > 0 AND dst_count < (src_count / 2) THEN
+							RAISE EXCEPTION 'migration 090 sanity check FAILED: only %/% observations migrated across credentials+memories+behavioral_rules', dst_count, src_count;
+						END IF;
+
+						SELECT COUNT(*) INTO cred_count FROM credentials;
+						SELECT COUNT(*) INTO cred_live_count
+						FROM observations
+						WHERE type = 'credential'
+						  AND encrypted_secret IS NOT NULL
+						  AND encryption_key_fingerprint IS NOT NULL
+						  AND title IS NOT NULL AND title != ''
+						  AND is_suppressed = false
+						  AND COALESCE(is_archived, 0) = 0
+						  AND COALESCE(is_superseded, 0) = 0;
+
+						IF cred_count != cred_live_count THEN
+							RAISE EXCEPTION 'migration 090 credential invariant FAILED: credentials=% != live observations WHERE type=''credential''=% — every vault credential MUST migrate byte-for-byte',
+								cred_count, cred_live_count;
+						END IF;
+
+						RAISE NOTICE 'migration 090 OK: credentials=% memories=% behavioral_rules=% observations_live=% dst_count=%',
+							cred_count,
+							(SELECT COUNT(*) FROM memories),
+							(SELECT COUNT(*) FROM behavioral_rules),
+							src_count,
+							dst_count;
+					END $$;
+				`).Error; err != nil {
+					return fmt.Errorf("migration 090_observations_to_static_entities: sanity check: %w", err)
+				}
+
+				return nil
+			},
+			Rollback: func(tx *gorm.DB) error {
+				// Rollback is intentionally disabled after cutover.
+				//
+				// After migration 090 runs successfully, credentials/memories/behavioral_rules
+				// contain data that clients may have WRITTEN DIRECTLY (via the new stores) —
+				// data that does NOT exist in the observations table. A TRUNCATE would silently
+				// destroy that post-migration data with no recovery path.
+				//
+				// If you genuinely need to roll back pre-cutover (e.g. on a fresh test DB that
+				// has never been used after migration), do so manually:
+				//   TRUNCATE TABLE memories, behavioral_rules, credentials;
+				// and then run gormigrate.RollbackTo("089_...") in a maintenance script.
+				return fmt.Errorf("migration 090_observations_to_static_entities: rollback is not safe after cutover — post-migration writes to credentials/memories/behavioral_rules would be destroyed; perform manual rollback if this is a pre-cutover environment")
+			},
+		},
 	})
 	if err := m.Migrate(); err != nil {
 		return fmt.Errorf("run gormigrate migrations: %w", err)

@@ -65,9 +65,7 @@ const (
 
 	// QueueProcessInterval is how often the background queue processor runs.
 	QueueProcessInterval = 2 * time.Second
-
 )
-
 
 // RetrievalStats tracks observation retrieval metrics.
 type RetrievalStats struct {
@@ -165,6 +163,9 @@ type Service struct {
 	ready                  atomic.Bool
 	vault                  *crypto.Vault
 	issueStore             *gorm.IssueStore
+	credentialStore        *gorm.CredentialStore
+	memoryStore            *gorm.MemoryStore
+	behavioralRulesStore   *gorm.BehavioralRulesStore
 	vaultOnce              sync.Once
 	vaultErr               error
 	promptCache            sync.Map // map[int64]promptCacheEntry — last user prompt per session
@@ -216,7 +217,6 @@ func (s *Service) getVault() (*crypto.Vault, error) {
 	})
 	return s.vault, s.vaultErr
 }
-
 
 // staleVerifyRequest represents a request to verify a stale observation in background
 type staleVerifyRequest struct {
@@ -329,11 +329,11 @@ func NewService(version string, logBuffer *logbuf.RingBuffer) (*Service, error) 
 		logBuffer:          logBuffer,
 		backfillTracker:    newBackfillTracker(),
 		cachedObsCounts:    make(map[string]cachedCount),
-		statsCacheTTL: time.Minute, // Cache stats for 1 minute
-		ingestDedup:   newDeduplicationCache(5 * time.Minute),
-		mcpHealth:        mcp.NewMCPHealth(),
-		strategySelector: learning.NewStrategySelector(cfg.InjectionStrategies, cfg.InjectionStrategyMode, cfg.DefaultStrategy),
-		eventBus:         &projectevents.Bus{},
+		statsCacheTTL:      time.Minute, // Cache stats for 1 minute
+		ingestDedup:        newDeduplicationCache(5 * time.Minute),
+		mcpHealth:          mcp.NewMCPHealth(),
+		strategySelector:   learning.NewStrategySelector(cfg.InjectionStrategies, cfg.InjectionStrategyMode, cfg.DefaultStrategy),
+		eventBus:           &projectevents.Bus{},
 	}
 
 	// Setup middleware and routes (health endpoint works immediately)
@@ -546,6 +546,12 @@ func (s *Service) initializeAsync() {
 		processor.SetReasoningStore(reasoningStore)
 	}
 
+	// Create memory + behavioral rules + credential stores for US3 observations split.
+	// All three stores are wired here (Commit E — T021).
+	memoryStore := gorm.NewMemoryStore(store)
+	behavioralRulesStore := gorm.NewBehavioralRulesStore(store)
+	credentialStore := gorm.NewCredentialStore(store)
+
 	// Set all the initialized components
 	s.initMu.Lock()
 	s.store = store
@@ -553,6 +559,9 @@ func (s *Service) initializeAsync() {
 	s.rawEventStore = rawEventStore
 	s.injectionStore = injectionStore
 	s.issueStore = issueStore
+	s.credentialStore = credentialStore
+	s.memoryStore = memoryStore
+	s.behavioralRulesStore = behavioralRulesStore
 	s.agentStatsStore = agentStatsStore
 	s.versionStore = versionStore
 	s.tokenStore = tokenStore
@@ -703,8 +712,8 @@ func (s *Service) initializeAsync() {
 	}
 	maintenanceSvc.OnComplete = func(summary maintenance.CompletionSummary) {
 		s.sseBroadcaster.Broadcast(map[string]any{
-			"type":        "maintenance_complete",
-			"duration_ms": summary.DurationMs,
+			"type":          "maintenance_complete",
+			"duration_ms":   summary.DurationMs,
 			"subtask_count": summary.SubtaskCount,
 			"summary": map[string]any{
 				"merged":   summary.Merged,
@@ -837,6 +846,13 @@ func (s *Service) initializeAsync() {
 	// Wire reasoning trace store into MCP server for System 2 memory recall.
 	mcpServer.SetReasoningStore(reasoningStore)
 	mcpServer.SetIssueStore(issueStore)
+
+	// Wire memory + behavioral rules stores (US3 Commit C).
+	// These power the new static-entity MCP tools store_rule / list_rules and
+	// will be used by Commit E when handleStoreMemory / handleRecall are
+	// switched from observations to memories/behavioral_rules.
+	mcpServer.SetMemoryStore(memoryStore)
+	mcpServer.SetBehavioralRulesStore(behavioralRulesStore)
 
 	// Wire gRPC server: create adapter over mcpServer and register with the server.
 	// initMu protects s.grpcServer — the cmux goroutine polls for it.
@@ -1333,6 +1349,11 @@ func (s *Service) setupRoutes() {
 		r.Delete("/api/vault/credentials/{name}", s.handleDeleteCredential)
 		r.Get("/api/vault/status", s.handleVaultStatus)
 		r.Delete("/api/vault/orphaned-credentials", s.handleDeleteOrphanedCredentials)
+
+		// Memory routes (US3 Commit E — explicit user memories stored in memories table)
+		r.Post("/api/memories", s.handleStoreMemoryExplicit)
+		r.Get("/api/memories", s.handleListMemories)
+		r.Delete("/api/memories/{id}", s.handleDeleteMemoryByID)
 
 		// Tag routes
 		r.Post("/api/observations/{id}/tags", s.handleTagObservation)

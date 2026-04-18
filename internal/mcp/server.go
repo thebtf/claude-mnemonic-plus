@@ -51,6 +51,8 @@ type Server struct {
 	graphStore             graphpkg.GraphStore
 	reasoningStore         *gorm.ReasoningTraceStore
 	issueStore             *gorm.IssueStore
+	memoryStore            *gorm.MemoryStore
+	behavioralRulesStore   *gorm.BehavioralRulesStore
 	vault                  *crypto.Vault
 	vaultInitErr           error
 	vaultOnce              sync.Once
@@ -123,6 +125,16 @@ func (s *Server) SetReasoningStore(rs *gorm.ReasoningTraceStore) {
 // SetIssueStore sets the issue store for cross-project agent issue tracking.
 func (s *Server) SetIssueStore(is *gorm.IssueStore) {
 	s.issueStore = is
+}
+
+// SetMemoryStore sets the memory store for the memories table (US3 Commit C).
+func (s *Server) SetMemoryStore(ms *gorm.MemoryStore) {
+	s.memoryStore = ms
+}
+
+// SetBehavioralRulesStore sets the behavioral rules store (US3 Commit C).
+func (s *Server) SetBehavioralRulesStore(brs *gorm.BehavioralRulesStore) {
+	s.behavioralRulesStore = brs
 }
 
 // HandleRequest dispatches a JSON-RPC request and returns the response.
@@ -1207,6 +1219,41 @@ func (s *Server) handleToolsList(req *Request) *Response {
 		},
 	}
 
+	// Behavioral rules tools — only advertise when the store is wired (US3 Commit C).
+	// Advertising store_rule/list_rules when behavioralRulesStore is nil would cause
+	// every call to fail with "behavioral rules store not initialised" — unhelpful noise
+	// for deployments that have not yet run migration 089.
+	if s.behavioralRulesStore != nil {
+		tools = append(tools,
+			Tool{
+				Name:        "store_rule",
+				Description: "Store a behavioral rule (always-inject guidance applied at session-start). Project-scoped if project is set, global otherwise.",
+				tier:        tierUseful,
+				InputSchema: map[string]any{
+					"type":     "object",
+					"required": []string{"content"},
+					"properties": map[string]any{
+						"project":  map[string]any{"type": "string", "description": "Project name (omit for global rule)"},
+						"content":  map[string]any{"type": "string", "description": "Rule content (required)"},
+						"priority": map[string]any{"type": "number", "description": "Priority — higher values inject first (default 0)"},
+					},
+				},
+			},
+			Tool{
+				Name:        "list_rules",
+				Description: "List behavioral rules for a project (always includes global rules where project is NULL).",
+				tier:        tierUseful,
+				InputSchema: map[string]any{
+					"type":       "object",
+					"properties": map[string]any{
+						"project": map[string]any{"type": "string", "description": "Project name (omit to list only global rules)"},
+						"limit":   map[string]any{"type": "number", "description": "Max results (default 50, max 500)"},
+					},
+				},
+			},
+		)
+	}
+
 	// Backfill status tool — only advertise when backfill tracker is available
 	if s.backfillStatusFunc != nil {
 		tools = append(tools, Tool{
@@ -1695,6 +1742,10 @@ func (s *Server) callTool(ctx context.Context, name string, args json.RawMessage
 		return s.handleGetMaintenanceStats(ctx)
 	case "merge_observations":
 		return s.handleMergeObservations(ctx, args)
+	case "store_rule":
+		return s.handleStoreRule(ctx, args)
+	case "list_rules":
+		return s.handleListRules(ctx, args)
 	case "get_observation":
 		return s.handleGetObservation(ctx, args)
 	case "edit_observation":

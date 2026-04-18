@@ -462,3 +462,59 @@ type IssueComment struct {
 }
 
 func (IssueComment) TableName() string { return "issue_comments" }
+
+// Credential represents a vault-stored encrypted credential.
+// Created by migration 087 as a dedicated static-entity table.
+// Pre-v5: credentials lived as rows in observations (type='credential').
+// Post-v5 (US3): credentials are migrated here and observations is dropped.
+type Credential struct {
+	Project                  string     `gorm:"type:text;not null;index:idx_credentials_project,where:deleted_at IS NULL;uniqueIndex:idx_credentials_project_key,priority:1" json:"project"`
+	Key                      string     `gorm:"type:text;not null;uniqueIndex:idx_credentials_project_key,priority:2" json:"key"`
+	EncryptedSecret          []byte     `gorm:"type:bytea;not null" json:"encrypted_secret"`
+	EncryptionKeyFingerprint string     `gorm:"type:text;not null;index:idx_credentials_fingerprint,where:deleted_at IS NULL" json:"encryption_key_fingerprint"`
+	Scope                    string     `gorm:"type:text" json:"scope,omitempty"`
+	EditedBy                 string     `gorm:"type:text" json:"edited_by,omitempty"`
+	CreatedAt                time.Time  `gorm:"type:timestamptz;not null;default:now()" json:"created_at"`
+	UpdatedAt                time.Time  `gorm:"type:timestamptz;not null;default:now()" json:"updated_at"`
+	DeletedAt                *time.Time `gorm:"type:timestamptz" json:"deleted_at,omitempty"`
+	ID                       int64      `gorm:"primaryKey;autoIncrement" json:"id"`
+	Version                  int        `gorm:"not null;default:1" json:"version"`
+}
+
+func (Credential) TableName() string { return "credentials" }
+
+// Memory is the GORM row struct for the memories table (migration 088).
+// Tags are stored as JSONB using models.JSONStringArray.
+// search_vector is a GENERATED ALWAYS AS STORED column — it must NOT appear in INSERT/UPDATE
+// statements.  GORM will only write columns that are present in the struct, so omitting the
+// search_vector field here is the correct approach.
+type Memory struct {
+	Project     string                 `gorm:"type:text;not null;index:idx_memories_project_created,priority:1,where:deleted_at IS NULL" json:"project"`
+	Content     string                 `gorm:"type:text;not null" json:"content"`
+	Tags        models.JSONStringArray `gorm:"type:jsonb;not null;default:'[]'" json:"tags"`
+	SourceAgent string                 `gorm:"type:text" json:"source_agent,omitempty"`
+	EditedBy    string                 `gorm:"type:text" json:"edited_by,omitempty"`
+	CreatedAt   time.Time              `gorm:"type:timestamptz;not null;default:now();index:idx_memories_project_created,priority:2,sort:desc" json:"created_at"`
+	UpdatedAt   time.Time              `gorm:"type:timestamptz;not null;default:now()" json:"updated_at"`
+	DeletedAt   *time.Time             `gorm:"type:timestamptz" json:"deleted_at,omitempty"`
+	ID          int64                  `gorm:"primaryKey;autoIncrement" json:"id"`
+	Version     int                    `gorm:"not null;default:1" json:"version"`
+}
+
+func (Memory) TableName() string { return "memories" }
+
+// BehavioralRule is the GORM row struct for the behavioral_rules table (migration 089).
+// Project is a pointer because the column is NULLable: NULL = global rule.
+type BehavioralRule struct {
+	Project   *string    `gorm:"type:text" json:"project,omitempty"`
+	Content   string     `gorm:"type:text;not null" json:"content"`
+	EditedBy  string     `gorm:"type:text" json:"edited_by,omitempty"`
+	CreatedAt time.Time  `gorm:"type:timestamptz;not null;default:now()" json:"created_at"`
+	UpdatedAt time.Time  `gorm:"type:timestamptz;not null;default:now()" json:"updated_at"`
+	DeletedAt *time.Time `gorm:"type:timestamptz" json:"deleted_at,omitempty"`
+	ID        int64      `gorm:"primaryKey;autoIncrement" json:"id"`
+	Priority  int        `gorm:"not null;default:0" json:"priority"`
+	Version   int        `gorm:"not null;default:1" json:"version"`
+}
+
+func (BehavioralRule) TableName() string { return "behavioral_rules" }

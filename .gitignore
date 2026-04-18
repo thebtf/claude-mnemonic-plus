@@ -86,10 +86,14 @@ docs/dist
 # Agent working state (entire directory)
 .agent/
 
-# Local Go caches (non-standard GOPATH)
+# Local Go caches (non-standard GOPATH layouts used in CI and Docker builds)
 .gocache/
 .gomodcache/
-.tmp-gocache/
+.tmp_gocache/
+.tmp_gomodcache/
+
+# Generic local cache directories (build tools, linters, etc.)
+.cache/
 
 # Session artifacts
 continuity.txt
@@ -99,3 +103,4 @@ continuity.txt
 
 # Marketplace submodule (separate repo)
 engram-marketplace/
+.aider*
