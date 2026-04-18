@@ -3,12 +3,10 @@ package worker
 import (
 	"context"
 	"sort"
-	"strconv"
 	"time"
 
 	"github.com/rs/zerolog/log"
 	"github.com/thebtf/engram/internal/db/gorm"
-	"github.com/thebtf/engram/internal/reranking"
 	"github.com/thebtf/engram/internal/search"
 	"github.com/thebtf/engram/internal/search/expansion"
 	"github.com/thebtf/engram/internal/worker/sdk"
@@ -49,18 +47,16 @@ type retrievalMetadata struct {
 }
 
 type retrievalHooks struct {
-	retrieveRelevant              func(ctx context.Context, project, query string, opts RetrievalOptions) ([]*models.Observation, map[int64]float64, error)
-	getProjectThreshold           func(ctx context.Context, project string, globalDefault float64) float64
-	getObservationsByIDs func(ctx context.Context, ids []int64, orderBy string, limit int) ([]*models.Observation, error)
-	searchObservationsFTSFiltered func(ctx context.Context, query string, scopeFilter gorm.ScopeFilter, limit int) ([]*models.Observation, error)
-	getRecentObservationsFiltered func(ctx context.Context, scopeFilter gorm.ScopeFilter, limit int) ([]*models.Observation, error)
-	rerank                        func(query string, candidates []reranking.Candidate, limit int) ([]reranking.RerankResult, error)
-	rerankByScore                 func(query string, candidates []reranking.Candidate, limit int) ([]reranking.RerankResult, error)
-	expandViaGraph                func(ctx context.Context, scoredIDs []search.ScoredID, limit int) []search.ScoredID
-	getDiversityScores            func(ctx context.Context, ids []int64) (map[int64]float64, error)
-	getRecentSessionIDs           func(ctx context.Context, project string, since time.Time) (map[string]bool, error)
-	getTopImportanceObservations  func(ctx context.Context, project string, limit int) ([]*models.Observation, error)
-	filterByRelevance             func(ctx context.Context, candidates []*models.Observation, project, taskContext string) []int64
+	retrieveRelevant               func(ctx context.Context, project, query string, opts RetrievalOptions) ([]*models.Observation, map[int64]float64, error)
+	getProjectThreshold            func(ctx context.Context, project string, globalDefault float64) float64
+	getObservationsByIDs           func(ctx context.Context, ids []int64, orderBy string, limit int) ([]*models.Observation, error)
+	searchObservationsFTSFiltered  func(ctx context.Context, query string, scopeFilter gorm.ScopeFilter, limit int) ([]*models.Observation, error)
+	getRecentObservationsFiltered  func(ctx context.Context, scopeFilter gorm.ScopeFilter, limit int) ([]*models.Observation, error)
+	expandViaGraph                 func(ctx context.Context, scoredIDs []search.ScoredID, limit int) []search.ScoredID
+	getDiversityScores             func(ctx context.Context, ids []int64) (map[int64]float64, error)
+	getRecentSessionIDs            func(ctx context.Context, project string, since time.Time) (map[string]bool, error)
+	getTopImportanceObservations   func(ctx context.Context, project string, limit int) ([]*models.Observation, error)
+	filterByRelevance              func(ctx context.Context, candidates []*models.Observation, project, taskContext string) []int64
 	getRecentUserPromptsByProject  func(ctx context.Context, project string, limit int) ([]*models.UserPromptWithSession, error)
 	readSignalCountForPath         func(sessionID, filePath string) int
 	filePathObservations           func(ctx context.Context, project, filePath string, limit int) ([]*models.Observation, error)
@@ -460,68 +456,6 @@ func (s *Service) filterFreshObservations(ctx context.Context, observations []*m
 }
 
 func (s *Service) applyReranking(query string, observations []*models.Observation, similarityScores map[int64]float64) []*models.Observation {
-	// noRerankAvailable is true when neither a hook-based nor a direct reranker is configured.
-	noRerankAvailable := s.reranker == nil &&
-		(s.retrievalHooks == nil || (s.retrievalHooks.rerank == nil && s.retrievalHooks.rerankByScore == nil))
-	if len(observations) == 0 || noRerankAvailable {
-		return observations
-	}
-	candidates := make([]reranking.Candidate, len(observations))
-	for index, observation := range observations {
-		content := observation.Title.String
-		if observation.Narrative.Valid && observation.Narrative.String != "" {
-			content = observation.Title.String + " " + observation.Narrative.String
-		}
-		candidates[index] = reranking.Candidate{ID: strconv.FormatInt(observation.ID, 10), Content: content, Score: similarityScores[observation.ID], Metadata: map[string]any{"obs_idx": index}}
-	}
-	rerankResults, err := s.rerankResults(query, candidates)
-	if err != nil || len(rerankResults) == 0 {
-		if err != nil {
-			log.Warn().Err(err).Msg("Cross-encoder reranking failed, using original order")
-		}
-		return observations
-	}
-	observationByID := make(map[int64]*models.Observation, len(observations))
-	for _, observation := range observations {
-		observationByID[observation.ID] = observation
-	}
-	reordered := make([]*models.Observation, 0, len(rerankResults))
-	for _, result := range rerankResults {
-		id, parseErr := strconv.ParseInt(result.ID, 10, 64)
-		if parseErr != nil {
-			continue
-		}
-		similarityScores[id] = result.CombinedScore
-		if observation, exists := observationByID[id]; exists {
-			reordered = append(reordered, observation)
-		}
-	}
-	if len(reordered) == 0 {
-		return observations
-	}
-	return reordered
-}
-
-func (s *Service) rerankResults(query string, candidates []reranking.Candidate) ([]reranking.RerankResult, error) {
-	limit := 0
-	pureMode := false
-	if s.config != nil {
-		limit = s.config.RerankingResults
-		pureMode = s.config.RerankingPureMode
-	}
-	if s.retrievalHooks != nil {
-		if pureMode && s.retrievalHooks.rerankByScore != nil {
-			return s.retrievalHooks.rerankByScore(query, candidates, limit)
-		}
-		if s.retrievalHooks.rerank != nil {
-			return s.retrievalHooks.rerank(query, candidates, limit)
-		}
-	}
-	if s.reranker == nil {
-		return nil, nil
-	}
-	if pureMode {
-		return s.reranker.RerankByScore(query, candidates, limit)
-	}
-	return s.reranker.Rerank(query, candidates, limit)
+	// Reranking removed in v5.
+	return observations
 }

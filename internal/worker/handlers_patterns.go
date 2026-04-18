@@ -585,7 +585,6 @@ func (s *Service) handlePatternCleanupAdvanced(w http.ResponseWriter, r *http.Re
 	s.initMu.RLock()
 	store := s.patternStore
 	detector := s.patternDetector
-	maintSvc := s.maintenanceService
 	s.initMu.RUnlock()
 
 	if store == nil {
@@ -606,17 +605,6 @@ func (s *Service) handlePatternCleanupAdvanced(w http.ResponseWriter, r *http.Re
 	}
 
 	resp := PatternCleanupResponse{}
-
-	// Step 1: Orphan detection (and pruning if not dry run).
-	if maintSvc != nil {
-		orphanResult, err := maintSvc.CleanupOrphanPatterns(r.Context(), req.DryRun)
-		if err != nil {
-			http.Error(w, "orphan cleanup failed: "+err.Error(), http.StatusInternalServerError)
-			return
-		}
-		resp.OrphansFound = orphanResult.OrphansFound
-		resp.OrphansArchived = orphanResult.OrphansArchived
-	}
 
 	// Step 2: Batch confidence recalculation (skip in dry-run — no mutations).
 	if !req.DryRun && detector != nil {

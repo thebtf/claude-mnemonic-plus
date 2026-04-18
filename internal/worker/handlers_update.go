@@ -2,7 +2,6 @@
 package worker
 
 import (
-	"fmt"
 	"net/http"
 	"strings"
 	"time"
@@ -168,35 +167,6 @@ func (s *Service) handleSelfCheck(w http.ResponseWriter, r *http.Request) {
 		overall = "unhealthy"
 	}
 	components = append(components, sseStatus)
-
-	// Check Cross-Encoder Reranker
-	rerankerStatus := ComponentHealth{Name: "Cross-Encoder Reranker", Status: "healthy"}
-	if !s.config.RerankingEnabled {
-		rerankerStatus.Status = "degraded"
-		rerankerStatus.Message = "Disabled in config"
-		if overall == "healthy" {
-			overall = "degraded"
-		}
-	} else if s.reranker == nil {
-		rerankerStatus.Status = "degraded"
-		rerankerStatus.Message = "Not initialized"
-		if overall == "healthy" {
-			overall = "degraded"
-		}
-	} else {
-		// Verify reranker is functional using Score
-		_, normalizedScore, err := s.reranker.Score("test query", "test document")
-		if err != nil {
-			rerankerStatus.Status = "unhealthy"
-			rerankerStatus.Message = fmt.Sprintf("Score check failed: %v", err)
-			if overall == "healthy" {
-				overall = "degraded"
-			}
-		} else {
-			rerankerStatus.Message = fmt.Sprintf("Score check passed (%.4f)", normalizedScore)
-		}
-	}
-	components = append(components, rerankerStatus)
 
 	// Calculate uptime
 	uptime := time.Since(s.startTime).Round(time.Second).String()

@@ -16,11 +16,9 @@ import (
 	"github.com/rs/zerolog/log"
 	"github.com/thebtf/engram/internal/chunking"
 	"github.com/thebtf/engram/internal/collections"
-	"github.com/thebtf/engram/internal/consolidation"
 	"github.com/thebtf/engram/internal/crypto"
 	"github.com/thebtf/engram/internal/db/gorm"
 	graphpkg "github.com/thebtf/engram/internal/graph"
-	"github.com/thebtf/engram/internal/maintenance"
 	"github.com/thebtf/engram/internal/privacy"
 	"github.com/thebtf/engram/internal/scoring"
 	"github.com/thebtf/engram/internal/search"
@@ -41,10 +39,8 @@ type Server struct {
 	injectionStore         *gorm.InjectionStore
 	scoreCalculator        *scoring.Calculator
 	recalculator           *scoring.Recalculator
-	maintenanceService     *maintenance.Service
 	collectionRegistry     *collections.Registry
 	sessionIdxStore        *sessions.Store
-	consolidationScheduler *consolidation.Scheduler
 	documentStore          *gorm.DocumentStore
 	versionedDocumentStore *gorm.VersionedDocumentStore
 	chunkManager           *chunking.Manager
@@ -70,30 +66,26 @@ func NewServer(
 	sessionStore *gorm.SessionStore,
 	scoreCalculator *scoring.Calculator,
 	recalculator *scoring.Recalculator,
-	maintenanceService *maintenance.Service,
 	collectionRegistry *collections.Registry,
 	sessionIdxStore *sessions.Store,
-	consolidationScheduler *consolidation.Scheduler,
 	documentStore *gorm.DocumentStore,
 	chunkManager *chunking.Manager,
 ) *Server {
 	return &Server{
-		searchMgr:              searchMgr,
-		version:                version,
-		stdin:                  os.Stdin,
-		stdout:                 os.Stdout,
-		observationStore:       observationStore,
-		patternStore:           patternStore,
-		relationStore:          relationStore,
-		sessionStore:           sessionStore,
-		scoreCalculator:        scoreCalculator,
-		recalculator:           recalculator,
-		maintenanceService:     maintenanceService,
-		collectionRegistry:     collectionRegistry,
-		sessionIdxStore:        sessionIdxStore,
-		consolidationScheduler: consolidationScheduler,
-		documentStore:          documentStore,
-		chunkManager:           chunkManager,
+		searchMgr:          searchMgr,
+		version:            version,
+		stdin:              os.Stdin,
+		stdout:             os.Stdout,
+		observationStore:   observationStore,
+		patternStore:       patternStore,
+		relationStore:      relationStore,
+		sessionStore:       sessionStore,
+		scoreCalculator:    scoreCalculator,
+		recalculator:       recalculator,
+		collectionRegistry: collectionRegistry,
+		sessionIdxStore:    sessionIdxStore,
+		documentStore:      documentStore,
+		chunkManager:       chunkManager,
 	}
 }
 
@@ -405,7 +397,7 @@ Engram is your permanent memory store. Memories saved here persist across ALL se
 | ` + "`issues`" + ` | **Cross-project issue tracking** between agents | create, list, get, update, comment, reopen |
 | ` + "`vault`" + ` | **Credentials** — encrypted AES-256-GCM | store, get, list, delete, status |
 | ` + "`docs`" + ` | **Documents** — versioned docs & collections | create, read, list, history, comment, collections, documents, get_doc, remove, ingest, search_docs |
-| ` + "`admin`" + ` | **Bulk ops**, maintenance, analytics | bulk_delete, bulk_supersede, tag, graph, stats, trends, quality, export, maintenance, ... |
+| ` + "`admin`" + ` | **Bulk ops**, analytics | bulk_delete, bulk_supersede, tag, graph, stats, trends, quality, export, ... |
 | ` + "`check_system_health`" + ` | **Health** check of all subsystems | (no params) |
 
 ## Issues — Cross-Project Agent Bug Tracker
@@ -593,7 +585,7 @@ func (s *Server) primaryTools() []Tool {
 		},
 		{
 			Name:        "admin",
-			Description: "Administrative operations: bulk ops, tagging, graph, analytics, maintenance. Actions: bulk_delete, bulk_supersede, bulk_boost, tag, by_tag, batch_tag, graph, graph_stats, stats, trends, quality, importance, search_analytics, obs_quality, scoring, consolidations, maintenance, maintenance_stats, consolidation, export, backfill_status. Action required.",
+			Description: "Administrative operations: bulk ops, tagging, graph, analytics. Actions: bulk_delete, bulk_supersede, bulk_boost, tag, by_tag, batch_tag, graph, graph_stats, stats, trends, quality, importance, search_analytics, obs_quality, scoring, export, backfill_status. Action required.",
 			tier:        tierUseful,
 			InputSchema: map[string]any{
 				"type":     "object",
@@ -895,24 +887,6 @@ func (s *Server) handleToolsList(req *Request) *Response {
 			},
 		},
 		{
-			Name:        "trigger_maintenance",
-			Description: "Trigger an immediate maintenance run (cleanup old observations, optimize database).",
-			tier:        tierAdmin,
-			InputSchema: map[string]any{
-				"type":       "object",
-				"properties": map[string]any{},
-			},
-		},
-		{
-			Name:        "get_maintenance_stats",
-			Description: "Get statistics about the maintenance system including last run time, cleanup counts, and configuration.",
-			tier:        tierAdmin,
-			InputSchema: map[string]any{
-				"type":       "object",
-				"properties": map[string]any{},
-			},
-		},
-		{
 			Name:        "merge_observations",
 			Description: "Merge two observations into one. The target observation is kept and boosted, the source is marked as superseded. Useful for deduplication without data loss.",
 			tier:        tierAdmin,
@@ -970,19 +944,6 @@ func (s *Server) handleToolsList(req *Request) *Response {
 				"required": []string{"id"},
 				"properties": map[string]any{
 					"id": map[string]any{"type": "number", "description": "Observation ID to analyze"},
-				},
-			},
-		},
-		{
-			Name:        "suggest_consolidations",
-			Description: "Find observations that could be merged or consolidated. Returns groups of similar observations with merge recommendations.",
-			tier:        tierAdmin,
-			InputSchema: map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"project":        map[string]any{"type": "string", "description": "Filter by project"},
-					"min_similarity": map[string]any{"type": "number", "default": 0.8, "minimum": 0.5, "maximum": 1.0, "description": "Minimum similarity threshold for grouping"},
-					"limit":          map[string]any{"type": "number", "default": 10, "minimum": 1, "maximum": 50, "description": "Maximum groups to return"},
 				},
 			},
 		},
@@ -1177,22 +1138,6 @@ func (s *Server) handleToolsList(req *Request) *Response {
 				},
 			},
 		},
-		{
-			Name:        "run_consolidation",
-			Description: "Manually trigger the memory consolidation lifecycle. Runs decay (relevance recalculation), creative association discovery, and optionally forgetting. Use when you want to consolidate memories immediately rather than waiting for scheduled intervals.",
-			tier:        tierAdmin,
-			InputSchema: map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"cycle": map[string]any{
-						"type":        "string",
-						"enum":        []string{"all", "decay", "associations", "forgetting"},
-						"default":     "all",
-						"description": "Which consolidation cycle to run: 'all' runs everything, 'decay' recalculates relevance scores, 'associations' discovers creative associations, 'forgetting' archives low-relevance observations",
-					},
-				},
-			},
-		},
 		// Import instincts tool (always available — observation store is required for MCP)
 		{
 			Name:        "import_instincts",
@@ -1244,7 +1189,7 @@ func (s *Server) handleToolsList(req *Request) *Response {
 				Description: "List behavioral rules for a project (always includes global rules where project is NULL).",
 				tier:        tierUseful,
 				InputSchema: map[string]any{
-					"type":       "object",
+					"type": "object",
 					"properties": map[string]any{
 						"project": map[string]any{"type": "string", "description": "Project name (omit to list only global rules)"},
 						"limit":   map[string]any{"type": "number", "description": "Max results (default 50, max 500)"},
@@ -1736,10 +1681,6 @@ func (s *Server) callTool(ctx context.Context, name string, args json.RawMessage
 		return s.handleBulkMarkSuperseded(ctx, args)
 	case "bulk_boost_observations":
 		return s.handleBulkBoostObservations(ctx, args)
-	case "trigger_maintenance":
-		return s.handleTriggerMaintenance(ctx)
-	case "get_maintenance_stats":
-		return s.handleGetMaintenanceStats(ctx)
 	case "merge_observations":
 		return s.handleMergeObservations(ctx, args)
 	case "store_rule":
@@ -1752,8 +1693,6 @@ func (s *Server) callTool(ctx context.Context, name string, args json.RawMessage
 		return s.handleEditObservation(ctx, args)
 	case "get_observation_quality":
 		return s.handleGetObservationQuality(ctx, args)
-	case "suggest_consolidations":
-		return s.handleSuggestConsolidations(ctx, args)
 	case "tag_observation":
 		return s.handleTagObservation(ctx, args)
 	case "get_observations_by_tag":
@@ -1788,8 +1727,6 @@ func (s *Server) callTool(ctx context.Context, name string, args json.RawMessage
 		return s.handleSearchSessions(ctx, args)
 	case "list_sessions":
 		return s.handleListSessions(ctx, args)
-	case "run_consolidation":
-		return s.handleRunConsolidation(ctx, args)
 	// Document / Collection tools
 	case "list_collections":
 		return s.handleListCollections(ctx)
@@ -2464,43 +2401,6 @@ func (s *Server) handleBulkBoostObservations(ctx context.Context, args json.RawM
 	return string(output), nil
 }
 
-// handleTriggerMaintenance triggers an immediate maintenance run.
-func (s *Server) handleTriggerMaintenance(ctx context.Context) (string, error) {
-	if s.maintenanceService == nil {
-		return "", fmt.Errorf("maintenance service not available")
-	}
-
-	s.maintenanceService.RunNow(ctx)
-
-	response := map[string]any{
-		"status":  "triggered",
-		"message": "Maintenance run started in background",
-	}
-
-	output, err := json.Marshal(response)
-	if err != nil {
-		return "", fmt.Errorf("marshal response: %w", err)
-	}
-
-	return string(output), nil
-}
-
-// handleGetMaintenanceStats returns maintenance statistics.
-func (s *Server) handleGetMaintenanceStats(_ context.Context) (string, error) {
-	if s.maintenanceService == nil {
-		return "", fmt.Errorf("maintenance service not available")
-	}
-
-	stats := s.maintenanceService.Stats()
-
-	output, err := json.Marshal(stats)
-	if err != nil {
-		return "", fmt.Errorf("marshal response: %w", err)
-	}
-
-	return string(output), nil
-}
-
 // handleMergeObservations merges two observations, keeping the target and superseding the source.
 func (s *Server) handleMergeObservations(ctx context.Context, args json.RawMessage) (string, error) {
 	m, err := parseArgs(args)
@@ -2864,65 +2764,6 @@ func (s *Server) handleGetObservationQuality(ctx context.Context, args json.RawM
 			"files_read_count":     len(obs.FilesRead),
 			"files_modified_count": len(obs.FilesModified),
 		},
-	}
-
-	output, err := json.Marshal(response)
-	if err != nil {
-		return "", fmt.Errorf("marshal response: %w", err)
-	}
-
-	return string(output), nil
-}
-
-// handleSuggestConsolidations finds observations that could be merged.
-func (s *Server) handleSuggestConsolidations(ctx context.Context, args json.RawMessage) (string, error) {
-	m, err := parseArgs(args)
-	if err != nil {
-		return "", err
-	}
-
-	var params struct {
-		Project       string
-		MinSimilarity float64
-		Limit         int
-	}
-	params.Project = coerceString(m["project"], "")
-	params.MinSimilarity = coerceFloat64(m["min_similarity"], 0)
-	params.Limit = coerceInt(m["limit"], 0)
-
-	// Set defaults
-	if params.MinSimilarity == 0 {
-		params.MinSimilarity = 0.8
-	}
-	if params.Limit == 0 {
-		params.Limit = 10
-	}
-	if params.MinSimilarity < 0.5 || params.MinSimilarity > 1.0 {
-		return "", fmt.Errorf("min_similarity must be between 0.5 and 1.0")
-	}
-
-	// Get recent observations to analyze
-	obs, err := s.observationStore.GetRecentObservations(ctx, params.Project, 200)
-	if err != nil {
-		return "", fmt.Errorf("get observations: %w", err)
-	}
-
-	if len(obs) < 2 {
-		response := map[string]any{
-			"groups":  []any{},
-			"message": "Not enough observations to analyze",
-		}
-		output, _ := json.Marshal(response)
-		return string(output), nil
-	}
-
-	// Vector similarity search removed in v5. Return empty consolidation groups.
-	response := map[string]any{
-		"groups":         []any{},
-		"total_analyzed": len(obs),
-		"groups_found":   0,
-		"min_similarity": params.MinSimilarity,
-		"recommendation": "Vector similarity search removed in v5; manual consolidation via merge_observations is still available",
 	}
 
 	output, err := json.Marshal(response)
@@ -3755,7 +3596,7 @@ func (s *Server) handleBackfillStatus() (string, error) {
 // handleCheckSystemHealth performs comprehensive system health checks.
 func (s *Server) handleCheckSystemHealth(ctx context.Context) (string, error) {
 	type SubsystemHealth struct {
-		Status   string         `json:"status"`             // "healthy", "degraded", "unhealthy"
+		Status   string         `json:"status"` // "healthy", "degraded", "unhealthy"
 		Message  string         `json:"message,omitempty"`
 		Metrics  map[string]any `json:"metrics,omitempty"`
 		Warnings []string       `json:"warnings,omitempty"`
@@ -4452,49 +4293,6 @@ func (s *Server) handleListSessions(ctx context.Context, args json.RawMessage) (
 		return "", fmt.Errorf("marshal results: %w", err)
 	}
 	return string(data), nil
-}
-
-func (s *Server) handleRunConsolidation(ctx context.Context, args json.RawMessage) (string, error) {
-	if s.consolidationScheduler == nil {
-		return "", fmt.Errorf("consolidation scheduler not available")
-	}
-
-	m, err := parseArgs(args)
-	if err != nil {
-		return "", err
-	}
-
-	var params struct {
-		Cycle string
-	}
-	params.Cycle = coerceString(m["cycle"], "all")
-	if params.Cycle == "" {
-		params.Cycle = "all"
-	}
-
-	switch params.Cycle {
-	case "all":
-		err = s.consolidationScheduler.RunAll(ctx)
-	case "decay":
-		err = s.consolidationScheduler.RunDecay(ctx)
-	case "associations":
-		err = s.consolidationScheduler.RunAssociations(ctx)
-	case "forgetting":
-		err = s.consolidationScheduler.RunForgetting(ctx)
-	default:
-		return "", fmt.Errorf("unknown cycle: %s (use 'all', 'decay', 'associations', or 'forgetting')", params.Cycle)
-	}
-
-	if err != nil {
-		return "", fmt.Errorf("consolidation %s cycle failed: %w", params.Cycle, err)
-	}
-
-	result := map[string]any{
-		"status": "completed",
-		"cycle":  params.Cycle,
-	}
-	b, _ := json.MarshalIndent(result, "", "  ")
-	return string(b), nil
 }
 
 // handleGetGraphNeighbors returns graph neighbors via FalkorDB.
