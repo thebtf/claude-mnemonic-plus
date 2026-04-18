@@ -3,11 +3,15 @@ package worker
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/rs/zerolog/log"
+	gormlib "gorm.io/gorm"
+
 	"github.com/thebtf/engram/internal/config"
 	"github.com/thebtf/engram/internal/crypto"
 	"github.com/thebtf/engram/pkg/models"
@@ -33,41 +37,39 @@ type storeCredentialRequest struct {
 // @Failure 500 {string} string "internal error"
 // @Router /api/vault/credentials [get]
 func (s *Service) handleListCredentials(w http.ResponseWriter, r *http.Request) {
-	if s.observationStore == nil {
-		http.Error(w, "observation store not available", http.StatusServiceUnavailable)
+	if s.credentialStore == nil {
+		http.Error(w, "credential store not available", http.StatusServiceUnavailable)
 		return
 	}
 
 	project := r.URL.Query().Get("project")
 
-	creds, err := s.observationStore.ListCredentials(r.Context(), project)
+	type credItem struct {
+		Name      string `json:"name"`
+		Scope     string `json:"scope"`
+		CreatedAt string `json:"created_at"`
+		ID        int64  `json:"id"`
+	}
+
+	if project == "" {
+		writeJSON(w, []credItem{})
+		return
+	}
+
+	creds, err := s.credentialStore.List(r.Context(), project)
 	if err != nil {
 		log.Error().Err(err).Msg("list credentials failed")
 		http.Error(w, "list credentials: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
 
-	type credItem struct {
-		Concepts  []string `json:"concepts,omitempty"`
-		Name      string   `json:"name"`
-		Scope     string   `json:"scope"`
-		CreatedAt string   `json:"created_at"`
-		ID        int64    `json:"id"`
-	}
 	items := make([]credItem, 0, len(creds))
 	for _, c := range creds {
-		name := ""
-		if c.Title.Valid {
-			name = c.Title.String
-		} else if c.Narrative.Valid {
-			name = c.Narrative.String
-		}
 		items = append(items, credItem{
 			ID:        c.ID,
-			Name:      name,
-			Scope:     string(c.Scope),
-			CreatedAt: c.CreatedAt,
-			Concepts:  []string(c.Concepts),
+			Name:      c.Key,
+			Scope:     c.Scope,
+			CreatedAt: c.CreatedAt.Format(time.RFC3339),
 		})
 	}
 
@@ -88,8 +90,8 @@ func (s *Service) handleListCredentials(w http.ResponseWriter, r *http.Request) 
 // @Failure 500 {string} string "internal error"
 // @Router /api/vault/credentials/{name} [get]
 func (s *Service) handleGetCredential(w http.ResponseWriter, r *http.Request) {
-	if s.observationStore == nil {
-		http.Error(w, "observation store not available", http.StatusServiceUnavailable)
+	if s.credentialStore == nil {
+		http.Error(w, "credential store not available", http.StatusServiceUnavailable)
 		return
 	}
 
@@ -106,20 +108,20 @@ func (s *Service) handleGetCredential(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	cred, err := s.observationStore.GetCredential(r.Context(), name, project)
+	cred, err := s.credentialStore.Get(r.Context(), project, name)
 	if err != nil {
+		if errors.Is(err, gormlib.ErrRecordNotFound) {
+			http.Error(w, "credential not found", http.StatusNotFound)
+			return
+		}
 		log.Error().Err(err).Str("name", name).Msg("get credential failed")
 		http.Error(w, "get credential: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
-	if cred == nil {
-		http.Error(w, "credential not found", http.StatusNotFound)
-		return
-	}
 
 	// Verify key fingerprint before decryption to detect key mismatch early.
-	if cred.EncryptionKeyFingerprint.Valid && cred.EncryptionKeyFingerprint.String != "" {
-		if !v.MatchesFingerprint(cred.EncryptionKeyFingerprint.String) {
+	if cred.EncryptionKeyFingerprint != "" {
+		if !v.MatchesFingerprint(cred.EncryptionKeyFingerprint) {
 			http.Error(w, "encryption key mismatch: credential was encrypted with a different key", http.StatusConflict)
 			return
 		}
@@ -135,13 +137,13 @@ func (s *Service) handleGetCredential(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, map[string]any{
 		"name":  name,
 		"value": plaintext,
-		"scope": string(cred.Scope),
+		"scope": cred.Scope,
 	})
 }
 
 // handleStoreCredential godoc
 // @Summary Store a new credential
-// @Description Encrypts and stores a credential observation using AES-256-GCM vault encryption.
+// @Description Encrypts and stores a credential using AES-256-GCM vault encryption.
 // @Tags Vault
 // @Accept json
 // @Produce json
@@ -152,8 +154,8 @@ func (s *Service) handleGetCredential(w http.ResponseWriter, r *http.Request) {
 // @Failure 500 {string} string "internal error"
 // @Router /api/vault/credentials [post]
 func (s *Service) handleStoreCredential(w http.ResponseWriter, r *http.Request) {
-	if s.observationStore == nil {
-		http.Error(w, "observation store not available", http.StatusServiceUnavailable)
+	if s.credentialStore == nil {
+		http.Error(w, "credential store not available", http.StatusServiceUnavailable)
 		return
 	}
 
@@ -199,31 +201,26 @@ func (s *Service) handleStoreCredential(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	scope := models.ObservationScope(req.Scope)
-	obs := &models.ParsedObservation{
-		Type:                     models.ObsTypeCredential,
-		SourceType:               models.SourceManual,
-		Title:                    req.Name,
-		Narrative:                req.Name,
-		Concepts:                 req.Tags,
-		Scope:                    scope,
+	cred := &models.Credential{
+		Project:                  req.Project,
+		Key:                      req.Name,
 		EncryptedSecret:          ciphertext,
 		EncryptionKeyFingerprint: v.Fingerprint(),
+		Scope:                    req.Scope,
+		EditedBy:                 "api",
 	}
-
-	const vaultSessionID = "credential:vault"
-	id, _, err := s.observationStore.StoreObservation(r.Context(), vaultSessionID, req.Project, obs, 0, 0)
+	created, err := s.credentialStore.Create(r.Context(), cred)
 	if err != nil {
-		log.Error().Err(err).Msg("store credential observation failed")
+		log.Error().Err(err).Msg("store credential failed")
 		http.Error(w, "store credential: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
 
 	w.WriteHeader(http.StatusCreated)
 	writeJSON(w, map[string]any{
-		"id":      id,
+		"id":      created.ID,
 		"name":    req.Name,
-		"scope":   string(scope),
+		"scope":   req.Scope,
 		"message": "Credential stored successfully",
 	})
 }
@@ -239,11 +236,12 @@ func (s *Service) handleStoreCredential(w http.ResponseWriter, r *http.Request) 
 // @Param scope query string false "Scope filter (project or global)" default(project)
 // @Success 200 {object} object
 // @Failure 400 {string} string "bad request"
+// @Failure 404 {string} string "not found"
 // @Failure 500 {string} string "internal error"
 // @Router /api/vault/credentials/{name} [delete]
 func (s *Service) handleDeleteCredential(w http.ResponseWriter, r *http.Request) {
-	if s.observationStore == nil {
-		http.Error(w, "observation store not available", http.StatusServiceUnavailable)
+	if s.credentialStore == nil {
+		http.Error(w, "credential store not available", http.StatusServiceUnavailable)
 		return
 	}
 
@@ -270,7 +268,11 @@ func (s *Service) handleDeleteCredential(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	if err := s.observationStore.DeleteCredential(r.Context(), name, project, scope); err != nil {
+	if err := s.credentialStore.Delete(r.Context(), project, name); err != nil {
+		if errors.Is(err, gormlib.ErrRecordNotFound) {
+			http.Error(w, "credential not found", http.StatusNotFound)
+			return
+		}
 		log.Error().Err(err).Str("name", name).Msg("delete credential failed")
 		http.Error(w, "delete credential: "+err.Error(), http.StatusInternalServerError)
 		return
@@ -305,12 +307,12 @@ func (s *Service) handleDeleteOrphanedCredentials(w http.ResponseWriter, r *http
 		return
 	}
 
-	if s.observationStore == nil {
+	if s.credentialStore == nil {
 		http.Error(w, "service not ready", http.StatusServiceUnavailable)
 		return
 	}
 
-	deleted, err := s.observationStore.DeleteOrphanedCredentials(r.Context(), fingerprint)
+	deleted, err := s.credentialStore.DeleteOrphanedByFingerprint(r.Context(), fingerprint)
 	if err != nil {
 		http.Error(w, "failed to delete orphaned credentials", http.StatusInternalServerError)
 		return
@@ -348,16 +350,16 @@ func (s *Service) handleVaultStatus(w http.ResponseWriter, r *http.Request) {
 	}
 
 	count := 0
-	if s.observationStore != nil {
-		if n, err := s.observationStore.CountCredentials(r.Context()); err == nil {
+	if s.credentialStore != nil {
+		if n, err := s.credentialStore.CountCredentials(r.Context()); err == nil {
 			count = int(n)
 		}
 	}
 
 	// Check for fingerprint mismatch: credentials encrypted with a different key.
 	mismatchCount := 0
-	if fingerprint != "" && s.observationStore != nil {
-		if n, err := s.observationStore.CountCredentialsWithDifferentFingerprint(r.Context(), fingerprint); err == nil {
+	if fingerprint != "" && s.credentialStore != nil {
+		if n, err := s.credentialStore.CountWithDifferentFingerprint(r.Context(), fingerprint); err == nil {
 			mismatchCount = int(n)
 		}
 	}
