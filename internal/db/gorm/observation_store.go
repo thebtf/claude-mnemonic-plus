@@ -595,7 +595,11 @@ func (s *ObservationStore) GetObservationsByCommandPrefix(ctx context.Context, p
 	// query `"git push --force origin main"` because the stored value is a
 	// prefix of the query. `starts_with(?, cmd)` expresses this directly
 	// without the LIKE/ESCAPE wildcard hazard (%, _ in either side are
-	// treated as literals). Requires PostgreSQL 11+.
+	// treated as literals).
+	// PostgreSQL compatibility: starts_with() is available since PostgreSQL 9.1.
+	// This project targets PostgreSQL 17 (pgvector requirement), so there is no
+	// compatibility concern. The LIKE alternative (`query LIKE cmd || '%'`) was
+	// rejected because it is unsafe when cmd contains LIKE metacharacters.
 	trimmed := strings.TrimSpace(command)
 	var dbObservations []Observation
 	err := s.db.WithContext(ctx).

@@ -48,16 +48,23 @@ func (s *CredentialStore) Create(ctx context.Context, cred *models.Credential) (
 		return nil, fmt.Errorf("credential.EncryptionKeyFingerprint must not be empty")
 	}
 
+	// Use a single timestamp for both created_at and updated_at — two calls to time.Now()
+	// could produce different values under load and should always match on create.
+	// Copy the encrypted secret to prevent the caller's slice from aliasing the stored row —
+	// immutability contract: the caller's input is never mutated.
+	now := time.Now().UTC()
+	secret := append([]byte(nil), cred.EncryptedSecret...)
+
 	row := &Credential{
 		Project:                  cred.Project,
 		Key:                      cred.Key,
-		EncryptedSecret:          cred.EncryptedSecret,
+		EncryptedSecret:          secret,
 		EncryptionKeyFingerprint: cred.EncryptionKeyFingerprint,
 		Scope:                    cred.Scope,
 		EditedBy:                 cred.EditedBy,
 		Version:                  1,
-		CreatedAt:                time.Now().UTC(),
-		UpdatedAt:                time.Now().UTC(),
+		CreatedAt:                now,
+		UpdatedAt:                now,
 	}
 	if cred.Version > 0 {
 		row.Version = cred.Version
@@ -111,6 +118,16 @@ func (s *CredentialStore) List(ctx context.Context, project string) ([]*models.C
 
 // Delete permanently removes the credential matching (project, key).
 // Returns gorm.ErrRecordNotFound if no row exists.
+//
+// Design note — hard-delete vs soft-delete: credentials use hard-delete
+// intentionally. The primary use-case is key rotation: delete the old
+// credential, then create a new one with the same (project, key). The
+// credentials table has UNIQUE(project, key) without a partial index, so a
+// soft-deleted row with deleted_at IS NOT NULL would block re-creation with a
+// unique constraint violation. The deleted_at column is present in the schema
+// and GORM model for future auditing / cascaded-delete use (e.g. if a project
+// is removed), but it is NOT used by this Delete method.
+// See: TestCredentialStore_CreateGetCountDelete "rotation scenario" test case.
 func (s *CredentialStore) Delete(ctx context.Context, project, key string) error {
 	if project == "" {
 		return fmt.Errorf("project: must not be empty")
@@ -119,7 +136,7 @@ func (s *CredentialStore) Delete(ctx context.Context, project, key string) error
 		return fmt.Errorf("key: must not be empty")
 	}
 	result := s.db.WithContext(ctx).
-		Where("project = ? AND key = ?", project, key).
+		Where("project = ? AND key = ? AND deleted_at IS NULL", project, key).
 		Delete(&Credential{})
 	if result.Error != nil {
 		return fmt.Errorf("delete credential %q/%q: %w", project, key, result.Error)

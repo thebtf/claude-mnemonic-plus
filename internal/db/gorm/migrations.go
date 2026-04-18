@@ -2947,16 +2947,18 @@ WHERE utility_propagated_at IS NOT NULL`).Error
 			Migrate: func(tx *gorm.DB) error {
 				// 1. Migrate vault credentials FIRST — preserve ciphertext + fingerprint bytes verbatim.
 				//    credential name lives in observation.title per ObservationStore.GetCredential.
-				//    observations.created_at_epoch is BIGINT (unix seconds) — use TO_TIMESTAMP for unambiguous conversion.
+				//    observations.created_at_epoch is BIGINT (unix milliseconds, set via time.Now().UnixMilli()).
+				//    TO_TIMESTAMP expects seconds — divide by 1000.0 for correct conversion.
 				if err := tx.Exec(`
-					INSERT INTO credentials (project, key, encrypted_secret, encryption_key_fingerprint, created_at, updated_at)
+					INSERT INTO credentials (project, key, encrypted_secret, encryption_key_fingerprint, scope, created_at, updated_at)
 					SELECT
 						project,
 						title AS key,
 						encrypted_secret,
 						encryption_key_fingerprint,
-						TO_TIMESTAMP(created_at_epoch) AS created_at,
-						TO_TIMESTAMP(created_at_epoch) AS updated_at
+						COALESCE(NULLIF(scope, ''), 'project') AS scope,
+						TO_TIMESTAMP(created_at_epoch / 1000.0) AS created_at,
+						TO_TIMESTAMP(created_at_epoch / 1000.0) AS updated_at
 					FROM observations
 					WHERE type = 'credential'
 					  AND encrypted_secret IS NOT NULL
@@ -2982,8 +2984,8 @@ WHERE utility_propagated_at IS NOT NULL`).Error
 							WHEN importance_score >= 0.5 THEN 5
 							ELSE 0
 						END AS priority,
-						TO_TIMESTAMP(created_at_epoch) AS created_at,
-						TO_TIMESTAMP(created_at_epoch) AS updated_at
+						TO_TIMESTAMP(created_at_epoch / 1000.0) AS created_at,
+						TO_TIMESTAMP(created_at_epoch / 1000.0) AS updated_at
 					FROM observations
 					WHERE concepts @> '["always-inject"]'::jsonb
 					  AND type != 'credential'
@@ -3005,8 +3007,8 @@ WHERE utility_propagated_at IS NOT NULL`).Error
 						COALESCE(NULLIF(TRIM(narrative), ''), title, '') AS content,
 						COALESCE(concepts, '[]'::jsonb)                  AS tags,
 						COALESCE(NULLIF(agent_source, ''), 'unknown')    AS source_agent,
-						TO_TIMESTAMP(created_at_epoch)                   AS created_at,
-						TO_TIMESTAMP(created_at_epoch)                   AS updated_at
+						TO_TIMESTAMP(created_at_epoch / 1000.0)          AS created_at,
+						TO_TIMESTAMP(created_at_epoch / 1000.0)          AS updated_at
 					FROM observations
 					WHERE type != 'credential'
 					  AND NOT COALESCE(concepts @> '["always-inject"]'::jsonb, false)
@@ -3075,21 +3077,18 @@ WHERE utility_propagated_at IS NOT NULL`).Error
 				return nil
 			},
 			Rollback: func(tx *gorm.DB) error {
-				// Forward migration only READS observations; it WRITES to the 3 static tables.
-				// Rollback == empty the static tables to undo the data copy. Schema of
-				// credentials/memories/behavioral_rules remains (migrations 087-089 Rollback
-				// would handle that separately).
-				sqls := []string{
-					`TRUNCATE TABLE memories`,
-					`TRUNCATE TABLE behavioral_rules`,
-					`TRUNCATE TABLE credentials`,
-				}
-				for _, s := range sqls {
-					if err := tx.Exec(s).Error; err != nil {
-						return fmt.Errorf("migration 090_observations_to_static_entities rollback: %w", err)
-					}
-				}
-				return nil
+				// Rollback is intentionally disabled after cutover.
+				//
+				// After migration 090 runs successfully, credentials/memories/behavioral_rules
+				// contain data that clients may have WRITTEN DIRECTLY (via the new stores) —
+				// data that does NOT exist in the observations table. A TRUNCATE would silently
+				// destroy that post-migration data with no recovery path.
+				//
+				// If you genuinely need to roll back pre-cutover (e.g. on a fresh test DB that
+				// has never been used after migration), do so manually:
+				//   TRUNCATE TABLE memories, behavioral_rules, credentials;
+				// and then run gormigrate.RollbackTo("089_...") in a maintenance script.
+				return fmt.Errorf("migration 090_observations_to_static_entities: rollback is not safe after cutover — post-migration writes to credentials/memories/behavioral_rules would be destroyed; perform manual rollback if this is a pre-cutover environment")
 			},
 		},
 	})
