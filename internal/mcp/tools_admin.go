@@ -13,7 +13,7 @@ func (s *Server) handleAdmin(ctx context.Context, args json.RawMessage) (string,
 	}
 	action := coerceString(m["action"], "")
 	if action == "" {
-		return "", fmt.Errorf("action required for admin tool (valid: bulk_delete, bulk_supersede, bulk_boost, tag, by_tag, batch_tag, graph, graph_stats, stats, trends, quality, importance, search_analytics, obs_quality, scoring, consolidations, maintenance, maintenance_stats, consolidation, export, backfill_status)")
+		return "", fmt.Errorf("action required for admin tool (valid: bulk_delete, bulk_supersede, bulk_boost, tag, by_tag, batch_tag, graph, graph_stats, stats, trends, quality, importance, search_analytics, obs_quality, scoring, export, backfill_status, compress_aaak, set_aaak_code, taxonomy_stats)")
 	}
 
 	switch action {
@@ -47,14 +47,6 @@ func (s *Server) handleAdmin(ctx context.Context, args json.RawMessage) (string,
 		return s.handleGetObservationQuality(ctx, args)
 	case "scoring":
 		return s.handleGetObservationScoringBreakdown(ctx, args)
-	case "consolidations":
-		return s.handleSuggestConsolidations(ctx, args)
-	case "maintenance":
-		return s.handleTriggerMaintenance(ctx)
-	case "maintenance_stats":
-		return s.handleGetMaintenanceStats(ctx)
-	case "consolidation":
-		return s.handleRunConsolidation(ctx, args)
 	case "export":
 		return s.handleExportObservations(ctx, args)
 	case "backfill_status":
@@ -67,6 +59,6 @@ func (s *Server) handleAdmin(ctx context.Context, args json.RawMessage) (string,
 	case "taxonomy_stats":
 		return s.handleTaxonomyStats(ctx, args)
 	default:
-		return "", fmt.Errorf("unknown admin action: %q (valid: bulk_delete, bulk_supersede, bulk_boost, tag, by_tag, batch_tag, graph, graph_stats, stats, trends, quality, importance, search_analytics, obs_quality, scoring, consolidations, maintenance, maintenance_stats, consolidation, export, backfill_status, compress_aaak, set_aaak_code, taxonomy_stats)", action)
+		return "", fmt.Errorf("unknown admin action: %q (valid: bulk_delete, bulk_supersede, bulk_boost, tag, by_tag, batch_tag, graph, graph_stats, stats, trends, quality, importance, search_analytics, obs_quality, scoring, export, backfill_status, compress_aaak, set_aaak_code, taxonomy_stats)", action)
 	}
 }

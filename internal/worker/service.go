@@ -24,7 +24,6 @@ import (
 	mdchunking "github.com/thebtf/engram/internal/chunking/markdown"
 	"github.com/thebtf/engram/internal/collections"
 	"github.com/thebtf/engram/internal/config"
-	"github.com/thebtf/engram/internal/consolidation"
 	"github.com/thebtf/engram/internal/crypto"
 	"github.com/thebtf/engram/internal/db/gorm"
 	graphpkg "github.com/thebtf/engram/internal/graph"
@@ -32,10 +31,8 @@ import (
 	"github.com/thebtf/engram/internal/grpcserver"
 	"github.com/thebtf/engram/internal/learning"
 	"github.com/thebtf/engram/internal/logbuf"
-	"github.com/thebtf/engram/internal/maintenance"
 	"github.com/thebtf/engram/internal/mcp"
 	"github.com/thebtf/engram/internal/pattern"
-	"github.com/thebtf/engram/internal/reranking"
 	"github.com/thebtf/engram/internal/scoring"
 	"github.com/thebtf/engram/internal/search"
 	"github.com/thebtf/engram/internal/search/expansion"
@@ -96,7 +93,6 @@ type Service struct {
 	ctx                    context.Context
 	initError              error
 	server                 *http.Server
-	reranker               reranking.Reranker
 	observationStore       *gorm.ObservationStore
 	summaryStore           *gorm.SummaryStore
 	promptStore            *gorm.PromptStore
@@ -112,7 +108,6 @@ type Service struct {
 	queryExpander          *expansion.Expander
 	scoreCalculator        *scoring.Calculator
 	recalculator           *scoring.Recalculator
-	consolidationScheduler *consolidation.Scheduler
 	mcpHealth              *mcp.MCPHealth
 	searchMgr              *search.Manager
 	collectionRegistry     *collections.Registry
@@ -131,7 +126,6 @@ type Service struct {
 	configWatcher          *watcher.Watcher
 	updater                *update.Updater
 	similarityTelemetry    *telemetry.SimilarityTelemetry
-	maintenanceService     *maintenance.Service
 	rateLimiter            *PerClientRateLimiter
 	tokenAuth              *TokenAuth
 	expensiveOpLimiter     *ExpensiveOperationLimiter
@@ -356,57 +350,6 @@ func NewService(version string, logBuffer *logbuf.RingBuffer) (*Service, error) 
 	return svc, nil
 }
 
-// createReranker creates a reranker based on the configured provider.
-// Returns nil if creation fails (graceful degradation — reranking disabled).
-func (s *Service) createReranker() reranking.Reranker {
-	provider := s.config.RerankingProvider
-	if provider == "" {
-		provider = "api"
-	}
-
-	alpha := s.config.RerankingAlpha
-	if alpha <= 0 || alpha > 1 {
-		alpha = 0.7
-	}
-
-	switch provider {
-	case "api":
-
-		if s.config.RerankingAPIBaseURL == "" {
-			log.Warn().Msg("Reranking API URL not set (ENGRAM_RERANKING_API_URL) - reranking disabled")
-			return nil
-		}
-
-		timeout := time.Duration(s.config.RerankingTimeoutMS) * time.Millisecond
-		if timeout <= 0 {
-			timeout = 500 * time.Millisecond
-		}
-
-		ranker, err := reranking.NewAPIService(reranking.APIConfig{
-			BaseURL:   s.config.RerankingAPIBaseURL,
-			APIKey:    s.config.RerankingAPIKey,
-			Model:     s.config.RerankingAPIModel,
-			Alpha:     alpha,
-			Timeout:   timeout,
-			BatchSize: s.config.RerankingBatchSize,
-		})
-		if err != nil {
-			log.Warn().Err(err).Msg("API reranker creation failed - reranking disabled")
-			return nil
-		}
-		log.Info().
-			Str("provider", "api").
-			Str("model", s.config.RerankingAPIModel).
-			Float64("alpha", alpha).
-			Msg("API reranking enabled")
-		return ranker
-
-	default:
-		log.Warn().Str("provider", provider).Msg("Unknown reranking provider - reranking disabled")
-		return nil
-	}
-}
-
 // createHyDEGenerator creates a HyDE generator if enabled and configured.
 // Returns nil if HyDE is disabled or API config is missing (graceful no-op).
 func (s *Service) createHyDEGenerator() *expansion.HyDEGenerator {
@@ -496,12 +439,6 @@ func (s *Service) initializeAsync() {
 	// Create session manager
 	sessionManager := session.NewManager(sessionStore)
 
-	// Create reranking service if enabled (operates on text, no embedding needed)
-	var reranker reranking.Reranker
-	if s.config.RerankingEnabled {
-		reranker = s.createReranker()
-	}
-
 	// Create SDK processor (optional - requires LLM API or Claude CLI)
 	var processor *sdk.Processor
 	proc, err := sdk.NewProcessor(observationStore, summaryStore)
@@ -577,7 +514,6 @@ func (s *Service) initializeAsync() {
 	if processor != nil {
 		processor.SetDedupConfig(cfg.DedupSimilarityThreshold, cfg.DedupWindowSize)
 	}
-	s.reranker = reranker
 	s.initMu.Unlock()
 
 	// Wire token store into auth middleware for client token lookups
@@ -651,86 +587,11 @@ func (s *Service) initializeAsync() {
 	}()
 	log.Info().Msg("Importance scoring system initialized")
 
-	// Start consolidation scheduler
-	relevanceCalc := scoring.NewRelevanceCalculator(nil) // default config
-	assocEngine := consolidation.NewAssociationEngine(nil, consolidation.DefaultAssociationConfig(), log.Logger)
-	schedCfg := consolidation.DefaultSchedulerConfig()
-	if v := strings.ToLower(strings.TrimSpace(os.Getenv("ENGRAM_FORGET_ENABLED"))); v == "false" || v == "0" {
-		schedCfg.ForgetEnabled = false
-	}
-	consolidationScheduler := consolidation.NewScheduler(
-		relevanceCalc,
-		assocEngine,
-		observationStore,
-		relationStore,
-		schedCfg,
-		log.Logger,
-	)
-	s.initMu.Lock()
-	s.consolidationScheduler = consolidationScheduler
-	s.initMu.Unlock()
-
-	s.wg.Add(1)
-	go func() {
-		defer s.wg.Done()
-		consolidationScheduler.Start(s.ctx)
-	}()
-	log.Info().Msg("Consolidation scheduler started")
-
 	// Start pattern detector background analysis
 	if patternDetector != nil {
 		patternDetector.Start()
 		log.Info().Msg("Pattern recognition engine started")
 	}
-
-	// Initialize Smart GC and maintenance service
-	var smartGC *maintenance.SmartGC
-	if cfg.SmartGCEnabled {
-		smartGC = maintenance.NewSmartGC(
-			store, observationStore, nil,
-			scoreCalculator, cfg, log.Logger,
-		)
-	}
-	maintenanceSvc := maintenance.NewService(
-		store, observationStore, injectionStore, summaryStore, promptStore,
-		cfg, s.similarityTelemetry, smartGC, patternStore,
-		nil, nil, relationStore, gs,
-		sessionStore, agentStatsStore,
-		s.llmClient,
-		log.Logger,
-	)
-	maintenanceSvc.OnProgress = func(subtask string, index, total int, status, message string) {
-		s.sseBroadcaster.Broadcast(map[string]any{
-			"type":    "maintenance_progress",
-			"subtask": subtask,
-			"index":   index,
-			"total":   total,
-			"status":  status,
-			"message": message,
-		})
-	}
-	maintenanceSvc.OnComplete = func(summary maintenance.CompletionSummary) {
-		s.sseBroadcaster.Broadcast(map[string]any{
-			"type":          "maintenance_complete",
-			"duration_ms":   summary.DurationMs,
-			"subtask_count": summary.SubtaskCount,
-			"summary": map[string]any{
-				"merged":   summary.Merged,
-				"archived": summary.Archived,
-				"pruned":   summary.Pruned,
-			},
-		})
-	}
-
-	s.initMu.Lock()
-	s.maintenanceService = maintenanceSvc
-	s.initMu.Unlock()
-	s.wg.Add(1)
-	go func() {
-		defer s.wg.Done()
-		maintenanceSvc.Start(s.ctx)
-	}()
-	log.Info().Bool("smart_gc", cfg.SmartGCEnabled).Msg("Maintenance service started")
 
 	// Periodic prompt cache eviction (Learning Memory v3)
 	s.wg.Add(1)
@@ -820,10 +681,8 @@ func (s *Service) initializeAsync() {
 		sessionStore,
 		scoreCalculator,
 		recalculator,
-		maintenanceSvc,
 		collectionRegistry,
 		sessionIdxStore,
-		consolidationScheduler,
 		documentStore,
 		chunkManager,
 	)
@@ -1366,19 +1225,6 @@ func (s *Service) setupRoutes() {
 		r.Get("/api/sessions-index", s.handleListIndexedSessions)
 		r.Get("/api/sessions-index/search", s.handleSearchIndexedSessions)
 
-		// Maintenance routes
-		r.Post("/api/maintenance/consolidation", s.handleTriggerConsolidation)
-		r.Post("/api/maintenance/run", s.handleRunMaintenance)
-		r.Get("/api/maintenance/stats", s.handleGetMaintenanceStats)
-		r.Get("/api/maintenance/status", s.handleMaintenanceStatus)
-		r.Get("/api/maintenance/logs", s.handleMaintenanceLogs)
-		r.Get("/api/maintenance/consistency", s.handleConsistencyCheck)
-		r.Post("/api/maintenance/purge-patterns", s.handlePurgePatterns)
-		r.Post("/api/maintenance/pattern-cleanup", s.handlePatternCleanup)
-		r.Post("/api/maintenance/purge-rebuild", s.handlePurgeRebuild)
-		r.Post("/api/maintenance/patterns/cleanup", s.handlePatternCleanupAdvanced)
-		r.Post("/api/maintenance/apo/rewrite", s.handleAPORewrite)
-
 		// Analytics routes
 		r.Get("/api/analytics/trends", s.handleGetTrends)
 
@@ -1903,9 +1749,6 @@ func (s *Service) Shutdown(ctx context.Context) error {
 	if s.recalculator != nil {
 		s.recalculator.Stop()
 	}
-	if s.consolidationScheduler != nil {
-		s.consolidationScheduler.Stop()
-	}
 	if s.patternDetector != nil {
 		s.patternDetector.Stop()
 	}
@@ -1933,10 +1776,6 @@ func (s *Service) Shutdown(ctx context.Context) error {
 
 	// Phase 6: Close AI/ML services (close models)
 	log.Debug().Msg("Phase 6: Closing AI/ML services...")
-	if s.reranker != nil {
-		collectError("reranker", s.reranker.Close())
-	}
-
 	// Phase 7: Close database last (other components may need it)
 	log.Debug().Msg("Phase 8: Closing database...")
 	if s.store != nil {
