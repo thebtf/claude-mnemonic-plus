@@ -59,7 +59,7 @@ func (s *Service) handleListCredentials(w http.ResponseWriter, r *http.Request) 
 	creds, err := s.credentialStore.List(r.Context(), project)
 	if err != nil {
 		log.Error().Err(err).Msg("list credentials failed")
-		http.Error(w, "list credentials: "+err.Error(), http.StatusInternalServerError)
+		http.Error(w, "failed to list credentials", http.StatusInternalServerError)
 		return
 	}
 
@@ -108,7 +108,8 @@ func (s *Service) handleGetCredential(w http.ResponseWriter, r *http.Request) {
 
 	v, err := s.getVault()
 	if err != nil {
-		http.Error(w, "vault not available: "+err.Error(), http.StatusInternalServerError)
+		log.Error().Err(err).Msg("vault not available")
+		http.Error(w, "vault not available", http.StatusInternalServerError)
 		return
 	}
 
@@ -134,7 +135,7 @@ func (s *Service) handleGetCredential(w http.ResponseWriter, r *http.Request) {
 	plaintext, err := v.Decrypt(cred.EncryptedSecret)
 	if err != nil {
 		log.Error().Err(err).Str("name", name).Msg("decrypt credential failed")
-		http.Error(w, "decrypt credential: "+err.Error(), http.StatusInternalServerError)
+		http.Error(w, "failed to decrypt credential", http.StatusInternalServerError)
 		return
 	}
 
@@ -204,14 +205,15 @@ func (s *Service) handleStoreCredential(w http.ResponseWriter, r *http.Request) 
 
 	v, err := s.getVault()
 	if err != nil {
-		http.Error(w, "vault not available: "+err.Error(), http.StatusInternalServerError)
+		log.Error().Err(err).Msg("vault not available")
+		http.Error(w, "vault not available", http.StatusInternalServerError)
 		return
 	}
 
 	ciphertext, err := v.Encrypt(req.Value)
 	if err != nil {
 		log.Error().Err(err).Msg("encrypt credential failed")
-		http.Error(w, "encrypt credential: "+err.Error(), http.StatusInternalServerError)
+		http.Error(w, "failed to encrypt credential", http.StatusInternalServerError)
 		return
 	}
 
@@ -226,7 +228,7 @@ func (s *Service) handleStoreCredential(w http.ResponseWriter, r *http.Request) 
 	created, err := s.credentialStore.Create(r.Context(), cred)
 	if err != nil {
 		log.Error().Err(err).Msg("store credential failed")
-		http.Error(w, "store credential: "+err.Error(), http.StatusInternalServerError)
+		http.Error(w, "failed to store credential", http.StatusInternalServerError)
 		return
 	}
 
