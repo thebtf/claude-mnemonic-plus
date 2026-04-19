@@ -65,8 +65,9 @@ type retrievalHooks struct {
 	getLastPromptBySession func(ctx context.Context, project, sessionID string) (*models.UserPromptWithSession, error)
 }
 
+// Type-lane config removed in v5 (US11): lane-based search selection is no longer a feature.
 func (s *Service) typeLanesEnabled() bool {
-	return s.config != nil && s.config.TypeLanesEnabled
+	return false
 }
 
 func (s *Service) laneConfigForType(obsType models.ObservationType) (cfg struct {
@@ -74,33 +75,15 @@ func (s *Service) laneConfigForType(obsType models.ObservationType) (cfg struct 
 	TopK           int
 	RerankerWeight float64
 }) {
-	toLaneConfig := func(minScore float64, topK int, rerankerWeight float64) struct {
+	lane, ok := search.DefaultSearchLanes[string(obsType)]
+	if !ok {
+		lane = search.DefaultSearchLanes["default"]
+	}
+	return struct {
 		MinScore       float64
 		TopK           int
 		RerankerWeight float64
-	} {
-		return struct {
-			MinScore       float64
-			TopK           int
-			RerankerWeight float64
-		}{MinScore: minScore, TopK: topK, RerankerWeight: rerankerWeight}
-	}
-
-	if s.config == nil || len(s.config.TypeSearchLanes) == 0 {
-		if lane, ok := search.DefaultSearchLanes[string(obsType)]; ok {
-			return toLaneConfig(lane.MinScore, lane.TopK, lane.RerankerWeight)
-		}
-		lane := search.DefaultSearchLanes["default"]
-		return toLaneConfig(lane.MinScore, lane.TopK, lane.RerankerWeight)
-	}
-	if lane, ok := s.config.TypeSearchLanes[string(obsType)]; ok {
-		return toLaneConfig(lane.MinScore, lane.TopK, lane.RerankerWeight)
-	}
-	if lane, ok := s.config.TypeSearchLanes["default"]; ok {
-		return toLaneConfig(lane.MinScore, lane.TopK, lane.RerankerWeight)
-	}
-	lane := search.DefaultSearchLanes["default"]
-	return toLaneConfig(lane.MinScore, lane.TopK, lane.RerankerWeight)
+	}{MinScore: lane.MinScore, TopK: lane.TopK, RerankerWeight: lane.RerankerWeight}
 }
 
 func (s *Service) laneWeightMap() map[models.ObservationType]float64 {
@@ -108,37 +91,21 @@ func (s *Service) laneWeightMap() map[models.ObservationType]float64 {
 	for name, lane := range search.DefaultSearchLanes {
 		weights[models.ObservationType(name)] = lane.RerankerWeight
 	}
-	if s.config != nil && len(s.config.TypeSearchLanes) > 0 {
-		for name, lane := range s.config.TypeSearchLanes {
-			weights[models.ObservationType(name)] = lane.RerankerWeight
-		}
-	}
 	return weights
 }
 
 func (s *Service) typedLaneMinScore() float64 {
 	minScore := 0.0
 	found := false
-	applyLane := func(score float64) {
-		if score <= 0 {
-			return
+	for _, lane := range search.DefaultSearchLanes {
+		if lane.MinScore <= 0 {
+			continue
 		}
-		if !found || score < minScore {
-			minScore = score
+		if !found || lane.MinScore < minScore {
+			minScore = lane.MinScore
 			found = true
 		}
 	}
-
-	if s.config != nil && len(s.config.TypeSearchLanes) > 0 {
-		for _, lane := range s.config.TypeSearchLanes {
-			applyLane(lane.MinScore)
-		}
-	} else {
-		for _, lane := range search.DefaultSearchLanes {
-			applyLane(lane.MinScore)
-		}
-	}
-
 	if !found {
 		return search.DefaultSearchLanes["default"].MinScore
 	}
@@ -232,11 +199,8 @@ func (s *Service) RetrieveRelevant(ctx context.Context, project, query string, o
 	freshCount := len(freshObservations)
 
 	// Default 0.9: observations with cosine similarity >= 0.9 are considered duplicates
-	// and collapsed into a single cluster. Overridable via config.ClusteringThreshold.
-	clusteringThreshold := 0.9
-	if s.config != nil && s.config.ClusteringThreshold > 0 {
-		clusteringThreshold = s.config.ClusteringThreshold
-	}
+	// Clustering threshold removed in v5 (US11) — fixed default 0.9.
+	const clusteringThreshold = 0.9
 	clusteredObservations := clusterObservations(freshObservations, clusteringThreshold)
 	duplicatesRemoved := len(freshObservations) - len(clusteredObservations)
 	laneThresholdScores := similarityScores
@@ -314,17 +278,9 @@ func (s *Service) expandQueries(ctx context.Context, query string) ([]expansion.
 	if s.queryExpander == nil {
 		return []expansion.ExpandedQuery{{Query: query, Weight: 1.0, Source: "original"}}, ""
 	}
-	expandCtx := ctx
-	cancel := func() {}
-	if s.config != nil && s.config.QueryExpansionTimeoutMS > 0 {
-		expandCtx, cancel = context.WithTimeout(ctx, time.Duration(s.config.QueryExpansionTimeoutMS)*time.Millisecond)
-	}
-	defer cancel()
+	// QueryExpansion timeout and HyDE toggles removed in v5 (US11/US9).
 	cfg := expansion.DefaultConfig()
-	if s.config != nil {
-		cfg.EnableHyDE = s.config.HyDEEnabled
-	}
-	expandedQueries := s.queryExpander.Expand(expandCtx, query, cfg)
+	expandedQueries := s.queryExpander.Expand(ctx, query, cfg)
 	if len(expandedQueries) == 0 {
 		return []expansion.ExpandedQuery{{Query: query, Weight: 1.0, Source: "original"}}, ""
 	}

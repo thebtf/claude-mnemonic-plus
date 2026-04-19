@@ -307,33 +307,9 @@ func NewService(version string, logBuffer *logbuf.RingBuffer) (*Service, error) 
 	return svc, nil
 }
 
-// createHyDEGenerator creates a HyDE generator if enabled and configured.
-// Returns nil if HyDE is disabled or API config is missing (graceful no-op).
+// HyDE query expansion removed in v5 (US11/US9). Generator is always nil.
 func (s *Service) createHyDEGenerator() *expansion.HyDEGenerator {
-	if !s.config.HyDEEnabled {
-		return nil
-	}
-
-	timeout := time.Duration(s.config.HyDETimeoutMS) * time.Millisecond
-	if timeout <= 0 {
-		timeout = 800 * time.Millisecond
-	}
-
-	cfg := expansion.HyDEConfig{
-		APIURL:    s.config.HyDEAPIURL,
-		APIKey:    s.config.HyDEAPIKey,
-		Model:     s.config.HyDEModel,
-		MaxTokens: s.config.HyDEMaxTokens,
-		Timeout:   timeout,
-		CacheTTL:  5 * time.Minute,
-	}
-
-	gen := expansion.NewHyDEGenerator(cfg)
-	log.Info().
-		Str("model", cfg.Model).
-		Bool("has_api", cfg.APIURL != "" && cfg.APIKey != "").
-		Msg("HyDE query expansion enabled")
-	return gen
+	return nil
 }
 
 // createChunkManager creates a chunking manager with all available language chunkers.
@@ -372,8 +348,6 @@ func (s *Service) initializeAsync() {
 	promptStore := gorm.NewPromptStore(store, nil)
 	conflictStore := gorm.NewConflictStore(store)
 	relationStore := gorm.NewRelationStore(store)
-
-	cfg := config.Get()
 
 	// Create observation store
 	observationStore := gorm.NewObservationStore(store, nil)
@@ -450,9 +424,7 @@ func (s *Service) initializeAsync() {
 	s.relationStore = relationStore
 	s.sessionManager = sessionManager
 	s.processor = processor
-	if processor != nil {
-		processor.SetDedupConfig(cfg.DedupSimilarityThreshold, cfg.DedupWindowSize)
-	}
+	// Dedup config removed in v5 (US11) — SDK processor uses fixed defaults.
 	s.initMu.Unlock()
 
 	// Wire token store into auth middleware for client token lookups

@@ -512,15 +512,9 @@ func (p *Processor) queryWriteMergeCandidateIDs(ctx context.Context, project str
 // existing observation was updated in-place (write-merge update path).
 const mergeActionUpdate = "update"
 
-// applyWriteMergeDecision evaluates whether a new observation should be merged
-// into an existing one. LLM-based merge decisions were removed with the learning
-// package in v5; this implementation always returns create-new (nil, false, "", nil).
-func (p *Processor) applyWriteMergeDecision(_ context.Context, _, _ string, obs *models.ParsedObservation, _ int) (*models.Observation, bool, string, error) {
-	if obs == nil || !config.Get().WriteMergeEnabled {
-		return nil, false, "", nil
-	}
-	// Write-merge requires an LLM decision step that was removed in v5.
-	// Always fall through to create-new.
+// applyWriteMergeDecision is a no-op: LLM-based merge decisions were removed
+// with the learning package in v5. Always returns create-new.
+func (p *Processor) applyWriteMergeDecision(_ context.Context, _, _ string, _ *models.ParsedObservation, _ int) (*models.Observation, bool, string, error) {
 	return nil, false, "", nil
 }
 
