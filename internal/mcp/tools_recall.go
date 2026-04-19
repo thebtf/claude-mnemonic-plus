@@ -99,8 +99,10 @@ func (s *Server) handleRecallSearch(ctx context.Context, m map[string]any) (stri
 	project := coerceString(m["project"], "")
 	query := coerceString(m["query"], "")
 	limit := coerceInt(m["limit"], 20)
-	if limit <= 0 || limit > 100 {
+	if limit <= 0 {
 		limit = 20
+	} else if limit > 100 {
+		limit = 100
 	}
 
 	if s.memoryStore == nil {
@@ -115,19 +117,36 @@ func (s *Server) handleRecallSearch(ctx context.Context, m map[string]any) (stri
 		return `{"memories":[],"count":0,"note":"project parameter required for memory search in v5"}`, nil
 	}
 
-	memories, err := s.memoryStore.List(ctx, project, limit)
+	// When a query filter is provided, fetch a wider candidate pool so that
+	// older matching memories are not excluded by the limit before filtering.
+	// The final result is capped at `limit` after filtering.
+	fetchLimit := limit
+	query = strings.TrimSpace(query)
+	if query != "" {
+		const candidateMultiplier = 10
+		const minCandidatePool = 1000
+		fetchLimit = limit * candidateMultiplier
+		if fetchLimit < minCandidatePool {
+			fetchLimit = minCandidatePool
+		}
+	}
+
+	memories, err := s.memoryStore.List(ctx, project, fetchLimit)
 	if err != nil {
 		return "", fmt.Errorf("recall search: %w", err)
 	}
 
-	// Apply optional query filter in-memory (case-insensitive substring).
-	query = strings.TrimSpace(query)
+	// Apply optional query filter in-memory (case-insensitive substring),
+	// then cap at the originally requested limit.
 	if query != "" {
 		queryLower := strings.ToLower(query)
-		filtered := memories[:0]
+		filtered := memories[:0:0] // same element type, zero length, zero cap (avoids models import)
 		for _, mem := range memories {
 			if strings.Contains(strings.ToLower(mem.Content), queryLower) {
 				filtered = append(filtered, mem)
+				if len(filtered) == limit {
+					break
+				}
 			}
 		}
 		memories = filtered

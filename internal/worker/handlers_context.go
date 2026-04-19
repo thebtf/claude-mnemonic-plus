@@ -986,9 +986,10 @@ func (s *Service) handleSearchDecisions(w http.ResponseWriter, r *http.Request) 
 	}
 
 	// Decisions preset search was backed by search.Manager, dropped in v5 (US9).
-	// Return 501 with empty payload so the HTTP contract stays intact for clients
-	// that still probe the endpoint. Use recall(action="search") via MCP instead.
+	// Return 501 Not Implemented so clients can distinguish "feature removed" from
+	// "no results". Use recall(action="search") via MCP instead.
 	_ = body.Limit
+	w.WriteHeader(http.StatusNotImplemented)
 	writeJSON(w, map[string]any{
 		"project":      body.Project,
 		"query":        body.Query,

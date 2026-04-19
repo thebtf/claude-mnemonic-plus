@@ -454,11 +454,14 @@ func TestHandleToolsList(t *testing.T) {
 	}
 
 	// Removed tools must not appear in either listing (regression guard).
+	// Includes v5 (US9) removals: search, decisions (backed by internal/search, dropped).
 	removedTools := []string{
 		"trigger_maintenance",
 		"get_maintenance_stats",
 		"suggest_consolidations",
 		"run_consolidation",
+		"search",
+		"decisions",
 	}
 	for _, name := range removedTools {
 		assert.False(t, toolNames[name], "removed tool %s should not be in default listing", name)

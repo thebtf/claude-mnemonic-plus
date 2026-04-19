@@ -1689,9 +1689,8 @@ func (s *Server) handleFindByFileObservations(ctx context.Context, args json.Raw
 	if files == "" {
 		return "", fmt.Errorf("files parameter is required")
 	}
-	if project == "" {
-		return "", fmt.Errorf("project parameter is required")
-	}
+	// project is optional per schema (only "files" is required);
+	// empty project returns global observations via the store.
 
 	observations, err := s.observationStore.GetObservationsByFile(ctx, project, files, limit)
 	if err != nil {
@@ -2929,10 +2928,10 @@ func (s *Server) handleExportObservations(ctx context.Context, args json.RawMess
 				observations = append(observations, obs)
 				continue
 			}
-			if params.DateStart > 0 && ts.Unix() < params.DateStart {
+			if params.DateStart > 0 && ts.UnixMilli() < params.DateStart {
 				continue
 			}
-			if params.DateEnd > 0 && ts.Unix() > params.DateEnd {
+			if params.DateEnd > 0 && ts.UnixMilli() > params.DateEnd {
 				continue
 			}
 		}

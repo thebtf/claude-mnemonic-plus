@@ -336,9 +336,11 @@ func (s *Service) handleGetObservationsByTag(w http.ResponseWriter, r *http.Requ
 	}
 
 	// Tag-based search was backed by search.Manager.UnifiedSearch, dropped in v5 (US9).
-	// Return 501 with empty payload so the HTTP contract stays intact. Tags/concepts
-	// on observations will also disappear when US3-PR-B drops the observations table.
+	// Return 501 Not Implemented so clients can distinguish "feature removed" from
+	// "no results". Tags/concepts on observations will also disappear when US3-PR-B
+	// drops the observations table.
 	_ = limit
+	w.WriteHeader(http.StatusNotImplemented)
 	writeJSON(w, map[string]any{
 		"tag":          tag,
 		"observations": []any{},
