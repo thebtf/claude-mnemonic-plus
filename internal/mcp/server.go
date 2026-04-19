@@ -2922,11 +2922,19 @@ func (s *Server) handleExportObservations(ctx context.Context, args json.RawMess
 		if params.ObsType != "" && string(obs.Type) != params.ObsType {
 			continue
 		}
-		if params.DateStart > 0 && obs.CreatedAt.Unix() < params.DateStart {
-			continue
-		}
-		if params.DateEnd > 0 && obs.CreatedAt.Unix() > params.DateEnd {
-			continue
+		if params.DateStart > 0 || params.DateEnd > 0 {
+			ts, err := time.Parse(time.RFC3339, obs.CreatedAt)
+			if err != nil {
+				// Unparseable timestamp — skip the date filter for this observation.
+				observations = append(observations, obs)
+				continue
+			}
+			if params.DateStart > 0 && ts.Unix() < params.DateStart {
+				continue
+			}
+			if params.DateEnd > 0 && ts.Unix() > params.DateEnd {
+				continue
+			}
 		}
 		observations = append(observations, obs)
 	}
