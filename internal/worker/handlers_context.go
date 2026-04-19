@@ -817,9 +817,9 @@ func (s *Service) handleContextInject(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Cluster the union to remove duplicates
-	clusteredObservations := clusterObservations(unionObservations, s.config.ClusteringThreshold)
-	duplicatesRemoved := len(unionObservations) - len(clusteredObservations)
+	// Cluster the union to remove duplicates (clustering threshold removed in v5)
+	clusteredObservations := unionObservations
+	duplicatesRemoved := 0
 
 	// Record retrieval stats with staleness metrics
 	s.recordRetrievalStatsExtended(project, int64(len(clusteredObservations)), 0, 0,

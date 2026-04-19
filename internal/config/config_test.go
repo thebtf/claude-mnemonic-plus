@@ -49,10 +49,7 @@ func (s *ConfigSuite) TestDefault() {
 	s.Equal(100, cfg.ContextObservations)
 	s.Equal(25, cfg.ContextFullCount)
 	s.Equal(10, cfg.ContextSessionCount)
-	s.True(cfg.ContextShowReadTokens)
-	s.True(cfg.ContextShowWorkTokens)
 	s.Equal("narrative", cfg.ContextFullField)
-	s.True(cfg.ContextShowLastSummary)
 	s.Equal(DefaultObservationTypes, cfg.ContextObsTypes)
 	s.Equal(DefaultObservationConcepts, cfg.ContextObsConcepts)
 }
@@ -70,89 +67,6 @@ func (s *ConfigSuite) TestInjectUnifiedEnvOverride() {
 	cfg, err := Load()
 	s.Require().NoError(err)
 	s.False(cfg.InjectUnified, "ENGRAM_INJECT_UNIFIED=false must activate the legacy inject path")
-}
-
-// TestStorePathSupersessionDefaultTrue verifies store-path supersession defaults to enabled.
-func (s *ConfigSuite) TestStorePathSupersessionDefaultTrue() {
-	cfg, err := Load()
-	s.Require().NoError(err)
-	s.True(cfg.StorePathSupersessionEnabled, "store-path supersession must default to enabled for current behavior")
-}
-
-// TestStorePathSupersessionEnvOverride verifies the kill-switch disables store-path supersession.
-func (s *ConfigSuite) TestStorePathSupersessionEnvOverride() {
-	s.T().Setenv("ENGRAM_STORE_PATH_SUPERSESSION_ENABLED", "false")
-	cfg, err := Load()
-	s.Require().NoError(err)
-	s.False(cfg.StorePathSupersessionEnabled, "ENGRAM_STORE_PATH_SUPERSESSION_ENABLED=false must disable store-path supersession")
-}
-
-// TestTypeLanesEnabledDefaultFalse verifies typed lane dispatch is opt-in.
-func (s *ConfigSuite) TestTypeLanesEnabledDefaultFalse() {
-	cfg, err := Load()
-	s.Require().NoError(err)
-	s.False(cfg.TypeLanesEnabled, "typed lane dispatch must default to disabled")
-}
-
-// TestTypeLanesEnabledEnvOverride verifies the env flag enables typed lanes.
-func (s *ConfigSuite) TestTypeLanesEnabledEnvOverride() {
-	s.T().Setenv("ENGRAM_TYPE_LANES_ENABLED", "true")
-	cfg, err := Load()
-	s.Require().NoError(err)
-	s.True(cfg.TypeLanesEnabled, "ENGRAM_TYPE_LANES_ENABLED=true must enable typed lane dispatch")
-}
-
-// TestWriteMergeEnabledDefaultFalse verifies write-time merge is opt-in.
-func (s *ConfigSuite) TestWriteMergeEnabledDefaultFalse() {
-	cfg, err := Load()
-	s.Require().NoError(err)
-	s.False(cfg.WriteMergeEnabled, "write-time merge must default to disabled")
-}
-
-// TestWriteMergeEnabledEnvOverride verifies the env flag enables write-time merge.
-func (s *ConfigSuite) TestWriteMergeEnabledEnvOverride() {
-	s.T().Setenv("ENGRAM_WRITE_MERGE_ENABLED", "true")
-	cfg, err := Load()
-	s.Require().NoError(err)
-	s.True(cfg.WriteMergeEnabled, "ENGRAM_WRITE_MERGE_ENABLED=true must enable write-time merge")
-}
-
-// TestTypeSearchLanesDefaultsInitialized verifies defaults are present in config.
-func (s *ConfigSuite) TestTypeSearchLanesDefaultsInitialized() {
-	cfg := Default()
-	s.NotNil(cfg.TypeSearchLanes)
-	s.Contains(cfg.TypeSearchLanes, "guidance")
-	s.Contains(cfg.TypeSearchLanes, "decision")
-	s.Contains(cfg.TypeSearchLanes, "default")
-	s.Equal(0.20, cfg.TypeSearchLanes["guidance"].MinScore)
-	s.Equal(3, cfg.TypeSearchLanes["decision"].TopK)
-	s.Equal(1.0, cfg.TypeSearchLanes["default"].RerankerWeight)
-}
-
-// TestTypeSearchLanesJsonMerge verifies partial JSON overrides merge over defaults.
-func (s *ConfigSuite) TestTypeSearchLanesJsonMerge() {
-	err := EnsureDataDir()
-	s.Require().NoError(err)
-
-	settings := `{
-  "ENGRAM_TYPE_LANES_ENABLED": true,
-  "type_search_lanes": {
-    "decision": {"min_score": 0.7},
-    "guidance": {"top_k": 7}
-  }
-}`
-	path := SettingsPath()
-	err = os.WriteFile(path, []byte(settings), 0600)
-	s.Require().NoError(err)
-
-	cfg, err := Load()
-	s.Require().NoError(err)
-	s.True(cfg.TypeLanesEnabled)
-	s.Equal(0.7, cfg.TypeSearchLanes["decision"].MinScore)
-	s.Equal(3, cfg.TypeSearchLanes["decision"].TopK)
-	s.Equal(7, cfg.TypeSearchLanes["guidance"].TopK)
-	s.Equal(1.5, cfg.TypeSearchLanes["guidance"].RerankerWeight)
-	s.Equal(0.35, cfg.TypeSearchLanes["default"].MinScore)
 }
 
 // TestDataDir tests data directory path.
