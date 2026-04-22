@@ -123,7 +123,10 @@ func TestGetSessionStartContext_HappyPath(t *testing.T) {
 		EditedBy:    project,
 	})
 	require.NoError(t, err)
-	time.Sleep(5 * time.Millisecond)
+	olderCreatedAt := time.Now().UTC().Add(-2 * time.Second)
+	require.NoError(t, db.Exec(`UPDATE memories SET created_at = ?, updated_at = ? WHERE id = ?`, olderCreatedAt, olderCreatedAt, olderMemory.ID).Error)
+	olderMemory.CreatedAt = olderCreatedAt
+	olderMemory.UpdatedAt = olderCreatedAt
 	newerMemory, err := memoryStore.Create(ctx, &models.Memory{
 		Project:     project,
 		Content:     "newer memory",
@@ -153,7 +156,8 @@ func TestGetSessionStartContext_HappyPath(t *testing.T) {
 		Labels:        []string{"bug"},
 	})
 	require.NoError(t, err)
-	time.Sleep(5 * time.Millisecond)
+	highCreatedAt := time.Now().UTC().Add(-2 * time.Second)
+	require.NoError(t, db.Exec(`UPDATE issues SET created_at = ?, updated_at = ? WHERE id = ?`, highCreatedAt, highCreatedAt, highIssueID).Error)
 	criticalIssueID, err := issueStore.CreateIssue(ctx, &localgorm.Issue{
 		Title:         "critical issue",
 		Body:          "body-critical",
