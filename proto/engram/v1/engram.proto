@@ -1,5 +1,7 @@
 syntax = "proto3";
 
+import "google/protobuf/timestamp.proto";
+
 package engram.v1;
 
 option go_package = "github.com/thebtf/engram/proto/engram/v1;engramv1";
@@ -30,6 +32,13 @@ service EngramService {
   // streaming RPC; the stream stays open for the daemon's lifetime.
   // Delivery is at-least-once; the daemon is responsible for dedup.
   rpc ProjectEvents(ProjectEventsRequest) returns (stream ProjectEvent);
+
+  // GetSessionStartContext returns static session-start context entities for a project.
+  // No ranking or LLM filtering is applied; the server returns SQL-backed entities only.
+  rpc GetSessionStartContext(GetSessionStartContextRequest) returns (GetSessionStartContextResponse);
+
+  // NegotiateVersion validates MAJOR-version compatibility between client and server.
+  rpc NegotiateVersion(NegotiateVersionRequest) returns (NegotiateVersionResponse);
 }
 
 // ---- SyncProjectState messages ----------------------------------------
@@ -110,6 +119,83 @@ enum ProjectEventType {
   PROJECT_EVENT_TYPE_REMOVED     = 1;
   PROJECT_EVENT_TYPE_CREATED     = 2; // reserved for v0.2.0
   PROJECT_EVENT_TYPE_RENAMED     = 3; // reserved for v0.2.0
+}
+
+// ---- Session-start context messages --------------------------------------
+
+message GetSessionStartContextRequest {
+  // project is the target project slug used to fetch static context entities.
+  string project = 1;
+
+  // memories_limit is the maximum number of memories to return, ordered by newest first.
+  // Zero means the server default.
+  int32 memories_limit = 2;
+
+  // issues_limit is the maximum number of active issues to return, ordered by priority then newest first.
+  // Zero means the server default.
+  int32 issues_limit = 3;
+}
+
+message GetSessionStartContextResponse {
+  repeated SessionStartIssue issues = 1;
+  repeated SessionStartRule rules = 2;
+  repeated SessionStartMemory memories = 3;
+  google.protobuf.Timestamp generated_at = 4;
+}
+
+message SessionStartIssue {
+  int64 id = 1;
+  string title = 2;
+  string body = 3;
+  string status = 4;
+  string priority = 5;
+  string type = 6;
+  string source_project = 7;
+  string target_project = 8;
+  string source_agent = 9;
+  repeated string labels = 10;
+  int64 comment_count = 11;
+  google.protobuf.Timestamp acknowledged_at = 12;
+  google.protobuf.Timestamp resolved_at = 13;
+  google.protobuf.Timestamp reopened_at = 14;
+  google.protobuf.Timestamp closed_at = 15;
+  google.protobuf.Timestamp created_at = 16;
+  google.protobuf.Timestamp updated_at = 17;
+}
+
+message SessionStartRule {
+  int64 id = 1;
+  string project = 2;
+  string content = 3;
+  string edited_by = 4;
+  int32 priority = 5;
+  int32 version = 6;
+  google.protobuf.Timestamp created_at = 7;
+  google.protobuf.Timestamp updated_at = 8;
+}
+
+message SessionStartMemory {
+  int64 id = 1;
+  string project = 2;
+  string content = 3;
+  repeated string tags = 4;
+  string source_agent = 5;
+  string edited_by = 6;
+  int32 version = 7;
+  google.protobuf.Timestamp created_at = 8;
+  google.protobuf.Timestamp updated_at = 9;
+}
+
+// ---- Version negotiation messages ----------------------------------------
+
+message NegotiateVersionRequest {
+  string client_version = 1;
+}
+
+message NegotiateVersionResponse {
+  bool compatible = 1;
+  string server_version = 2;
+  string incompat_reason = 3;
 }
 
 // CallToolRequest carries an MCP tool invocation.
