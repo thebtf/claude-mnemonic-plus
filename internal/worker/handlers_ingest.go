@@ -11,9 +11,6 @@ import (
 	"time"
 
 	"github.com/rs/zerolog/log"
-	"github.com/thebtf/engram/internal/pipeline"
-	"github.com/thebtf/engram/internal/privacy"
-	"github.com/thebtf/engram/pkg/models"
 )
 
 // IngestRequest is the request body for the event ingest endpoint.
@@ -87,133 +84,17 @@ func (c *deduplicationCache) cleanup() {
 // @Failure 500 {string} string "internal error"
 // @Router /api/events/ingest [post]
 func (s *Service) handleIngestEvent(w http.ResponseWriter, r *http.Request) {
-	var req IngestRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "invalid request body: "+err.Error(), http.StatusBadRequest)
-		return
-	}
-
-	// Validate required fields
-	if req.ToolName == "" {
-		http.Error(w, "tool_name is required", http.StatusBadRequest)
-		return
-	}
-	if req.SessionID == "" {
-		http.Error(w, "session_id is required", http.StatusBadRequest)
-		return
-	}
-
-	// Stringify tool_input and tool_result for pipeline functions
-	toolInputStr := toJSONString(req.ToolInput)
-	toolResultStr := toJSONString(req.ToolResult)
-
-	// Redact secrets from tool input/result before any pipeline processing.
-	if privacy.ContainsSecrets(toolInputStr) {
-		log.Warn().Str("tool", req.ToolName).Msg("ingest: tool_input contains secrets — redacting before pipeline processing")
-		toolInputStr = privacy.RedactSecrets(toolInputStr)
-	}
-	if privacy.ContainsSecrets(toolResultStr) {
-		log.Warn().Str("tool", req.ToolName).Msg("ingest: tool_result contains secrets — redacting before pipeline processing")
-		toolResultStr = privacy.RedactSecrets(toolResultStr)
-	}
-
-	// Filter: skip tools that should never be observed
-	if pipeline.ShouldSkipTool(req.ToolName) {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusAccepted)
-		_ = json.NewEncoder(w).Encode(map[string]string{"status": "skipped", "reason": "filtered_tool"})
-		return
-	}
-
-	// Filter: skip trivial operations (e.g. tiny reads, no-op results)
-	if pipeline.ShouldSkipTrivial(req.ToolName, toolInputStr, toolResultStr) {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusAccepted)
-		_ = json.NewEncoder(w).Encode(map[string]string{"status": "skipped", "reason": "trivial"})
-		return
-	}
-
-	// Deduplication: skip identical events within the TTL window
-	dedupKey := computeDedupKey(req.ToolName, toolInputStr, toolResultStr)
-	if s.ingestDedup != nil && s.ingestDedup.isDuplicate(dedupKey) {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusAccepted)
-		_ = json.NewEncoder(w).Encode(map[string]string{"status": "skipped", "reason": "duplicate"})
-		return
-	}
-
-	// Store raw event first (source of truth)
-	toolInputJSON, _ := json.Marshal(req.ToolInput)
-	toolResultJSON, _ := json.Marshal(req.ToolResult)
-
-	rawEvent := &models.RawEvent{
-		SessionID:     req.SessionID,
-		ToolName:      req.ToolName,
-		ToolInput:     toolInputJSON,
-		ToolResult:    toolResultJSON,
-		Project:       req.Project,
-		WorkstationID: req.WorkstationID,
-	}
-
-	eventID, err := s.rawEventStore.InsertRawEvent(r.Context(), rawEvent)
-	if err != nil {
-		log.Error().Err(err).Str("tool", req.ToolName).Msg("Failed to store raw event")
-		http.Error(w, "failed to store event", http.StatusInternalServerError)
-		return
-	}
-
-	// Run deterministic Level 0 pipeline (no LLM involved)
-	obsType := pipeline.ClassifyEvent(req.ToolName, toolInputStr, toolResultStr)
-	title := pipeline.GenerateTitle(req.ToolName, toolInputStr)
-	concepts := pipeline.ExtractConcepts(req.ToolName, toolInputStr, toolResultStr)
-	filePaths := pipeline.ExtractFilePaths(toolInputStr, toolResultStr)
-	facts := pipeline.ExtractFacts(req.ToolName, toolInputStr, toolResultStr)
-
-	// Classify file paths into read vs modified based on tool semantics
-	filesRead, filesModified := classifyFilesByTool(req.ToolName, filePaths)
-
-	// ParsedObservation for Level 0 storage. All required fields are populated by
-	// the deterministic pipeline above. The removed semantic-dedup path (v4)
-	// compared parsed against existing observations but never added fields to it,
-	// so parsed remains complete after that removal.
-	parsed := &models.ParsedObservation{
-		Type:          obsType,
-		Title:         title,
-		Concepts:      concepts,
-		Facts:         facts,
-		FilesRead:     filesRead,
-		FilesModified: filesModified,
-	}
-	parsed.SourceType = models.ClassifySourceType(req.ToolName)
-
-	// Store observation using the existing store interface
-	obsID, _, err := s.observationStore.StoreObservation(r.Context(), req.SessionID, req.Project, parsed, 0, 0)
-	if err != nil {
-		log.Error().Err(err).Str("tool", req.ToolName).Msg("Failed to store observation")
-		http.Error(w, "failed to store observation", http.StatusInternalServerError)
-		return
-	}
-
-	// Mark raw event as processed
-	if markErr := s.rawEventStore.MarkProcessed(r.Context(), eventID); markErr != nil {
-		log.Warn().Err(markErr).Int64("eventId", eventID).Msg("Failed to mark raw event as processed")
-	}
-
-	log.Debug().
-		Int64("eventId", eventID).
-		Int64("obsId", obsID).
-		Str("tool", req.ToolName).
-		Str("type", string(obsType)).
-		Msg("Ingested event and created Level 0 observation")
+	log.Info().Msg("/api/events/ingest removed in v5; rejecting ingest request without reading payload")
 
 	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusAccepted)
+	w.WriteHeader(http.StatusNotImplemented)
 	_ = json.NewEncoder(w).Encode(map[string]any{
-		"status":   "accepted",
-		"event_id": eventID,
-		"obs_id":   obsID,
-		"type":     obsType,
-		"title":    title,
+		"status":         "removed_in_v5",
+		"error":          "event ingest endpoint was removed in v5",
+		"tool_name":      "",
+		"session_id":     "",
+		"project":        "",
+		"workstation_id": "",
 	})
 }
 

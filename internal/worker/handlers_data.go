@@ -17,15 +17,18 @@ import (
 
 // handleGetObservations godoc
 // @Summary List observations
-// @Description Returns recent observations with optional semantic search via vector store. Supports pagination.
+// @Description Returns recent observations with optional fallback search. Filters by type, status, memory type, and concept, then applies corrected pagination after in-memory filtering.
 // @Tags Observations
 // @Produce json
 // @Security ApiKeyAuth
 // @Param project query string false "Filter by project"
-// @Param query query string false "Semantic search query"
+// @Param query query string false "Search query"
+// @Param type query string false "Filter by observation type"
+// @Param status query string false "Filter by status (only active is currently supported)"
+// @Param memory_type query string false "Filter by memory type"
 // @Param limit query int false "Number of results (default 100)"
 // @Param offset query int false "Pagination offset"
-// @Param concept query string false "Filter by concept (LIKE match on concepts JSON column)"
+// @Param concept query string false "Filter by concept substring match"
 // @Success 200 {object} map[string]interface{}
 // @Failure 400 {string} string "bad request"
 // @Failure 500 {string} string "internal error"
@@ -37,7 +40,37 @@ func (s *Service) handleGetObservations(w http.ResponseWriter, r *http.Request) 
 	obsType := r.URL.Query().Get("type")
 	status := r.URL.Query().Get("status")
 	memoryType := r.URL.Query().Get("memory_type")
-	concept := r.URL.Query().Get("concept")
+	concept := strings.TrimSpace(r.URL.Query().Get("concept"))
+
+	matchesFilters := func(observation *models.Observation) bool {
+		if observation == nil {
+			return false
+		}
+		if obsType != "" && string(observation.Type) != obsType {
+			return false
+		}
+		// searchFallbackObservations only returns active observations in v5.
+		// That means status filtering is capability-based rather than row-based:
+		// - empty status: accept the active-only fallback result set as-is
+		// - status=active: explicitly accept that same active-only result set
+		// - any other explicit status: return no matches because those states are unavailable here
+		if status != "" && status != "active" {
+			return false
+		}
+		if memoryType != "" && string(observation.MemoryType) != memoryType {
+			return false
+		}
+		if concept == "" {
+			return true
+		}
+		needle := strings.ToLower(concept)
+		for _, candidate := range observation.Concepts {
+			if strings.Contains(strings.ToLower(candidate), needle) {
+				return true
+			}
+		}
+		return false
+	}
 
 	// Validate project name to prevent path traversal
 	if err := ValidateProjectName(project); err != nil {
@@ -45,42 +78,94 @@ func (s *Service) handleGetObservations(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	var observations []*models.Observation
-	var total int64
-	var err error
 	searchStart := time.Now()
+	scopeFilter := retrievalScope{Project: project}
+	requestedCount := pagination.Offset + pagination.Limit
+	if requestedCount <= 0 {
+		requestedCount = pagination.Limit
+	}
+	if requestedCount <= 0 {
+		requestedCount = DefaultObservationsLimit
+	}
 
-	// Use database query (vector search removed in v5)
-	if project != "" {
-		// Strict project filtering for dashboard - only observations from this project
-		observations, total, err = s.observationStore.GetObservationsByProjectStrictPaginated(r.Context(), project, obsType, status, memoryType, concept, pagination.Limit, pagination.Offset)
+	overfetchStep := pagination.Limit
+	if overfetchStep <= 0 {
+		overfetchStep = DefaultObservationsLimit
+	}
+
+	fetchLimit := requestedCount
+	filtered := make([]*models.Observation, 0, fetchLimit)
+	exhausted := false
+
+	for {
+		observations, err := s.searchFallbackObservations(r.Context(), query, scopeFilter, fetchLimit)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		if observations == nil {
+			observations = []*models.Observation{}
+		}
+
+		filtered = filtered[:0]
+		for _, observation := range observations {
+			if matchesFilters(observation) {
+				filtered = append(filtered, observation)
+			}
+		}
+
+		if len(observations) < fetchLimit {
+			exhausted = true
+			break
+		}
+		if len(filtered) > requestedCount {
+			break
+		}
+
+		nextFetchLimit := fetchLimit + overfetchStep
+		if nextFetchLimit <= fetchLimit {
+			exhausted = true
+			break
+		}
+		fetchLimit = nextFetchLimit
+	}
+
+	page := 1
+	if pagination.Limit > 0 {
+		page = (pagination.Offset / pagination.Limit) + 1
+	}
+
+	total := int64(len(filtered))
+	hasMore := false
+	if exhausted {
+		hasMore = int64(pagination.Offset)+int64(pagination.Limit) < total
 	} else {
-		// All projects
-		observations, total, err = s.observationStore.GetAllRecentObservationsPaginated(r.Context(), obsType, status, memoryType, concept, pagination.Limit, pagination.Offset)
+		hasMore = true
+		if lowerBoundTotal := requestedCount + 1; lowerBoundTotal > len(filtered) {
+			total = int64(lowerBoundTotal)
+		}
 	}
 
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
+	pageItems := []*models.Observation{}
+	if pagination.Offset < len(filtered) {
+		end := pagination.Offset + pagination.Limit
+		if end > len(filtered) {
+			end = len(filtered)
+		}
+		pageItems = filtered[pagination.Offset:end]
 	}
 
-	// Ensure we return empty array, not null
-	if observations == nil {
-		observations = []*models.Observation{}
-	}
-
-	// Track search if query was provided
 	if query != "" {
-		s.trackSearchQuery(query, project, "observations", len(observations), float32(time.Since(searchStart).Milliseconds()))
+		s.trackSearchQuery(query, project, "observations", len(pageItems), float32(time.Since(searchStart).Milliseconds()))
 	}
 
-	// Return paginated response
 	resp := map[string]any{
-		"observations": observations,
+		"observations": pageItems,
 		"total":        total,
 		"limit":        pagination.Limit,
 		"offset":       pagination.Offset,
-		"hasMore":      int64(pagination.Offset)+int64(len(observations)) < total,
+		"page":         page,
+		"hasMore":      hasMore,
 	}
 	if project != "" {
 		resp["project_display_name"] = s.getProjectDisplayName(r.Context(), project)
@@ -90,16 +175,15 @@ func (s *Service) handleGetObservations(w http.ResponseWriter, r *http.Request) 
 
 // handleGetSummaries godoc
 // @Summary List summaries
-// @Description Returns recent session summaries with optional semantic search via vector store.
+// @Description Session summaries endpoint removed in v5. Returns 501 Not Implemented after request validation.
 // @Tags Observations
 // @Produce json
 // @Security ApiKeyAuth
 // @Param project query string false "Filter by project"
 // @Param query query string false "Semantic search query"
 // @Param limit query int false "Number of results (default 50)"
-// @Success 200 {array} models.SessionSummary
+// @Success 501 {string} string "session summaries endpoint removed in v5; session_summaries persistence was dropped in US3-PR-B"
 // @Failure 400 {string} string "bad request"
-// @Failure 500 {string} string "internal error"
 // @Router /api/summaries [get]
 func (s *Service) handleGetSummaries(w http.ResponseWriter, r *http.Request) {
 	limit := gorm.ParseLimitParam(r, DefaultSummariesLimit)
@@ -112,47 +196,23 @@ func (s *Service) handleGetSummaries(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// The summary store does not support text search. Return 501 so clients
-	// can distinguish "feature not supported" from "search returned nothing".
-	if query != "" {
-		http.Error(w, "search not supported for /api/summaries in v5; vector pipeline removed", http.StatusNotImplemented)
-		return
-	}
+	_ = limit
+	_ = query
 
-	var summaries []*models.SessionSummary
-	var err error
-
-	// Use database query (vector search removed in v5)
-	if project != "" {
-		summaries, err = s.summaryStore.GetRecentSummaries(r.Context(), project, limit)
-	} else {
-		summaries, err = s.summaryStore.GetAllRecentSummaries(r.Context(), limit)
-	}
-
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	// Ensure we return empty array, not null
-	if summaries == nil {
-		summaries = []*models.SessionSummary{}
-	}
-	writeJSON(w, summaries)
+	http.Error(w, "session summaries endpoint removed in v5; session_summaries persistence was dropped in US3-PR-B", http.StatusNotImplemented)
 }
 
 // handleGetPrompts godoc
 // @Summary List user prompts
-// @Description Returns recent user prompts with optional semantic search via vector store.
+// @Description User prompts endpoint removed in v5. Returns 501 Not Implemented after request validation.
 // @Tags Observations
 // @Produce json
 // @Security ApiKeyAuth
 // @Param project query string false "Filter by project"
 // @Param query query string false "Semantic search query"
 // @Param limit query int false "Number of results (default 100)"
-// @Success 200 {array} models.UserPromptWithSession
+// @Success 501 {string} string "user prompts endpoint removed in v5; prompt persistence was dropped in US3-PR-B"
 // @Failure 400 {string} string "bad request"
-// @Failure 500 {string} string "internal error"
 // @Router /api/prompts [get]
 func (s *Service) handleGetPrompts(w http.ResponseWriter, r *http.Request) {
 	limit := gorm.ParseLimitParam(r, DefaultPromptsLimit)
@@ -165,33 +225,10 @@ func (s *Service) handleGetPrompts(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// The prompt store does not support text search. Return 501 so clients
-	// can distinguish "feature not supported" from "search returned nothing".
-	if query != "" {
-		http.Error(w, "search not supported for /api/prompts in v5; vector pipeline removed", http.StatusNotImplemented)
-		return
-	}
+	_ = limit
+	_ = query
 
-	var prompts []*models.UserPromptWithSession
-	var err error
-
-	// Use database query (vector search removed in v5)
-	if project != "" {
-		prompts, err = s.promptStore.GetRecentUserPromptsByProject(r.Context(), project, limit)
-	} else {
-		prompts, err = s.promptStore.GetAllRecentUserPrompts(r.Context(), limit)
-	}
-
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	// Ensure we return empty array, not null
-	if prompts == nil {
-		prompts = []*models.UserPromptWithSession{}
-	}
-	writeJSON(w, prompts)
+	http.Error(w, "user prompts endpoint removed in v5; prompt persistence was dropped in US3-PR-B", http.StatusNotImplemented)
 }
 
 // handleGetProjects godoc
@@ -312,13 +349,8 @@ func (s *Service) handleGetStats(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Include total observation count (active, non-archived, non-superseded)
-	if s.observationStore != nil {
-		obsCount, err := s.observationStore.GetTotalObservationCount(r.Context(), project)
-		if err == nil {
-			response["observationCount"] = obsCount
-		}
-	}
+	// observationCount was backed by the removed observations store in v5.
+	// Keep only projectObservations, which now comes from v5 stores via cache.
 
 	// Include project-specific observation count if project is specified
 	if project != "" {
@@ -494,99 +526,43 @@ type UpdateObservationRequest struct {
 
 // handleUpdateObservation godoc
 // @Summary Update an observation
-// @Description Updates an existing observation's fields. Only provided fields are updated.
+// @Description Observation update endpoint removed in v5. Returns 501 Not Implemented after request validation.
 // @Tags Observations
 // @Accept json
 // @Produce json
 // @Security ApiKeyAuth
 // @Param id path int true "Observation ID"
 // @Param body body UpdateObservationRequest true "Fields to update"
-// @Success 200 {object} map[string]interface{}
+// @Success 501 {string} string "observation update endpoint removed in v5; observations persistence was dropped in US3-PR-B"
 // @Failure 400 {string} string "bad request"
-// @Failure 404 {string} string "observation not found"
-// @Failure 500 {string} string "internal error"
 // @Router /api/observations/{id} [put]
 func (s *Service) handleUpdateObservation(w http.ResponseWriter, r *http.Request) {
-	// Parse observation ID from URL
 	id, ok := parseIDParam(w, r.PathValue("id"), "observation")
 	if !ok {
 		return
 	}
 
-	// Parse request body
 	var req UpdateObservationRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "invalid request body: "+err.Error(), http.StatusBadRequest)
 		return
 	}
 
-	// Build update struct - only include fields that were provided
-	update := &gorm.ObservationUpdate{}
+	_ = id
+	_ = req
 
-	if req.Title != nil {
-		update.Title = req.Title
-	}
-	if req.Subtitle != nil {
-		update.Subtitle = req.Subtitle
-	}
-	if req.Narrative != nil {
-		update.Narrative = req.Narrative
-	}
-	if req.Facts != nil {
-		update.Facts = &req.Facts
-	}
-	if req.Concepts != nil {
-		update.Concepts = &req.Concepts
-	}
-	if req.FilesRead != nil {
-		update.FilesRead = &req.FilesRead
-	}
-	if req.FilesModified != nil {
-		update.FilesModified = &req.FilesModified
-	}
-	if req.Scope != nil {
-		// Validate scope
-		if *req.Scope != "project" && *req.Scope != "global" {
-			http.Error(w, "scope must be 'project' or 'global'", http.StatusBadRequest)
-			return
-		}
-		update.Scope = req.Scope
-	}
-
-	// Update the observation
-	updatedObs, err := s.observationStore.UpdateObservation(r.Context(), id, update)
-	if err != nil {
-		if strings.Contains(err.Error(), "not found") {
-			http.Error(w, err.Error(), http.StatusNotFound)
-			return
-		}
-		http.Error(w, "failed to update observation: "+err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	// Broadcast update event
-	s.sseBroadcaster.Broadcast(map[string]any{
-		"type": "observation_updated",
-		"id":   id,
-	})
-
-	writeJSON(w, map[string]any{
-		"observation": updatedObs,
-		"message":     "observation updated successfully",
-	})
+	http.Error(w, "observation update endpoint removed in v5; observations persistence was dropped in US3-PR-B", http.StatusNotImplemented)
 }
 
 // handleGetObservationByID godoc
 // @Summary Get observation by ID
-// @Description Returns a single observation by its ID.
+// @Description Observation lookup endpoint removed in v5. Returns 501 Not Implemented after request validation.
 // @Tags Observations
 // @Produce json
 // @Security ApiKeyAuth
 // @Param id path int true "Observation ID"
-// @Success 200 {object} models.Observation
+// @Success 501 {string} string "observation lookup endpoint removed in v5; observations persistence was dropped in US3-PR-B"
 // @Failure 400 {string} string "bad request"
-// @Failure 404 {string} string "observation not found"
-// @Failure 500 {string} string "internal error"
 // @Router /api/observations/{id} [get]
 func (s *Service) handleGetObservationByID(w http.ResponseWriter, r *http.Request) {
 	id, ok := parseIDParam(w, r.PathValue("id"), "observation")
@@ -594,24 +570,9 @@ func (s *Service) handleGetObservationByID(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	obs, err := s.observationStore.GetObservationByID(r.Context(), id)
-	if err != nil {
-		http.Error(w, "failed to get observation: "+err.Error(), http.StatusInternalServerError)
-		return
-	}
+	_ = id
 
-	if obs == nil {
-		http.Error(w, "observation not found", http.StatusNotFound)
-		return
-	}
-
-	writeJSON(w, struct {
-		*models.Observation
-		ProjectDisplayName string `json:"project_display_name,omitempty"`
-	}{
-		Observation:        obs,
-		ProjectDisplayName: s.getProjectDisplayName(r.Context(), obs.Project),
-	})
+	http.Error(w, "observation lookup endpoint removed in v5; observations persistence was dropped in US3-PR-B", http.StatusNotImplemented)
 }
 
 // handleGraphStats godoc
@@ -699,22 +660,16 @@ type bulkDeleteRequest struct {
 
 // handleBulkDeleteREST godoc
 // @Summary Bulk delete observations
-// @Description Deletes multiple observations by ID. Maximum 100 per request.
+// @Description Bulk observation delete endpoint removed in v5. Returns 501 Not Implemented after request validation.
 // @Tags Observations
 // @Accept json
 // @Produce json
 // @Security ApiKeyAuth
 // @Param body body bulkDeleteRequest true "Observation IDs to delete"
-// @Success 200 {object} object
+// @Success 501 {string} string "bulk observation delete endpoint removed in v5; observations persistence was dropped in US3-PR-B"
 // @Failure 400 {string} string "bad request"
-// @Failure 500 {string} string "internal error"
 // @Router /api/observations/bulk [delete]
 func (s *Service) handleBulkDeleteREST(w http.ResponseWriter, r *http.Request) {
-	if s.observationStore == nil {
-		http.Error(w, "observation store not available", http.StatusServiceUnavailable)
-		return
-	}
-
 	var req bulkDeleteRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "invalid JSON body: "+err.Error(), http.StatusBadRequest)
@@ -730,16 +685,7 @@ func (s *Service) handleBulkDeleteREST(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	deleted, err := s.observationStore.DeleteObservations(r.Context(), req.IDs)
-	if err != nil {
-		log.Error().Err(err).Int("count", len(req.IDs)).Msg("bulk-delete: delete observations failed")
-		http.Error(w, "delete failed: "+err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	writeJSON(w, map[string]any{
-		"deleted": deleted,
-	})
+	http.Error(w, "bulk observation delete endpoint removed in v5; observations persistence was dropped in US3-PR-B", http.StatusNotImplemented)
 }
 
 // bulkScopeChangeRequest is the JSON body for PATCH /api/observations/bulk-scope.
@@ -750,22 +696,16 @@ type bulkScopeChangeRequest struct {
 
 // handleBulkScopeChange godoc
 // @Summary Bulk update observation scope
-// @Description Changes the scope of multiple observations to either "global" or "project".
+// @Description Bulk observation scope endpoint removed in v5. Returns 501 Not Implemented after request validation.
 // @Tags Observations
 // @Accept json
 // @Produce json
 // @Security ApiKeyAuth
 // @Param body body bulkScopeChangeRequest true "IDs and new scope"
-// @Success 200 {object} object
+// @Success 501 {string} string "bulk observation scope endpoint removed in v5; observations persistence was dropped in US3-PR-B"
 // @Failure 400 {string} string "bad request"
-// @Failure 500 {string} string "internal error"
 // @Router /api/observations/bulk-scope [patch]
 func (s *Service) handleBulkScopeChange(w http.ResponseWriter, r *http.Request) {
-	if s.observationStore == nil {
-		http.Error(w, "observation store not available", http.StatusServiceUnavailable)
-		return
-	}
-
 	var req bulkScopeChangeRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "invalid JSON body: "+err.Error(), http.StatusBadRequest)
@@ -784,23 +724,7 @@ func (s *Service) handleBulkScopeChange(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	ctx := r.Context()
-	var updated int64
-
-	scope := req.Scope
-	update := &gorm.ObservationUpdate{Scope: &scope}
-
-	for _, id := range req.IDs {
-		if _, err := s.observationStore.UpdateObservation(ctx, id, update); err != nil {
-			log.Error().Err(err).Int64("id", id).Msg("bulk-scope: update observation failed")
-			continue
-		}
-		updated++
-	}
-
-	writeJSON(w, map[string]any{
-		"updated": updated,
-	})
+	http.Error(w, "bulk observation scope endpoint removed in v5; observations persistence was dropped in US3-PR-B", http.StatusNotImplemented)
 }
 
 const noHitRateAnalyticsDataMessage = "No hit rate analytics data available. Hit rate analytics is disabled in v5 (injection_log was dropped in US1)."
@@ -813,32 +737,10 @@ type hitRateAnalyticsRow struct {
 }
 
 func (s *Service) queryHitRateAnalyticsRows(ctx context.Context, project string, limit int) ([]hitRateAnalyticsRow, error) {
-	if s.observationStore == nil {
-		return nil, nil
-	}
-
-	db := s.observationStore.GetDB().WithContext(ctx)
-	var results []hitRateAnalyticsRow
-	sql := `
-		SELECT id, COALESCE(title, '') as title, type,
-			CASE
-				WHEN concepts::text LIKE '%noise_candidate%' THEN 'noise_candidate'
-				WHEN concepts::text LIKE '%high_value%' THEN 'high_value'
-			END as flag
-		FROM observations
-		WHERE (concepts::text LIKE '%noise_candidate%' OR concepts::text LIKE '%high_value%')
-		AND status = 'active'`
-	params := []any{}
-	if project != "" {
-		sql += " AND project = ?"
-		params = append(params, project)
-	}
-	sql += " ORDER BY importance_score DESC LIMIT ?"
-	params = append(params, limit)
-	if err := db.Raw(sql, params...).Scan(&results).Error; err != nil {
-		return nil, fmt.Errorf("hit_rate query: %w", err)
-	}
-	return results, nil
+	_ = ctx
+	_ = project
+	_ = limit
+	return nil, nil
 }
 
 func formatHitRateAnalyticsMarkdown(rows []hitRateAnalyticsRow) string {
@@ -903,11 +805,6 @@ func buildHitRateAnalyticsResponse(rows []hitRateAnalyticsRow) map[string]any {
 }
 
 func (s *Service) handleGetHitRateAnalytics(w http.ResponseWriter, r *http.Request) {
-	if s.observationStore == nil {
-		writeJSON(w, map[string]any{"high_value": 0, "noise_candidates": 0, "observations": []any{}, "total": 0})
-		return
-	}
-
 	rows, err := s.queryHitRateAnalyticsRows(r.Context(), r.URL.Query().Get("project"), 50)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)

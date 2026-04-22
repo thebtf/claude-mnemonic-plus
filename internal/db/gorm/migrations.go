@@ -8,6 +8,7 @@ import (
 
 	"github.com/go-gormigrate/gormigrate/v2"
 	"github.com/rs/zerolog/log"
+	"github.com/thebtf/engram/pkg/models"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
@@ -21,29 +22,76 @@ func runMigrations(db *gorm.DB) error {
 	}
 
 	m := gormigrate.New(db, gormigrate.DefaultOptions, []*gormigrate.Migration{
-		// Migration 001: Core tables (SDKSession, Observation, SessionSummary)
+		// Migration 001: Core tables.
+		// Keep the historical chain self-contained for fresh databases even though
+		// later PR-B drop migrations remove observations/session_summaries again.
+		// sdk_sessions must remain because SessionStore is still wired.
+		//
+		// NOTE: do not rely solely on the current pkg/models structs here. Fresh-install
+		// replay must create the historical baseline columns that later ALTER/INDEX steps
+		// expect (for example session_summaries.importance_score). Upgrades from older
+		// databases already have these columns; fresh DBs need them created up front.
 		{
 			ID: "001_core_tables",
 			Migrate: func(tx *gorm.DB) error {
-				// AutoMigrate creates tables with all indexes from struct tags
-				if err := tx.AutoMigrate(&SDKSession{}); err != nil {
+				if err := tx.AutoMigrate(&SDKSession{}, &models.Observation{}); err != nil {
 					return err
 				}
-				if err := tx.AutoMigrate(&Observation{}); err != nil {
-					return err
+				sqls := []string{
+					`CREATE TABLE IF NOT EXISTS session_summaries (
+						id BIGSERIAL PRIMARY KEY,
+						sdk_session_id TEXT NOT NULL,
+						project TEXT NOT NULL,
+						request TEXT,
+						investigated TEXT,
+						learned TEXT,
+						completed TEXT,
+						next_steps TEXT,
+						notes TEXT,
+						prompt_number BIGINT,
+						discovery_tokens BIGINT NOT NULL DEFAULT 0,
+						created_at TEXT NOT NULL DEFAULT NOW()::text,
+						created_at_epoch BIGINT NOT NULL DEFAULT 0,
+						importance_score DOUBLE PRECISION NOT NULL DEFAULT 0
+					)`,
 				}
-				return tx.AutoMigrate(&SessionSummary{})
+				for _, s := range sqls {
+					if err := tx.Exec(s).Error; err != nil {
+						return fmt.Errorf("migration 001: %w", err)
+					}
+				}
+				return nil
 			},
 			Rollback: func(tx *gorm.DB) error {
 				return tx.Migrator().DropTable("sdk_sessions", "observations", "session_summaries")
 			},
 		},
 
-		// Migration 002: User prompts table
+		// Migration 002: User prompts table.
+		// Keep the base table creation self-contained so historical migration 003 and later
+		// project-rewrite migrations can ALTER/UPDATE the table on fresh databases.
 		{
 			ID: "002_user_prompts",
 			Migrate: func(tx *gorm.DB) error {
-				return tx.AutoMigrate(&UserPrompt{})
+				sqls := []string{
+					`CREATE TABLE IF NOT EXISTS user_prompts (
+						id BIGSERIAL PRIMARY KEY,
+						claude_session_id TEXT NOT NULL,
+						sdk_session_id TEXT NOT NULL DEFAULT '',
+						project TEXT NOT NULL DEFAULT '',
+						prompt_number INTEGER NOT NULL DEFAULT 0,
+						prompt_text TEXT NOT NULL,
+						matched_observations INTEGER NOT NULL DEFAULT 0,
+						created_at TEXT NOT NULL DEFAULT NOW()::text,
+						created_at_epoch BIGINT NOT NULL DEFAULT 0
+					)`,
+				}
+				for _, s := range sqls {
+					if err := tx.Exec(s).Error; err != nil {
+						return fmt.Errorf("migration 002: %w", err)
+					}
+				}
+				return nil
 			},
 			Rollback: func(tx *gorm.DB) error {
 				return tx.Migrator().DropTable("user_prompts")
@@ -3143,6 +3191,81 @@ WHERE utility_propagated_at IS NOT NULL`).Error
 			},
 			Rollback: func(tx *gorm.DB) error {
 				return fmt.Errorf("migration 098_drop_patterns rollback is IRREVERSIBLE — pattern data is not recoverable without a pre-US5 pg_dump snapshot")
+			},
+		},
+
+		// Migration 099: Drop observations table (US3 PR-B — raw log tables sweep).
+		// Credential and memory data was migrated to static-entity tables by migration 090.
+		// Per plan.md C3: rollback is IRREVERSIBLE — pg_restore required.
+		{
+			ID: "099_drop_observations",
+			Migrate: func(tx *gorm.DB) error {
+				return tx.Exec("DROP TABLE IF EXISTS observations CASCADE").Error
+			},
+			Rollback: func(tx *gorm.DB) error {
+				return fmt.Errorf("099_drop_observations: IRREVERSIBLE — pg_restore required (C3)")
+			},
+		},
+
+		// Migration 100: Drop user_prompts table (US3 PR-B).
+		// Per plan.md C3: rollback is IRREVERSIBLE — pg_restore required.
+		{
+			ID: "100_drop_user_prompts",
+			Migrate: func(tx *gorm.DB) error {
+				return tx.Exec("DROP TABLE IF EXISTS user_prompts CASCADE").Error
+			},
+			Rollback: func(tx *gorm.DB) error {
+				return fmt.Errorf("100_drop_user_prompts: IRREVERSIBLE — pg_restore required (C3)")
+			},
+		},
+
+		// Migration 101: Drop raw_events table (US3 PR-B).
+		// Per plan.md C3: rollback is IRREVERSIBLE — pg_restore required.
+		{
+			ID: "101_drop_raw_event_store",
+			Migrate: func(tx *gorm.DB) error {
+				return tx.Exec("DROP TABLE IF EXISTS raw_events CASCADE").Error
+			},
+			Rollback: func(tx *gorm.DB) error {
+				return fmt.Errorf("101_drop_raw_event_store: IRREVERSIBLE — pg_restore required (C3)")
+			},
+		},
+
+		// Migration 102: Drop indexed_sessions table (US3 PR-B).
+		// Per plan.md C3: rollback is IRREVERSIBLE — pg_restore required.
+		{
+			ID: "102_drop_indexed_sessions",
+			Migrate: func(tx *gorm.DB) error {
+				return tx.Exec("DROP TABLE IF EXISTS indexed_sessions CASCADE").Error
+			},
+			Rollback: func(tx *gorm.DB) error {
+				return fmt.Errorf("102_drop_indexed_sessions: IRREVERSIBLE — pg_restore required (C3)")
+			},
+		},
+
+		// Migration 103: Drop session_summaries table (US3 PR-B).
+		// Per plan.md C3: rollback is IRREVERSIBLE — pg_restore required.
+		{
+			ID: "103_drop_summaries",
+			Migrate: func(tx *gorm.DB) error {
+				return tx.Exec("DROP TABLE IF EXISTS session_summaries CASCADE").Error
+			},
+			Rollback: func(tx *gorm.DB) error {
+				return fmt.Errorf("103_drop_summaries: IRREVERSIBLE — pg_restore required (C3)")
+			},
+		},
+
+		// Migration 104: Drop sdk_sessions table (US3 PR-B).
+		// DISABLED for now: SessionStore is still wired, so dropping sdk_sessions breaks
+		// the live code path. Keep the migration ID reserved until the consumer is fully
+		// removed in a follow-up chunk. Rollback remains documented as irreversible.
+		{
+			ID: "104_drop_sdk_sessions",
+			Migrate: func(tx *gorm.DB) error {
+				return nil
+			},
+			Rollback: func(tx *gorm.DB) error {
+				return fmt.Errorf("104_drop_sdk_sessions: IRREVERSIBLE — pg_restore required (C3)")
 			},
 		},
 	})

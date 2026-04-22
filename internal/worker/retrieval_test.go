@@ -7,12 +7,11 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"github.com/thebtf/engram/internal/config"
-	"github.com/thebtf/engram/internal/db/gorm"
 	"github.com/thebtf/engram/pkg/models"
 )
 
-// TestRetrieveRelevant_NoHooks_ReturnsEmpty verifies that without any hooks wired,
-// RetrieveRelevant returns empty results (FTS fallback returns nothing when hook is nil).
+// TestRetrieveRelevant_NoHooks_ReturnsEmpty verifies that without hooks or static stores,
+// RetrieveRelevant still returns a stable empty result.
 func TestRetrieveRelevant_NoHooks_ReturnsEmpty(t *testing.T) {
 	service := newRetrievalTestService()
 	observations, similarityScores, err := service.RetrieveRelevant(context.Background(), "engram", "missing", RetrievalOptions{MaxResults: 5})
@@ -21,11 +20,24 @@ func TestRetrieveRelevant_NoHooks_ReturnsEmpty(t *testing.T) {
 	require.Empty(t, similarityScores)
 }
 
+func TestObservationMatchesFallbackQuery_MatchesTitleNarrativeAndConcepts(t *testing.T) {
+	observation := &models.Observation{
+		Title:     sql.NullString{String: "Authentication failure", Valid: true},
+		Narrative: sql.NullString{String: "Billing sync retried", Valid: true},
+		Concepts:  []string{"security", "match-tag"},
+	}
+
+	require.True(t, observationMatchesFallbackQuery(observation, "auth"))
+	require.True(t, observationMatchesFallbackQuery(observation, "billing"))
+	require.True(t, observationMatchesFallbackQuery(observation, "match-tag"))
+	require.False(t, observationMatchesFallbackQuery(observation, "missing"))
+}
+
 // TestRetrieveRelevant_FTSFallback_ReturnsObservations verifies FTS-based retrieval
 // (the only search path in v5 after vector storage was removed).
 func TestRetrieveRelevant_FTSFallback_ReturnsObservations(t *testing.T) {
 	service := newRetrievalTestService()
-	service.retrievalHooks.searchObservationsFTSFiltered = func(_ context.Context, _ string, _ gorm.ScopeFilter, _ int) ([]*models.Observation, error) {
+	service.retrievalHooks.searchObservationsFTSFiltered = func(_ context.Context, _ string, _ retrievalScope, _ int) ([]*models.Observation, error) {
 		return []*models.Observation{
 			newObservation(1, "Alpha"),
 			newObservation(2, "Beta"),
@@ -42,7 +54,7 @@ func TestRetrieveRelevant_MaxResultsCapsOutput(t *testing.T) {
 	// The mock respects the limit parameter so the assertion can be exact.
 	// Disambiguated titles keep term-based clustering from collapsing these entries.
 	distinctTitles := []string{"Alpha migration schema", "Gravity kernel panic", "Lunar lattice cipher", "Rhizome radio silence", "Spectral pivot anomaly"}
-	service.retrievalHooks.searchObservationsFTSFiltered = func(_ context.Context, _ string, _ gorm.ScopeFilter, limit int) ([]*models.Observation, error) {
+	service.retrievalHooks.searchObservationsFTSFiltered = func(_ context.Context, _ string, _ retrievalScope, limit int) ([]*models.Observation, error) {
 		obs := make([]*models.Observation, 0, limit)
 		for i := 1; i <= limit && i-1 < len(distinctTitles); i++ {
 			obs = append(obs, newObservation(int64(i), distinctTitles[i-1]))
@@ -57,7 +69,7 @@ func TestRetrieveRelevant_MaxResultsCapsOutput(t *testing.T) {
 // TestRetrieveRelevant_LLMFilterHonorsSilence verifies LLM filter returning empty silences results.
 func TestRetrieveRelevant_LLMFilterHonorsSilence(t *testing.T) {
 	service := newRetrievalTestService()
-	service.retrievalHooks.searchObservationsFTSFiltered = func(_ context.Context, _ string, _ gorm.ScopeFilter, _ int) ([]*models.Observation, error) {
+	service.retrievalHooks.searchObservationsFTSFiltered = func(_ context.Context, _ string, _ retrievalScope, _ int) ([]*models.Observation, error) {
 		return []*models.Observation{newObservation(1, "Alpha"), newObservation(2, "Beta")}, nil
 	}
 	service.retrievalHooks.filterByRelevance = func(_ context.Context, _ []*models.Observation, _, _ string) []int64 {

@@ -3,10 +3,9 @@ package worker
 import (
 	"context"
 	"sort"
+	"strings"
 	"time"
 
-	"github.com/rs/zerolog/log"
-	"github.com/thebtf/engram/internal/db/gorm"
 	"github.com/thebtf/engram/internal/worker/sdk"
 	"github.com/thebtf/engram/pkg/models"
 )
@@ -44,12 +43,17 @@ type retrievalMetadata struct {
 	duplicatesRemoved int
 }
 
+type retrievalScope struct {
+	Project string
+	AgentID string
+}
+
 type retrievalHooks struct {
 	retrieveRelevant               func(ctx context.Context, project, query string, opts RetrievalOptions) ([]*models.Observation, map[int64]float64, error)
 	getProjectThreshold            func(ctx context.Context, project string, globalDefault float64) float64
 	getObservationsByIDs           func(ctx context.Context, ids []int64, orderBy string, limit int) ([]*models.Observation, error)
-	searchObservationsFTSFiltered  func(ctx context.Context, query string, scopeFilter gorm.ScopeFilter, limit int) ([]*models.Observation, error)
-	getRecentObservationsFiltered  func(ctx context.Context, scopeFilter gorm.ScopeFilter, limit int) ([]*models.Observation, error)
+	searchObservationsFTSFiltered  func(ctx context.Context, query string, scopeFilter retrievalScope, limit int) ([]*models.Observation, error)
+	getRecentObservationsFiltered  func(ctx context.Context, scopeFilter retrievalScope, limit int) ([]*models.Observation, error)
 	getDiversityScores             func(ctx context.Context, ids []int64) (map[int64]float64, error)
 	getRecentSessionIDs            func(ctx context.Context, project string, since time.Time) (map[string]bool, error)
 	getTopImportanceObservations   func(ctx context.Context, project string, limit int) ([]*models.Observation, error)
@@ -170,7 +174,7 @@ func (s *Service) RetrieveRelevant(ctx context.Context, project, query string, o
 	observations := make([]*models.Observation, 0)
 
 	// Vector search removed in v5 (content_chunks table dropped). Use FTS-only retrieval.
-	scopeFilter := gorm.ScopeFilter{Project: project, AgentID: state.agentID}
+	scopeFilter := retrievalScope{Project: project, AgentID: state.agentID}
 	fallbackObservations, fallbackErr := s.searchFallbackObservations(ctx, query, scopeFilter, limit)
 	if fallbackErr != nil {
 		return nil, nil, fallbackErr
@@ -255,33 +259,95 @@ func (s *Service) fetchObservationsByID(ctx context.Context, ids []int64, orderB
 	if s.retrievalHooks != nil && s.retrievalHooks.getObservationsByIDs != nil {
 		return s.retrievalHooks.getObservationsByIDs(ctx, ids, orderBy, limit)
 	}
-	if s.observationStore == nil {
-		return nil, nil
-	}
-	return s.observationStore.GetObservationsByIDs(ctx, ids, orderBy, limit)
+	return nil, nil
 }
 
-func (s *Service) searchFallbackObservations(ctx context.Context, query string, scopeFilter gorm.ScopeFilter, limit int) ([]*models.Observation, error) {
+func (s *Service) searchFallbackObservations(ctx context.Context, query string, scopeFilter retrievalScope, limit int) ([]*models.Observation, error) {
 	if s.retrievalHooks != nil && s.retrievalHooks.searchObservationsFTSFiltered != nil {
 		observations, err := s.retrievalHooks.searchObservationsFTSFiltered(ctx, query, scopeFilter, limit)
 		if err == nil || s.retrievalHooks.getRecentObservationsFiltered == nil {
 			return observations, err
 		}
 	}
-	if s.observationStore != nil {
-		observations, err := s.observationStore.SearchObservationsFTSFiltered(ctx, query, scopeFilter, limit)
-		if err == nil {
-			return observations, nil
-		}
-		log.Warn().Err(err).Str("query", query).Msg("FTS search failed, falling back to recent")
-	}
 	if s.retrievalHooks != nil && s.retrievalHooks.getRecentObservationsFiltered != nil {
 		return s.retrievalHooks.getRecentObservationsFiltered(ctx, scopeFilter, limit)
 	}
-	if s.observationStore == nil {
-		return nil, nil
+
+	if limit <= 0 {
+		limit = DefaultSearchLimit
 	}
-	return s.observationStore.GetRecentObservationsFiltered(ctx, scopeFilter, limit)
+
+	fetchLimit := limit
+	trimmedQuery := strings.TrimSpace(query)
+	if trimmedQuery != "" {
+		const candidateMultiplier = 10
+		const minCandidatePool = 1000
+		fetchLimit = limit * candidateMultiplier
+		if fetchLimit < minCandidatePool {
+			fetchLimit = minCandidatePool
+		}
+	}
+
+	observations := make([]*models.Observation, 0, fetchLimit)
+	if s.memoryStore != nil && scopeFilter.Project != "" {
+		memories, err := s.memoryStore.List(ctx, scopeFilter.Project, fetchLimit)
+		if err != nil {
+			return nil, err
+		}
+		observations = append(observations, memoriesToObservations(memories)...)
+	}
+	if s.behavioralRulesStore != nil {
+		var projectPtr *string
+		if scopeFilter.Project != "" {
+			project := scopeFilter.Project
+			projectPtr = &project
+		}
+		rules, err := s.behavioralRulesStore.List(ctx, projectPtr, fetchLimit)
+		if err != nil {
+			return nil, err
+		}
+		observations = append(observations, behavioralRulesToObservations(rules)...)
+	}
+	if len(observations) == 0 {
+		return []*models.Observation{}, nil
+	}
+
+	if trimmedQuery != "" {
+		queryLower := strings.ToLower(trimmedQuery)
+		filtered := observations[:0]
+		for _, observation := range observations {
+			if observationMatchesFallbackQuery(observation, queryLower) {
+				filtered = append(filtered, observation)
+			}
+		}
+		observations = filtered
+	}
+
+	sort.SliceStable(observations, func(i, j int) bool {
+		return observations[i].CreatedAtEpoch > observations[j].CreatedAtEpoch
+	})
+	if len(observations) > limit {
+		observations = observations[:limit]
+	}
+	return observations, nil
+}
+
+func observationMatchesFallbackQuery(observation *models.Observation, queryLower string) bool {
+	if observation == nil {
+		return false
+	}
+	if strings.Contains(strings.ToLower(observation.Title.String), queryLower) {
+		return true
+	}
+	if strings.Contains(strings.ToLower(observation.Narrative.String), queryLower) {
+		return true
+	}
+	for _, concept := range observation.Concepts {
+		if strings.Contains(strings.ToLower(concept), queryLower) {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *Service) filterFreshObservations(ctx context.Context, observations []*models.Observation, cwd string) ([]*models.Observation, int) {
