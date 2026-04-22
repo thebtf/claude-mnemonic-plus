@@ -3,6 +3,7 @@
 
 const fs = require('fs');
 const os = require('os');
+const path = require('path');
 const readline = require('readline');
 
 const lib = require('./lib');
@@ -56,6 +57,27 @@ function expandTranscriptPath(transcriptPath) {
   return transcriptPath;
 }
 
+function deriveTranscriptPath(sessionId) {
+  if (typeof sessionId !== 'string' || sessionId === '') return null;
+  const home = os.homedir();
+  if (!home) return null;
+  const projectsDir = path.join(home, '.claude', 'projects');
+  try {
+    const dirs = fs.readdirSync(projectsDir);
+    for (const dir of dirs) {
+      const candidate = path.join(projectsDir, dir, `${sessionId}.jsonl`);
+      if (fs.existsSync(candidate)) return candidate;
+    }
+  } catch {}
+  return null;
+}
+
+function resolveTranscriptPath(transcriptPath, sessionId) {
+  const expanded = expandTranscriptPath(transcriptPath);
+  if (expanded && fs.existsSync(expanded)) return expanded;
+  return deriveTranscriptPath(sessionId) || expanded;
+}
+
 const MAX_MESSAGES = 50;
 const MAX_MESSAGE_LENGTH = 5000;
 
@@ -64,9 +86,8 @@ function truncateText(text, maxLen) {
   return text.length <= maxLen ? text : text.slice(0, maxLen);
 }
 
-async function parseTranscript(transcriptPath) {
-  const expandedPath = expandTranscriptPath(transcriptPath);
-  if (!expandedPath) {
+async function parseTranscript(resolvedPath) {
+  if (!resolvedPath) {
     return { lastUser: '', lastAssistant: '', messages: [] };
   }
 
@@ -75,19 +96,31 @@ async function parseTranscript(transcriptPath) {
     let lastAssistant = '';
     const messages = [];
 
-    const stream = fs.createReadStream(expandedPath, {
+    const stream = fs.createReadStream(resolvedPath, {
       encoding: 'utf8',
       highWaterMark: 1024 * 1024,
-    });
-
-    stream.on('error', (error) => {
-      console.error(`[stop] Failed to read transcript: ${error.message}`);
-      resolve({ lastUser, lastAssistant, messages });
     });
 
     const rl = readline.createInterface({
       input: stream,
       crlfDelay: Infinity,
+    });
+
+    let settled = false;
+    const finish = (result) => {
+      if (settled) return;
+      settled = true;
+      resolve(result);
+    };
+
+    stream.on('error', (error) => {
+      console.error(`[stop] Failed to read transcript: ${error.message}`);
+      finish({ lastUser, lastAssistant, messages });
+    });
+
+    rl.on('error', (error) => {
+      console.error(`[stop] Readline error while reading transcript: ${error.message}`);
+      finish({ lastUser, lastAssistant, messages });
     });
 
     rl.on('line', (line) => {
@@ -129,7 +162,7 @@ async function parseTranscript(transcriptPath) {
     });
 
     rl.on('close', () => {
-      resolve({ lastUser, lastAssistant, messages });
+      finish({ lastUser, lastAssistant, messages });
     });
   });
 }
@@ -279,7 +312,8 @@ async function handleStop(ctx, input) {
       ? input.TranscriptPath
       : '';
 
-  const { lastUser, lastAssistant, messages } = await parseTranscript(transcriptPath);
+  const resolvedTranscriptPath = resolveTranscriptPath(transcriptPath, claudeSessionID);
+  const { lastUser, lastAssistant, messages } = await parseTranscript(resolvedTranscriptPath);
 
   console.error(`[stop] Transcript path: ${transcriptPath}`);
   console.error(`[stop] Last user message length: ${String(lastUser).length}`);
@@ -326,11 +360,10 @@ async function handleStop(ctx, input) {
 
   // Index session transcript for full-text search
   try {
-    const expandedPath = expandTranscriptPath(transcriptPath);
-    if (expandedPath) {
-      const stat = fs.statSync(expandedPath);
+    if (resolvedTranscriptPath) {
+      const stat = fs.statSync(resolvedTranscriptPath);
       if (stat.size > 0 && stat.size <= 5 * 1024 * 1024) {
-        const transcriptContent = fs.readFileSync(expandedPath, 'utf8');
+        const transcriptContent = fs.readFileSync(resolvedTranscriptPath, 'utf8');
         const wsId = lib.WorkstationID();
         const endpoint = `/api/sessions/index?workstation_id=${encodeURIComponent(wsId)}&session_id=${encodeURIComponent(claudeSessionID)}`;
         const indexResult = await lib.requestUpload(endpoint, transcriptContent, 15000);
