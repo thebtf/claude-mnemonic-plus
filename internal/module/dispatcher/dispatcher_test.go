@@ -152,8 +152,8 @@ func TestHandleRequest_Initialize_ReturnsCorrectServerInfo(t *testing.T) {
 	if si["name"] != "engram" {
 		t.Errorf("serverInfo.name: got %v, want engram", si["name"])
 	}
-	if si["version"] != "v4.3.0" {
-		t.Errorf("serverInfo.version: got %v, want v4.3.0", si["version"])
+	if si["version"] != "v5.0.0" {
+		t.Errorf("serverInfo.version: got %v, want v5.0.0", si["version"])
 	}
 	if result["protocolVersion"] != "2024-11-05" {
 		t.Errorf("protocolVersion: got %v, want 2024-11-05", result["protocolVersion"])
