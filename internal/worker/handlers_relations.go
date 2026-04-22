@@ -85,12 +85,12 @@ func (s *Service) handleGetRelationGraph(w http.ResponseWriter, r *http.Request)
 // relatedObservationRef is the v5-compatible response shape for related-observation
 // lookups now that observation persistence has been removed.
 type relatedObservationRef struct {
-	ID            int64   `json:"id"`
-	MinConfidence float64 `json:"min_confidence,omitempty"`
+	ID         int64   `json:"id"`
+	Confidence float64 `json:"confidence"`
 }
 
 // @Summary Get related observations
-// @Description Returns related observation IDs only in v5 because full observation records were removed.
+// @Description Returns related observation IDs with their actual relation confidence in v5.
 // @Tags Relations
 // @Produce json
 // @Security ApiKeyAuth
@@ -116,17 +116,26 @@ func (s *Service) handleGetRelatedObservations(w http.ResponseWriter, r *http.Re
 		}
 	}
 
-	relatedIDs, err := s.relationStore.GetRelatedObservationIDs(r.Context(), id, minConfidence)
+	relations, err := s.relationStore.GetRelationsWithDetails(r.Context(), id)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
-	refs := make([]relatedObservationRef, 0, len(relatedIDs))
-	for _, relatedID := range relatedIDs {
+	refs := make([]relatedObservationRef, 0, len(relations))
+	for _, relation := range relations {
+		if relation == nil || relation.Relation == nil || relation.Relation.Confidence < minConfidence {
+			continue
+		}
+
+		relatedID := relation.Relation.SourceID
+		if relatedID == id {
+			relatedID = relation.Relation.TargetID
+		}
+
 		refs = append(refs, relatedObservationRef{
-			ID:            relatedID,
-			MinConfidence: minConfidence,
+			ID:         relatedID,
+			Confidence: relation.Relation.Confidence,
 		})
 	}
 

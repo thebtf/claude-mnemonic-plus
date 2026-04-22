@@ -5,17 +5,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"reflect"
 	"time"
-	"unsafe"
-
-	gogorm "gorm.io/gorm"
 
 	"github.com/rs/zerolog/log"
 	"github.com/thebtf/engram/internal/config"
 	"github.com/thebtf/engram/internal/crypto"
 	gormstore "github.com/thebtf/engram/internal/db/gorm"
 	"github.com/thebtf/engram/pkg/models"
+	gogorm "gorm.io/gorm"
 )
 
 // getVault returns the Server's Vault, initializing it lazily on first call.
@@ -32,55 +29,24 @@ func (s *Server) getVault() (*crypto.Vault, error) {
 	return s.vault, s.vaultInitErr
 }
 
-// credentialStore derives a dedicated CredentialStore from the MCP server's existing
-// in-process GORM wiring. v5 removed observation-backed credentials, but the MCP
-// server still has a MemoryStore, which already carries the shared *gorm.DB handle.
-//
-// Scope note: this keeps the fix inside tools_credential.go, as requested, without
-// widening Server's public surface or adding new injected fields.
+// credentialStore derives a dedicated CredentialStore from the server's configured
+// database DSN using only public constructors. This removes the prior reflect/unsafe
+// field access while keeping the change local to MCP wiring.
 func (s *Server) credentialStore() (*gormstore.CredentialStore, error) {
 	if s.memoryStore == nil {
 		return nil, fmt.Errorf("credential store not available")
 	}
 
-	db, err := extractMemoryStoreDB(s.memoryStore)
+	dsn := config.GetDatabaseDSN()
+	if dsn == "" {
+		return nil, fmt.Errorf("credential store not available: database DSN not configured")
+	}
+
+	store, err := gormstore.NewStore(gormstore.Config{DSN: dsn})
 	if err != nil {
 		return nil, fmt.Errorf("credential store not available: %w", err)
 	}
-	return newCredentialStoreFromDB(db), nil
-}
-
-func extractMemoryStoreDB(ms *gormstore.MemoryStore) (*gogorm.DB, error) {
-	if ms == nil {
-		return nil, fmt.Errorf("memory store is nil")
-	}
-
-	value := reflect.ValueOf(ms)
-	if value.Kind() != reflect.Pointer || value.IsNil() {
-		return nil, fmt.Errorf("memory store is not an initialized pointer")
-	}
-
-	field := value.Elem().FieldByName("db")
-	if !field.IsValid() {
-		return nil, fmt.Errorf("memory store db field not found")
-	}
-	if !field.CanAddr() {
-		return nil, fmt.Errorf("memory store db field is not addressable")
-	}
-
-	dbValue := reflect.NewAt(field.Type(), unsafe.Pointer(field.UnsafeAddr())).Elem()
-	db, ok := dbValue.Interface().(*gogorm.DB)
-	if !ok || db == nil {
-		return nil, fmt.Errorf("memory store db field has unexpected type")
-	}
-	return db, nil
-}
-
-func newCredentialStoreFromDB(db *gogorm.DB) *gormstore.CredentialStore {
-	store := &gormstore.CredentialStore{}
-	field := reflect.ValueOf(store).Elem().FieldByName("db")
-	reflect.NewAt(field.Type(), unsafe.Pointer(field.UnsafeAddr())).Elem().Set(reflect.ValueOf(db))
-	return store
+	return gormstore.NewCredentialStore(store), nil
 }
 
 // handleStoreCredential encrypts and stores a credential in the dedicated credentials table.

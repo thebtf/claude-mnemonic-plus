@@ -121,19 +121,23 @@ func behavioralRulesToObservations(rules []*models.BehavioralRule) []*models.Obs
 			continue
 		}
 		project := ""
+		scope := models.ScopeGlobal
 		if rule.Project != nil {
 			project = *rule.Project
+			scope = models.ScopeProject
 		}
 		result = append(result, &models.Observation{
-			ID:             rule.ID,
-			Project:        project,
-			Scope:          models.ScopeGlobal,
-			Type:           models.ObsTypeGuidance,
-			CreatedAt:      rule.CreatedAt.Format(time.RFC3339),
-			CreatedAtEpoch: rule.CreatedAt.UnixMilli(),
-			Title:          sql.NullString{String: rule.Content, Valid: rule.Content != ""},
-			Narrative:      sql.NullString{String: rule.Content, Valid: rule.Content != ""},
-			Concepts:       models.JSONStringArray{"behavioral-rule", "always-inject"},
+			ID:              rule.ID,
+			Project:         project,
+			Scope:           scope,
+			Type:            models.ObsTypeGuidance,
+			MemoryType:      models.MemTypeGuidance,
+			SourceType:      models.SourceManual,
+			CreatedAt:       rule.CreatedAt.Format(time.RFC3339),
+			CreatedAtEpoch:  rule.CreatedAt.UnixMilli(),
+			Title:           sql.NullString{String: rule.Content, Valid: rule.Content != ""},
+			Narrative:       sql.NullString{String: rule.Content, Valid: rule.Content != ""},
+			Concepts:        models.JSONStringArray{"behavioral-rule", "always-inject"},
 			ImportanceScore: 1,
 		})
 	}
@@ -151,6 +155,8 @@ func memoriesToObservations(mems []*models.Memory) []*models.Observation {
 			Project:         mem.Project,
 			Scope:           models.ScopeProject,
 			Type:            models.ObsTypeDiscovery,
+			MemoryType:      models.MemTypeContext,
+			SourceType:      models.SourceManual,
 			CreatedAt:       mem.CreatedAt.Format(time.RFC3339),
 			CreatedAtEpoch:  mem.CreatedAt.UnixMilli(),
 			Title:           sql.NullString{String: mem.Content, Valid: mem.Content != ""},

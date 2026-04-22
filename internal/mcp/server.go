@@ -16,6 +16,7 @@ import (
 	"github.com/rs/zerolog/log"
 	"github.com/thebtf/engram/internal/chunking"
 	"github.com/thebtf/engram/internal/collections"
+	"github.com/thebtf/engram/internal/config"
 	"github.com/thebtf/engram/internal/crypto"
 	"github.com/thebtf/engram/internal/db/gorm"
 	"github.com/thebtf/engram/internal/privacy"
@@ -480,12 +481,12 @@ func (s *Server) primaryTools() []Tool {
 		},
 		{
 			Name:        "store",
-			Description: "Store, edit, merge, or extract memories. Actions: create (default), edit, merge, import, extract.",
+			Description: "Store, edit, merge, or import memories. Actions: create (default), edit, merge, import.",
 			tier:        tierCore,
 			InputSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"action":        map[string]any{"type": "string", "enum": []string{"create", "edit", "merge", "import", "extract"}, "default": "create", "description": "Action to perform"},
+					"action":        map[string]any{"type": "string", "enum": []string{"create", "edit", "merge", "import"}, "default": "create", "description": "Action to perform"},
 					"content":       map[string]any{"type": "string", "description": "Observation content (for create)"},
 					"title":         map[string]any{"type": "string", "description": "Title (for create, edit)"},
 					"id":            map[string]any{"type": "number", "description": "Observation ID (for edit)"},
@@ -861,8 +862,8 @@ func (s *Server) handleToolsList(req *Request) *Response {
 		)
 	}
 
-	// Credential vault tools — advertise when vault-backed credential storage is available
-	if s.memoryStore != nil {
+	// Credential vault tools — advertise only when credential persistence and vault keying are actually available.
+	if s.memoryStore != nil && crypto.VaultExists(config.Get()) {
 		tools = append(tools,
 			Tool{
 				Name:        "store_credential",
@@ -1370,8 +1371,11 @@ func (s *Server) handleFindRelatedObservations(ctx context.Context, args json.Ra
 	params.MinConfidence = coerceFloat64(m["min_confidence"], 0)
 	params.Limit = coerceInt(m["limit"], 0)
 
-	if params.ID == 0 {
-		return "", fmt.Errorf("id is required")
+	if params.ID <= 0 {
+		return "", fmt.Errorf("id is required and must be a positive integer")
+	}
+	if s.relationStore == nil {
+		return "", fmt.Errorf("related observations unavailable: relation store not configured")
 	}
 	if params.MinConfidence < 0 {
 		params.MinConfidence = 0.5
@@ -1398,7 +1402,7 @@ func (s *Server) handleFindRelatedObservations(ctx context.Context, args json.Ra
 	response := map[string]any{
 		"observation_ids": relatedIDs,
 		"count":           len(relatedIDs),
-		"note":            "Full observation fetch unavailable in v5 — use recall(action=\"search\") with the returned IDs",
+		"note":            "Full observation fetch unavailable in v5 — pass the returned IDs to tools that accept observation IDs",
 	}
 
 	output, err := json.Marshal(response)

@@ -1,6 +1,12 @@
 #!/usr/bin/env node
 'use strict';
 
+const lib = require('./lib');
+
+async function handlePostToolUse() {
+  return '';
+}
+
 (async () => {
-  process.stdout.write('');
+  await lib.RunHook('PostToolUse', handlePostToolUse);
 })();

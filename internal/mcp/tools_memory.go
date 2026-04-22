@@ -235,7 +235,7 @@ func (s *Server) handleStoreMemory(ctx context.Context, args json.RawMessage) (s
 		"id":      created.ID,
 		"title":   truncateTitle(created.Content, 80),
 		"type":    obsTypeStr,
-		"scope":   params.Scope,
+		"scope":   resolvedScope,
 		"storage": "memories",
 		"message": "Memory stored successfully",
 	}
@@ -429,10 +429,17 @@ func (s *Server) handleRecallMemory(ctx context.Context, args json.RawMessage) (
 		}
 		items := make([]item, 0, len(filtered))
 		for _, mem := range filtered {
+			memoryType := ""
+			for _, tag := range mem.Tags {
+				if strings.HasPrefix(tag, "type:") {
+					memoryType = strings.TrimPrefix(tag, "type:")
+					break
+				}
+			}
 			items = append(items, item{
 				ID:          mem.ID,
 				Title:       truncateTitle(mem.Content, 80),
-				Type:        obsType,
+				Type:        memoryType,
 				Content:     mem.Content,
 				Tags:        mem.Tags,
 				SourceAgent: mem.SourceAgent,

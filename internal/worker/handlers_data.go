@@ -17,15 +17,18 @@ import (
 
 // handleGetObservations godoc
 // @Summary List observations
-// @Description Returns recent observations with optional semantic search via vector store. Supports pagination.
+// @Description Returns recent observations with optional fallback search. Filters by type, status, memory type, and concept, then applies corrected pagination after in-memory filtering.
 // @Tags Observations
 // @Produce json
 // @Security ApiKeyAuth
 // @Param project query string false "Filter by project"
-// @Param query query string false "Semantic search query"
+// @Param query query string false "Search query"
+// @Param type query string false "Filter by observation type"
+// @Param status query string false "Filter by status (only active is currently supported)"
+// @Param memory_type query string false "Filter by memory type"
 // @Param limit query int false "Number of results (default 100)"
 // @Param offset query int false "Pagination offset"
-// @Param concept query string false "Filter by concept (LIKE match on concepts JSON column)"
+// @Param concept query string false "Filter by concept substring match"
 // @Success 200 {object} map[string]interface{}
 // @Failure 400 {string} string "bad request"
 // @Failure 500 {string} string "internal error"
@@ -39,6 +42,31 @@ func (s *Service) handleGetObservations(w http.ResponseWriter, r *http.Request) 
 	memoryType := r.URL.Query().Get("memory_type")
 	concept := strings.TrimSpace(r.URL.Query().Get("concept"))
 
+	matchesFilters := func(observation *models.Observation) bool {
+		if observation == nil {
+			return false
+		}
+		if obsType != "" && string(observation.Type) != obsType {
+			return false
+		}
+		if status != "" && status != "active" {
+			return false
+		}
+		if memoryType != "" && string(observation.MemoryType) != memoryType {
+			return false
+		}
+		if concept == "" {
+			return true
+		}
+		needle := strings.ToLower(concept)
+		for _, candidate := range observation.Concepts {
+			if strings.Contains(strings.ToLower(candidate), needle) {
+				return true
+			}
+		}
+		return false
+	}
+
 	// Validate project name to prevent path traversal
 	if err := ValidateProjectName(project); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
@@ -47,70 +75,92 @@ func (s *Service) handleGetObservations(w http.ResponseWriter, r *http.Request) 
 
 	searchStart := time.Now()
 	scopeFilter := retrievalScope{Project: project}
-	fetchLimit := pagination.Offset + pagination.Limit
-	if fetchLimit <= 0 {
-		fetchLimit = pagination.Limit
+	requestedCount := pagination.Offset + pagination.Limit
+	if requestedCount <= 0 {
+		requestedCount = pagination.Limit
+	}
+	if requestedCount <= 0 {
+		requestedCount = DefaultObservationsLimit
 	}
 
-	observations, err := s.searchFallbackObservations(r.Context(), query, scopeFilter, fetchLimit)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-	if observations == nil {
-		observations = []*models.Observation{}
+	overfetchStep := pagination.Limit
+	if overfetchStep <= 0 {
+		overfetchStep = DefaultObservationsLimit
 	}
 
-	filtered := make([]*models.Observation, 0, len(observations))
-	for _, observation := range observations {
-		if observation == nil {
-			continue
+	fetchLimit := requestedCount
+	filtered := make([]*models.Observation, 0, fetchLimit)
+	exhausted := false
+
+	for {
+		observations, err := s.searchFallbackObservations(r.Context(), query, scopeFilter, fetchLimit)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
 		}
-		if obsType != "" && string(observation.Type) != obsType {
-			continue
+		if observations == nil {
+			observations = []*models.Observation{}
 		}
-		if status != "" && status != "active" {
-			continue
-		}
-		if memoryType != "" && string(observation.MemoryType) != memoryType {
-			continue
-		}
-		if concept != "" {
-			matchedConcept := false
-			for _, candidate := range observation.Concepts {
-				if strings.Contains(strings.ToLower(candidate), strings.ToLower(concept)) {
-					matchedConcept = true
-					break
-				}
-			}
-			if !matchedConcept {
-				continue
+
+		filtered = filtered[:0]
+		for _, observation := range observations {
+			if matchesFilters(observation) {
+				filtered = append(filtered, observation)
 			}
 		}
-		filtered = append(filtered, observation)
+
+		if len(observations) < fetchLimit {
+			exhausted = true
+			break
+		}
+		if len(filtered) > requestedCount {
+			break
+		}
+
+		nextFetchLimit := fetchLimit + overfetchStep
+		if nextFetchLimit <= fetchLimit {
+			exhausted = true
+			break
+		}
+		fetchLimit = nextFetchLimit
+	}
+
+	page := 1
+	if pagination.Limit > 0 {
+		page = (pagination.Offset / pagination.Limit) + 1
 	}
 
 	total := int64(len(filtered))
-	if pagination.Offset >= len(filtered) {
-		filtered = []*models.Observation{}
+	hasMore := false
+	if exhausted {
+		hasMore = int64(pagination.Offset)+int64(pagination.Limit) < total
 	} else {
+		hasMore = true
+		if lowerBoundTotal := requestedCount + 1; lowerBoundTotal > len(filtered) {
+			total = int64(lowerBoundTotal)
+		}
+	}
+
+	pageItems := []*models.Observation{}
+	if pagination.Offset < len(filtered) {
 		end := pagination.Offset + pagination.Limit
 		if end > len(filtered) {
 			end = len(filtered)
 		}
-		filtered = filtered[pagination.Offset:end]
+		pageItems = filtered[pagination.Offset:end]
 	}
 
 	if query != "" {
-		s.trackSearchQuery(query, project, "observations", len(filtered), float32(time.Since(searchStart).Milliseconds()))
+		s.trackSearchQuery(query, project, "observations", len(pageItems), float32(time.Since(searchStart).Milliseconds()))
 	}
 
 	resp := map[string]any{
-		"observations": filtered,
+		"observations": pageItems,
 		"total":        total,
 		"limit":        pagination.Limit,
 		"offset":       pagination.Offset,
-		"hasMore":      int64(pagination.Offset)+int64(len(filtered)) < total,
+		"page":         page,
+		"hasMore":      hasMore,
 	}
 	if project != "" {
 		resp["project_display_name"] = s.getProjectDisplayName(r.Context(), project)

@@ -827,7 +827,6 @@ func (s *Service) setupRoutes() {
 		r.Get("/api/sessions/list", s.handleListSessions)
 		r.Get("/api/sessions", s.handleGetSessionByClaudeID)
 		r.Post("/api/sessions/{id}/init", s.handleSessionStart)
-		r.Post("/api/sessions/observations", s.handleObservation)
 		r.Post("/api/sessions/subagent-complete", s.handleSubagentComplete)
 		r.Post("/api/sessions/{id}/summarize", s.handleSummarize)
 		r.Post("/api/sessions/{id}/extract-learnings", s.handleExtractLearnings)
@@ -1111,11 +1110,7 @@ func (s *Service) getCachedObservationCount(ctx context.Context, project string)
 		if err != nil {
 			return 0, err
 		}
-		for _, rule := range rules {
-			if rule != nil && rule.Project != nil && *rule.Project == project {
-				count++
-			}
-		}
+		count += len(rules)
 	}
 
 	// Update cache

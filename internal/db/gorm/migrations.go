@@ -8,6 +8,7 @@ import (
 
 	"github.com/go-gormigrate/gormigrate/v2"
 	"github.com/rs/zerolog/log"
+	"github.com/thebtf/engram/pkg/models"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
@@ -21,26 +22,27 @@ func runMigrations(db *gorm.DB) error {
 	}
 
 	m := gormigrate.New(db, gormigrate.DefaultOptions, []*gormigrate.Migration{
-		// Migration 001: Core tables (SDKSession only post-US3 PR-B).
-		// In v5, Observation and SessionSummary AutoMigrate calls removed with their types.
-		// Existing prod DBs already have these tables from prior runs; they drop in 099/103.
-		// sdk_sessions still needs AutoMigrate for SessionStore which is still wired.
+		// Migration 001: Core tables.
+		// Keep the historical chain self-contained for fresh databases even though
+		// later PR-B drop migrations remove observations/session_summaries again.
+		// sdk_sessions must remain because SessionStore is still wired.
 		{
 			ID: "001_core_tables",
 			Migrate: func(tx *gorm.DB) error {
-				return tx.AutoMigrate(&SDKSession{})
+				return tx.AutoMigrate(&SDKSession{}, &models.Observation{}, &models.SessionSummary{})
 			},
 			Rollback: func(tx *gorm.DB) error {
 				return tx.Migrator().DropTable("sdk_sessions", "observations", "session_summaries")
 			},
 		},
 
-		// Migration 002: User prompts table (v5 no-op — UserPrompt type removed; table
-		// drop tracked by migration 100_drop_user_prompts).
+		// Migration 002: User prompts table.
+		// Keep the base table creation so historical migration 003 can ALTER it on
+		// fresh databases; PR-B still drops the table later in 100_drop_user_prompts.
 		{
 			ID: "002_user_prompts",
 			Migrate: func(tx *gorm.DB) error {
-				return nil
+				return tx.AutoMigrate(&models.UserPrompt{})
 			},
 			Rollback: func(tx *gorm.DB) error {
 				return tx.Migrator().DropTable("user_prompts")
@@ -3205,13 +3207,13 @@ WHERE utility_propagated_at IS NOT NULL`).Error
 		},
 
 		// Migration 104: Drop sdk_sessions table (US3 PR-B).
-		// MUST be last in drop sequence: SessionStore (session_store.go) is still wired
-		// in service.go and will be removed in chunk 2/3 after consumer unwiring.
-		// Per plan.md C3: rollback is IRREVERSIBLE — pg_restore required.
+		// DISABLED for now: SessionStore is still wired, so dropping sdk_sessions breaks
+		// the live code path. Keep the migration ID reserved until the consumer is fully
+		// removed in a follow-up chunk. Rollback remains documented as irreversible.
 		{
 			ID: "104_drop_sdk_sessions",
 			Migrate: func(tx *gorm.DB) error {
-				return tx.Exec("DROP TABLE IF EXISTS sdk_sessions CASCADE").Error
+				return nil
 			},
 			Rollback: func(tx *gorm.DB) error {
 				return fmt.Errorf("104_drop_sdk_sessions: IRREVERSIBLE — pg_restore required (C3)")

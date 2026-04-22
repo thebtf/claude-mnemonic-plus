@@ -239,13 +239,15 @@ func (s *Service) handleObservation(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if sess == nil {
-		// Create session on-the-fly with project from request
+		// Create session on-the-fly with project from request.
+		// QueueObservation will auto-initialize the session manager from the DB,
+		// so we only need the database ID here.
 		id, err := s.sessionStore.CreateSDKSession(r.Context(), req.ClaudeSessionID, req.Project, "")
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-		sess, _ = s.sessionStore.GetSessionByID(r.Context(), id)
+		sess = &models.SDKSession{ID: id}
 	}
 
 	// Queue observation with user prompt context (Learning Memory v3 FR-4)

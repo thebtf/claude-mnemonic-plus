@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 'use strict';
 
+const lib = require('./lib');
+
 function buildSearchRequest(project, prompt, cwd, filesBeingEdited) {
   const request = {
     project,
@@ -21,7 +23,7 @@ async function handleUserPrompt() {
 
 if (require.main === module) {
   (async () => {
-    process.stdout.write('');
+    await lib.RunHook('UserPromptSubmit', handleUserPrompt);
   })();
 }
 
