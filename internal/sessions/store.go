@@ -66,14 +66,17 @@ func NewStore(store *gormdb.Store) *Store {
 	return &Store{db: store.GetDB(), rawDB: store.GetRawDB()}
 }
 
-// UpsertSession returns an explicit error because indexed_sessions was removed in v5.
+// UpsertSession returns an explicit unsupported error so REST compatibility handlers
+// can emit a deprecated/disabled response instead of pretending the session was indexed.
 func (s *Store) UpsertSession(_ context.Context, _ map[string]any) error {
 	return unsupportedIndexedSessionsError("upsert session")
 }
 
-// CheckSessionsExist returns an explicit error because indexed_sessions was removed in v5.
+// CheckSessionsExist degrades to an empty result set in v5 so callers that still probe
+// indexed_sessions can continue operating without surfacing a server-internal failure.
+// The practical effect is that every requested session ID is treated as missing.
 func (s *Store) CheckSessionsExist(_ context.Context, _ []string) ([]string, error) {
-	return nil, unsupportedIndexedSessionsError("check sessions exist")
+	return []string{}, nil
 }
 
 // ListSessions returns an explicit error because indexed_sessions was removed in v5.

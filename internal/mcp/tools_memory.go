@@ -122,6 +122,9 @@ func (s *Server) handleStoreMemory(ctx context.Context, args json.RawMessage) (s
 	if resolvedScope == "" {
 		resolvedScope = string(models.ScopeProject)
 	}
+	if resolvedScope != string(models.ScopeProject) && resolvedScope != string(models.ScopeGlobal) {
+		return "", fmt.Errorf("invalid scope %q: must be one of project, global", resolvedScope)
+	}
 
 	if params.Project == "" && !(params.AlwaysInject && resolvedScope == string(models.ScopeGlobal)) {
 		return "", fmt.Errorf("project is required for store_memory in v5 unless always_inject=true with scope=global")
@@ -175,6 +178,13 @@ func (s *Server) handleStoreMemory(ctx context.Context, args json.RawMessage) (s
 
 	ttlDays := computeTTLDays(params.TtlDays, tags)
 	ttlApplied := ttlDays > 0
+	if ttlApplied {
+		ttlTag := fmt.Sprintf("ttl:%d", ttlDays)
+		if !seen[ttlTag] {
+			tags = append(tags, ttlTag)
+			seen[ttlTag] = true
+		}
+	}
 
 	if params.AlwaysInject {
 		if s.behavioralRulesStore == nil {

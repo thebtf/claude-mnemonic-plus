@@ -85,18 +85,8 @@ func (c *deduplicationCache) cleanup() {
 // @Router /api/events/ingest [post]
 func (s *Service) handleIngestEvent(w http.ResponseWriter, r *http.Request) {
 	var req IngestRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "invalid request body: "+err.Error(), http.StatusBadRequest)
-		return
-	}
-
-	if req.ToolName == "" {
-		http.Error(w, "tool_name is required", http.StatusBadRequest)
-		return
-	}
-	if req.SessionID == "" {
-		http.Error(w, "session_id is required", http.StatusBadRequest)
-		return
+	if r.Body != nil {
+		_ = json.NewDecoder(r.Body).Decode(&req)
 	}
 
 	log.Info().
@@ -108,11 +98,11 @@ func (s *Service) handleIngestEvent(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusNotImplemented)
 	_ = json.NewEncoder(w).Encode(map[string]any{
-		"status":        "removed_in_v5",
-		"error":         "event ingest endpoint was removed in v5",
-		"tool_name":     req.ToolName,
-		"session_id":    req.SessionID,
-		"project":       req.Project,
+		"status":         "removed_in_v5",
+		"error":          "event ingest endpoint was removed in v5",
+		"tool_name":      req.ToolName,
+		"session_id":     req.SessionID,
+		"project":        req.Project,
 		"workstation_id": req.WorkstationID,
 	})
 }

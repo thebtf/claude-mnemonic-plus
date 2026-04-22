@@ -26,6 +26,7 @@ type ArchiveRequest struct {
 }
 
 func writeRemovedInV5Error(w http.ResponseWriter, path string) {
+	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusNotImplemented)
 	writeJSON(w, map[string]any{
 		"error":   "removed_in_v5",

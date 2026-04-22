@@ -116,7 +116,7 @@ func (s *Service) handleGetRelatedObservations(w http.ResponseWriter, r *http.Re
 		}
 	}
 
-	relations, err := s.relationStore.GetRelationsWithDetails(r.Context(), id)
+	relations, err := s.relationStore.GetRelationsByObservationID(r.Context(), id)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -124,18 +124,18 @@ func (s *Service) handleGetRelatedObservations(w http.ResponseWriter, r *http.Re
 
 	refs := make([]relatedObservationRef, 0, len(relations))
 	for _, relation := range relations {
-		if relation == nil || relation.Relation == nil || relation.Relation.Confidence < minConfidence {
+		if relation == nil || relation.Confidence < minConfidence {
 			continue
 		}
 
-		relatedID := relation.Relation.SourceID
+		relatedID := relation.SourceID
 		if relatedID == id {
-			relatedID = relation.Relation.TargetID
+			relatedID = relation.TargetID
 		}
 
 		refs = append(refs, relatedObservationRef{
 			ID:         relatedID,
-			Confidence: relation.Relation.Confidence,
+			Confidence: relation.Confidence,
 		})
 	}
 

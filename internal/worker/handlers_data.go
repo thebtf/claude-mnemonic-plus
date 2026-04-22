@@ -49,6 +49,8 @@ func (s *Service) handleGetObservations(w http.ResponseWriter, r *http.Request) 
 		if obsType != "" && string(observation.Type) != obsType {
 			return false
 		}
+		// searchFallbackObservations only returns active observations in v5, so
+		// "status=active" is accepted and any other explicit status yields no matches.
 		if status != "" && status != "active" {
 			return false
 		}
