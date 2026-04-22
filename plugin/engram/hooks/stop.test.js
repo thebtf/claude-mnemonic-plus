@@ -190,14 +190,9 @@ test('handleStop uses Claude session ID for injections and mark-cited endpoints'
   }
 });
 
-test('handleStop does not crash when transcript_path is missing', async () => {
+test('handleStop does not crash when transcript_path is absent', async () => {
   const claudeSessionID = 'stop-missing-transcript-session';
   const numericSessionID = 456;
-  const missingTranscriptPath = path.join(
-    os.tmpdir(),
-    'engram-worktree-like-slug',
-    `${claudeSessionID}.jsonl`
-  );
   const getCalls = [];
   const postCalls = [];
   const uploadCalls = [];
@@ -239,7 +234,7 @@ test('handleStop does not crash when transcript_path is missing', async () => {
           RawInput: '',
           Project: 'engram',
         },
-        { transcript_path: missingTranscriptPath }
+        {}
       );
     });
 

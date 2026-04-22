@@ -86,8 +86,7 @@ function truncateText(text, maxLen) {
   return text.length <= maxLen ? text : text.slice(0, maxLen);
 }
 
-async function parseTranscript(transcriptPath, sessionId) {
-  const resolvedPath = resolveTranscriptPath(transcriptPath, sessionId);
+async function parseTranscript(resolvedPath) {
   if (!resolvedPath) {
     return { lastUser: '', lastAssistant: '', messages: [] };
   }
@@ -314,7 +313,7 @@ async function handleStop(ctx, input) {
       : '';
 
   const resolvedTranscriptPath = resolveTranscriptPath(transcriptPath, claudeSessionID);
-  const { lastUser, lastAssistant, messages } = await parseTranscript(transcriptPath, claudeSessionID);
+  const { lastUser, lastAssistant, messages } = await parseTranscript(resolvedTranscriptPath);
 
   console.error(`[stop] Transcript path: ${transcriptPath}`);
   console.error(`[stop] Last user message length: ${String(lastUser).length}`);
