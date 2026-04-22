@@ -111,6 +111,7 @@ type Service struct {
 	logBuffer              *logbuf.RingBuffer
 	backfillTracker        *backfillTracker
 	grpcServer             *googlegrpc.Server
+	grpcInternalServer     sessionStartContextProvider
 	searchQueryLogStore    *gorm.SearchQueryLogStore
 	retrievalStatsLogStore *gorm.RetrievalStatsLogStore
 	injectionStore         *gorm.InjectionStore
@@ -500,6 +501,7 @@ func (s *Service) initializeAsync() {
 	grpcInternalSrv.SetBus(s.eventBus)
 	s.initMu.Lock()
 	s.grpcServer = grpcSrv
+	s.grpcInternalServer = grpcInternalSrv
 	s.initMu.Unlock()
 
 	s.initMu.Lock()
@@ -851,16 +853,18 @@ func (s *Service) setupRoutes() {
 		r.Get("/api/types", s.handleGetTypes)
 		r.Get("/api/models", s.handleGetModels)
 
-		// Context injection
-		r.Get("/api/context/count", s.handleContextCount)
-		r.Post("/api/context/inject", s.handleContextInject)
-		r.Get("/api/context/inject", s.handleContextInject) // deprecated — use POST
-		r.Get("/api/context/search", s.handleSearchByPrompt)
-		r.Post("/api/context/search", s.handleSearchByPrompt)
-		r.Get("/api/context/files", s.handleFileContext)
-		r.Get("/api/context/by-file", s.handleContextByFile)
-		r.Post("/api/memory/triggers", s.handleMemoryTriggers)
-		r.Post("/api/decisions/search", s.handleSearchDecisions)
+			// Context injection
+			r.Get("/api/context/count", s.handleContextCount)
+			r.Post("/api/context/inject", s.handleContextInject)
+			r.Get("/api/context/inject", s.handleContextInject) // deprecated — use POST
+			r.Post("/api/context/session-start", s.handleSessionStartContextStatic)
+			r.Get("/api/context/session-start", s.handleSessionStartContextStatic)
+			r.Get("/api/context/search", s.handleSearchByPrompt)
+			r.Post("/api/context/search", s.handleSearchByPrompt)
+			r.Get("/api/context/files", s.handleFileContext)
+			r.Get("/api/context/by-file", s.handleContextByFile)
+			r.Post("/api/memory/triggers", s.handleMemoryTriggers)
+			r.Post("/api/decisions/search", s.handleSearchDecisions)
 
 		// Issue tracking routes (agent-issues feature)
 		r.Get("/api/issues", s.handleListIssues)

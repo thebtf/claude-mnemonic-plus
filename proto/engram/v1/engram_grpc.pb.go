@@ -19,11 +19,13 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	EngramService_CallTool_FullMethodName         = "/engram.v1.EngramService/CallTool"
-	EngramService_Initialize_FullMethodName       = "/engram.v1.EngramService/Initialize"
-	EngramService_Ping_FullMethodName             = "/engram.v1.EngramService/Ping"
-	EngramService_SyncProjectState_FullMethodName = "/engram.v1.EngramService/SyncProjectState"
-	EngramService_ProjectEvents_FullMethodName    = "/engram.v1.EngramService/ProjectEvents"
+	EngramService_CallTool_FullMethodName               = "/engram.v1.EngramService/CallTool"
+	EngramService_Initialize_FullMethodName             = "/engram.v1.EngramService/Initialize"
+	EngramService_Ping_FullMethodName                   = "/engram.v1.EngramService/Ping"
+	EngramService_SyncProjectState_FullMethodName       = "/engram.v1.EngramService/SyncProjectState"
+	EngramService_ProjectEvents_FullMethodName          = "/engram.v1.EngramService/ProjectEvents"
+	EngramService_GetSessionStartContext_FullMethodName = "/engram.v1.EngramService/GetSessionStartContext"
+	EngramService_NegotiateVersion_FullMethodName       = "/engram.v1.EngramService/NegotiateVersion"
 )
 
 // EngramServiceClient is the client API for EngramService service.
@@ -50,6 +52,11 @@ type EngramServiceClient interface {
 	// streaming RPC; the stream stays open for the daemon's lifetime.
 	// Delivery is at-least-once; the daemon is responsible for dedup.
 	ProjectEvents(ctx context.Context, in *ProjectEventsRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[ProjectEvent], error)
+	// GetSessionStartContext returns static session-start context entities for a project.
+	// No ranking or LLM filtering is applied; the server returns SQL-backed entities only.
+	GetSessionStartContext(ctx context.Context, in *GetSessionStartContextRequest, opts ...grpc.CallOption) (*GetSessionStartContextResponse, error)
+	// NegotiateVersion validates MAJOR-version compatibility between client and server.
+	NegotiateVersion(ctx context.Context, in *NegotiateVersionRequest, opts ...grpc.CallOption) (*NegotiateVersionResponse, error)
 }
 
 type engramServiceClient struct {
@@ -119,6 +126,26 @@ func (c *engramServiceClient) ProjectEvents(ctx context.Context, in *ProjectEven
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
 type EngramService_ProjectEventsClient = grpc.ServerStreamingClient[ProjectEvent]
 
+func (c *engramServiceClient) GetSessionStartContext(ctx context.Context, in *GetSessionStartContextRequest, opts ...grpc.CallOption) (*GetSessionStartContextResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetSessionStartContextResponse)
+	err := c.cc.Invoke(ctx, EngramService_GetSessionStartContext_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *engramServiceClient) NegotiateVersion(ctx context.Context, in *NegotiateVersionRequest, opts ...grpc.CallOption) (*NegotiateVersionResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(NegotiateVersionResponse)
+	err := c.cc.Invoke(ctx, EngramService_NegotiateVersion_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // EngramServiceServer is the server API for EngramService service.
 // All implementations must embed UnimplementedEngramServiceServer
 // for forward compatibility.
@@ -143,6 +170,11 @@ type EngramServiceServer interface {
 	// streaming RPC; the stream stays open for the daemon's lifetime.
 	// Delivery is at-least-once; the daemon is responsible for dedup.
 	ProjectEvents(*ProjectEventsRequest, grpc.ServerStreamingServer[ProjectEvent]) error
+	// GetSessionStartContext returns static session-start context entities for a project.
+	// No ranking or LLM filtering is applied; the server returns SQL-backed entities only.
+	GetSessionStartContext(context.Context, *GetSessionStartContextRequest) (*GetSessionStartContextResponse, error)
+	// NegotiateVersion validates MAJOR-version compatibility between client and server.
+	NegotiateVersion(context.Context, *NegotiateVersionRequest) (*NegotiateVersionResponse, error)
 	mustEmbedUnimplementedEngramServiceServer()
 }
 
@@ -167,6 +199,12 @@ func (UnimplementedEngramServiceServer) SyncProjectState(context.Context, *SyncP
 }
 func (UnimplementedEngramServiceServer) ProjectEvents(*ProjectEventsRequest, grpc.ServerStreamingServer[ProjectEvent]) error {
 	return status.Error(codes.Unimplemented, "method ProjectEvents not implemented")
+}
+func (UnimplementedEngramServiceServer) GetSessionStartContext(context.Context, *GetSessionStartContextRequest) (*GetSessionStartContextResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetSessionStartContext not implemented")
+}
+func (UnimplementedEngramServiceServer) NegotiateVersion(context.Context, *NegotiateVersionRequest) (*NegotiateVersionResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method NegotiateVersion not implemented")
 }
 func (UnimplementedEngramServiceServer) mustEmbedUnimplementedEngramServiceServer() {}
 func (UnimplementedEngramServiceServer) testEmbeddedByValue()                       {}
@@ -272,6 +310,42 @@ func _EngramService_ProjectEvents_Handler(srv interface{}, stream grpc.ServerStr
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
 type EngramService_ProjectEventsServer = grpc.ServerStreamingServer[ProjectEvent]
 
+func _EngramService_GetSessionStartContext_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetSessionStartContextRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(EngramServiceServer).GetSessionStartContext(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: EngramService_GetSessionStartContext_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(EngramServiceServer).GetSessionStartContext(ctx, req.(*GetSessionStartContextRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _EngramService_NegotiateVersion_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(NegotiateVersionRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(EngramServiceServer).NegotiateVersion(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: EngramService_NegotiateVersion_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(EngramServiceServer).NegotiateVersion(ctx, req.(*NegotiateVersionRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // EngramService_ServiceDesc is the grpc.ServiceDesc for EngramService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -294,6 +368,14 @@ var EngramService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "SyncProjectState",
 			Handler:    _EngramService_SyncProjectState_Handler,
+		},
+		{
+			MethodName: "GetSessionStartContext",
+			Handler:    _EngramService_GetSessionStartContext_Handler,
+		},
+		{
+			MethodName: "NegotiateVersion",
+			Handler:    _EngramService_NegotiateVersion_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{

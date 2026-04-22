@@ -111,6 +111,50 @@ function resolveRequestURL(endpoint) {
   return `${base}${normalizedEndpoint}`;
 }
 
+function getPluginDataDir() {
+  const fromEngram = process.env.ENGRAM_DATA_DIR;
+  if (typeof fromEngram === 'string' && fromEngram.trim() !== '') {
+    return fromEngram.trim();
+  }
+  const fromClaude = process.env.CLAUDE_PLUGIN_DATA;
+  if (typeof fromClaude === 'string' && fromClaude.trim() !== '') {
+    return fromClaude.trim();
+  }
+  return '';
+}
+
+function getSessionStartCachePath(projectSlug) {
+  const baseDir = getPluginDataDir();
+  if (!baseDir || !projectSlug) {
+    return '';
+  }
+  const safeProjectSlug = String(projectSlug).replace(/[^a-zA-Z0-9._-]/g, '_');
+  return path.join(baseDir, 'cache', `session-start-${safeProjectSlug}.json`);
+}
+
+function readJSONFile(filePath) {
+  if (!filePath) {
+    return null;
+  }
+  try {
+    if (!fs.existsSync(filePath)) {
+      return null;
+    }
+    return JSON.parse(fs.readFileSync(filePath, 'utf8'));
+  } catch {
+    return null;
+  }
+}
+
+function writeJSONFile(filePath, value) {
+  if (!filePath) {
+    return;
+  }
+  const parentDir = path.dirname(filePath);
+  fs.mkdirSync(parentDir, { recursive: true });
+  fs.writeFileSync(filePath, JSON.stringify(value, null, 2), 'utf8');
+}
+
 function readAllStdin() {
   return new Promise((resolve) => {
     let data = '';
@@ -666,6 +710,10 @@ function _timeAgo(date) {
 
 module.exports = {
   getServerURL,
+  getPluginDataDir,
+  getSessionStartCachePath,
+  readJSONFile,
+  writeJSONFile,
   ProjectIDWithName,
   LegacyProjectID,
   WorkstationID,

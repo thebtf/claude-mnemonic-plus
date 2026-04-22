@@ -56,12 +56,120 @@ function formatProjectBriefingBlock(projectBriefing) {
     + '\n</project-briefing>\n';
 }
 
+function formatBehaviorRulesBlock(rules) {
+  if (!Array.isArray(rules) || rules.length === 0) {
+    return '';
+  }
+
+  let block = '<user-behavior-rules>\n';
+  block += '# Behavioral Rules (Always Active)\n';
+  block += 'These rules are injected unconditionally. Follow them in every session.\n\n';
+
+  for (const rule of rules) {
+    if (!rule || typeof rule !== 'object') continue;
+    const title = escapeXmlTags(getString(rule.title) || getString(rule.content));
+    const narrative = escapeXmlTags(getString(rule.narrative) || getString(rule.content));
+    if (title !== '') {
+      block += `## ${title}\n`;
+    }
+    if (narrative !== '') {
+      block += `${narrative}\n`;
+    }
+    block += formatFactsLine(rule.facts);
+    block += '\n';
+  }
+
+  block += '</user-behavior-rules>\n';
+  return block;
+}
+
+function formatMemoriesBlock(memories) {
+  if (!Array.isArray(memories) || memories.length === 0) {
+    return '';
+  }
+
+  let block = '<engram-static-memories>\n';
+  block += '# Recent Memory\n';
+  block += 'Static session-start memories from Engram. Prefer using these before rediscovering context.\n\n';
+
+  for (const memory of memories) {
+    if (!memory || typeof memory !== 'object') continue;
+    const content = escapeXmlTags(getString(memory.content));
+    if (content === '') continue;
+    block += `- ${content}\n`;
+  }
+
+  block += '</engram-static-memories>\n';
+  return block;
+}
+
+function buildSessionStartContext(payload, project) {
+  const issues = payload && Array.isArray(payload.issues) ? payload.issues : [];
+  const rules = payload && Array.isArray(payload.rules) ? payload.rules : [];
+  const memories = payload && Array.isArray(payload.memories) ? payload.memories : [];
+  const blocks = [];
+
+  if (issues.length > 0) {
+    blocks.push(lib.formatIssuesBlock(issues, project));
+  }
+  const behaviorRulesBlock = formatBehaviorRulesBlock(rules);
+  if (behaviorRulesBlock) {
+    blocks.push(behaviorRulesBlock.trimEnd());
+  }
+  const memoriesBlock = formatMemoriesBlock(memories);
+  if (memoriesBlock) {
+    blocks.push(memoriesBlock.trimEnd());
+  }
+
+  return blocks.filter(Boolean).join('\n') + (blocks.length > 0 ? '\n' : '');
+}
+
+function getSessionStartCachePayload(project) {
+  const cachePath = lib.getSessionStartCachePath(project);
+  const payload = lib.readJSONFile(cachePath);
+  if (!payload || typeof payload !== 'object') {
+    return { cachePath, payload: null };
+  }
+  return { cachePath, payload };
+}
+
+function cacheSessionStartPayload(project, payload) {
+  const cachePath = lib.getSessionStartCachePath(project);
+  if (!cachePath) {
+    return;
+  }
+  lib.writeJSONFile(cachePath, payload);
+}
+
+function formatStaleCacheBanner(generatedAt) {
+  const stamp = getString(generatedAt).trim();
+  const suffix = stamp !== '' ? ` Cached payload generated at ${stamp}.` : '';
+  return `<engram-session-start-stale>\nWARNING: Engram session-start context is stale because live fetch failed.${suffix}\n</engram-session-start-stale>\n`;
+}
+
+function formatNoCacheBanner() {
+  return '<engram-session-start-unavailable>\nWARNING: Engram session-start context is unavailable and no cache is present. Continuing without injected static context.\n</engram-session-start-unavailable>\n';
+}
+
+async function fetchSessionStartPayload(project) {
+  return lib.requestGet(`/api/context/session-start?project=${encodeURIComponent(project)}`, 5000);
+}
+
+function buildCachedSessionStartPayload(overrides = {}) {
+  return {
+    issues: [],
+    rules: [],
+    memories: [],
+    generated_at: '2026-04-22T12:00:00Z',
+    ...overrides,
+  };
+}
+
 async function handleSessionStart(ctx, input) {
   if (!process.env.ENGRAM_URL) {
     return '<engram-setup>\nEngram plugin is installed but not configured.\nSet environment variables to connect to your Engram server:\n  export ENGRAM_URL=http://your-server:37777/mcp\n  export ENGRAM_API_TOKEN=your-token\nThen restart Claude Code.\n</engram-setup>';
   }
 
-  const cwd = typeof ctx.CWD === 'string' ? ctx.CWD : '';
   const project = typeof ctx.Project === 'string' ? ctx.Project : '';
 
   // Crash-safe session tracking (gstack-insights FR-8)
@@ -96,149 +204,40 @@ async function handleSessionStart(ctx, input) {
     }, 3000).catch(() => {});
   }
 
-  const legacyProject = typeof ctx.LegacyProject === 'string' ? ctx.LegacyProject : '';
-  const gitRemote = typeof ctx.GitRemote === 'string' ? ctx.GitRemote : '';
-  const relativePath = typeof ctx.RelativePath === 'string' ? ctx.RelativePath : '';
+  const { cachePath, payload: cachedPayload } = getSessionStartCachePayload(project);
 
-  const ccSessionID = typeof ctx.SessionID === 'string' ? ctx.SessionID : '';
-  const filesBeingEdited = ccSessionID ? lib.getSessionFiles(ccSessionID) : [];
-  const injectURL = buildInjectURL(
-    project,
-    cwd,
-    ccSessionID,
-    legacyProject,
-    gitRemote,
-    relativePath,
-    filesBeingEdited,
-  );
-
-  // NOTE: inject GET is still performed — result.always_inject is needed for behavioral rules.
-  // Noisy fields (observations, full_count, project_briefing, guidance) are fetched but NOT rendered.
-  let result = {};
   try {
-    result = await lib.requestGet(injectURL);
+    const payload = await fetchSessionStartPayload(project);
+    cacheSessionStartPayload(project, payload);
+
+    const rules = Array.isArray(payload && payload.rules) ? payload.rules : [];
+    const issues = Array.isArray(payload && payload.issues) ? payload.issues : [];
+    const memories = Array.isArray(payload && payload.memories) ? payload.memories : [];
+
+    if (issues.length > 0) {
+      console.error(`[engram] Injecting ${issues.length} active issues for ${project}`);
+      const openIds = issues.filter((issue) => issue && issue.status === 'open').map((issue) => issue.id);
+      if (openIds.length > 0) {
+        lib.requestPost('/api/issues/acknowledge', { ids: openIds }, 3000).catch(() => {});
+      }
+    }
+    if (rules.length > 0) {
+      console.error(`[engram] Injected ${rules.length} static behavioral rules`);
+    }
+    if (memories.length > 0) {
+      console.error(`[engram] Injected ${memories.length} static memories`);
+    }
+
+    return buildSessionStartContext(payload, project);
   } catch (error) {
-    console.error(`[engram] Warning: context fetch failed: ${error.message}`);
-    return '';
-  }
-
-  // Log strategy for diagnostics only (not rendered)
-  if (result && result.strategy) {
-    console.error(`[session-start] Injection strategy: ${result.strategy}`);
-  }
-
-  // Fetch open/acknowledged/reopened issues targeting this project (agent-issues FR-5)
-  let issuesBlock = '';
-  let resolvedIssuesBlock = '';
-  if (project) {
-    try {
-      // Target issues: issues assigned to this project (open, acknowledged, reopened — NOT closed/rejected)
-      const issuesResult = await lib.requestGet(
-        `/api/issues?project=${encodeURIComponent(project)}&status=open,acknowledged,reopened&limit=10`
-      );
-      const issues = Array.isArray(issuesResult.issues) ? issuesResult.issues : [];
-      if (issues.length > 0) {
-        issuesBlock = lib.formatIssuesBlock(issues, project);
-        console.error(`[engram] Injecting ${issues.length} active issues for ${project}`);
-
-        // Auto-acknowledge: transition open → acknowledged (fire-and-forget, Constitution #3)
-        const openIds = issues.filter(i => i.status === 'open').map(i => i.id);
-        if (openIds.length > 0) {
-          lib.requestPost('/api/issues/acknowledge', { ids: openIds }, 3000).catch(() => {});
-        }
-      }
-
-      // Source notification: issues created BY this project that were resolved (lifecycle-v2 FR-1)
-      const sevenDaysAgoMs = Date.now() - 7 * 24 * 60 * 60 * 1000;
-      const resolvedResult = await lib.requestGet(
-        `/api/issues?source_project=${encodeURIComponent(project)}&status=resolved&resolved_since=${sevenDaysAgoMs}&limit=5`
-      );
-      const resolvedIssues = Array.isArray(resolvedResult.issues) ? resolvedResult.issues : [];
-      if (resolvedIssues.length > 0) {
-        resolvedIssuesBlock = lib.formatResolvedIssuesBlock(resolvedIssues, project);
-        console.error(`[engram] Injecting ${resolvedIssues.length} resolved issues from ${project}`);
-      }
-    } catch (err) {
-      console.error(`[engram] Warning: issue fetch failed: ${err.message}`);
+    console.error(`[engram] Warning: static session-start fetch failed: ${error.message}`);
+    if (cachedPayload) {
+      console.error(`[engram] Using cached session-start payload from ${cachePath}`);
+      return formatStaleCacheBanner(cachedPayload.generated_at) + buildSessionStartContext(cachedPayload, project);
     }
+    console.error('[engram] No cached session-start payload available');
+    return formatNoCacheBanner();
   }
-
-  // Always-inject tier: unconditional behavioral rules (FR-1, FR-6)
-  const alwaysInject = Array.isArray(result.always_inject) ? result.always_inject : [];
-  let contextBuilder = '';
-
-  // Issues blocks come first (before behavioral rules and memory)
-  if (issuesBlock) {
-    contextBuilder += issuesBlock + '\n';
-  }
-  if (resolvedIssuesBlock) {
-    contextBuilder += resolvedIssuesBlock + '\n';
-  }
-  if (alwaysInject.length > 0) {
-    contextBuilder += '<user-behavior-rules>\n';
-    contextBuilder += '# Behavioral Rules (Always Active)\n';
-    contextBuilder += 'These rules are injected unconditionally. Follow them in every session.\n\n';
-    for (const rule of alwaysInject) {
-      if (!rule || typeof rule !== 'object') continue;
-      const rTitle = escapeXmlTags(getString(rule.title));
-      const rNarrative = escapeXmlTags(getString(rule.narrative));
-      contextBuilder += `## ${rTitle}\n`;
-      if (rNarrative !== '') {
-        contextBuilder += `${rNarrative}\n`;
-      }
-      contextBuilder += formatFactsLine(rule.facts);
-      contextBuilder += '\n';
-    }
-    contextBuilder += '</user-behavior-rules>\n';
-    console.error(`[engram] Injected ${alwaysInject.length} always-inject behavioral rules`);
-  }
-
-  // NOTE: <engram-context>, <project-briefing>, and <engram-guidance> sections are intentionally
-  // disabled (v4.4.1 tactical fix #16). They produced noise rather than relevant context.
-  // The inject GET above is kept because result.always_inject still needs it.
-  // Re-enable by restoring the rendering blocks once inject pipeline is redesigned (Phase 2).
-
-  // Mark injected IDs — scoped to always_inject ONLY (fire-and-forget).
-  // observations and guidance are not rendered so must not be logged as injected
-  // (would produce false positives in citation tracking).
-  const ids = [];
-  for (const obs of alwaysInject) {
-    if (obs && typeof obs === 'object' && typeof obs.id === 'number' && obs.id > 0) {
-      ids.push(obs.id);
-    }
-  }
-  if (ids.length > 0) {
-    // Try to resolve Claude session ID to DB session ID for per-session tracking
-    let dbSessionId = null;
-    if (ctx.SessionID) {
-      try {
-        const sessionResult = await lib.requestGet(
-          `/api/sessions?claudeSessionId=${encodeURIComponent(ctx.SessionID)}`,
-          3000
-        );
-        const candidateId = Number(sessionResult && sessionResult.id);
-        if (Number.isFinite(candidateId) && candidateId > 0) {
-          dbSessionId = candidateId;
-        }
-      } catch {
-        // Session may not exist yet — fall through to global-only tracking
-      }
-    }
-
-    if (dbSessionId !== null) {
-      // Per-session endpoint does dual-write: session table + global injection_count
-      lib.requestPost(`/api/sessions/${dbSessionId}/mark-injected`, { ids }, 3000).catch((err) => {
-        console.error(`[engram] session mark-injected failed: ${err.message}`);
-      });
-    } else {
-      // Fallback: global-only tracking when session isn't in DB yet
-      lib.requestPost('/api/observations/mark-injected', { ids }, 3000).catch((err) => {
-        console.error(`[engram] mark-injected failed: ${err.message}`);
-      });
-    }
-  }
-
-  return contextBuilder;
 }
 
 if (require.main === module) {
@@ -249,6 +248,7 @@ if (require.main === module) {
 
 module.exports = {
   buildInjectURL,
+  buildCachedSessionStartPayload,
   formatProjectBriefingBlock,
   handleSessionStart,
 };

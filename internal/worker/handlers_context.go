@@ -11,7 +11,10 @@ import (
 	"time"
 
 	"github.com/rs/zerolog/log"
+	"google.golang.org/grpc/codes"
+	grpcstatus "google.golang.org/grpc/status"
 	"github.com/thebtf/engram/internal/db/gorm"
+	pb "github.com/thebtf/engram/proto/engram/v1"
 	"github.com/thebtf/engram/internal/worker/sdk"
 	"github.com/thebtf/engram/pkg/models"
 )
@@ -19,6 +22,10 @@ import (
 // agentEffectivenessThreshold is the minimum number of agent-specific injections required
 // to substitute the global effectiveness score with the agent-specific one.
 const agentEffectivenessThreshold = 10
+
+type sessionStartContextProvider interface {
+	GetSessionStartContext(context.Context, *pb.GetSessionStartContextRequest) (*pb.GetSessionStartContextResponse, error)
+}
 
 // applyStrategy reorders or filters observations according to the named injection strategy.
 // agentStats is an optional map of observation_id -> AgentObservationStat used by the
@@ -609,6 +616,201 @@ func applyActiveVersions(ctx context.Context, vs *gorm.VersionStore, observation
 	}
 
 	return result
+}
+
+type sessionStartCompatibilityResponse struct {
+	Issues      []map[string]any `json:"issues"`
+	Rules       []map[string]any `json:"rules"`
+	Memories    []map[string]any `json:"memories"`
+	GeneratedAt string           `json:"generated_at"`
+}
+
+func sessionStartIssuesToMaps(issues []*pb.SessionStartIssue) []map[string]any {
+	result := make([]map[string]any, 0, len(issues))
+	for _, issue := range issues {
+		if issue == nil {
+			continue
+		}
+		entry := map[string]any{
+			"id":             issue.GetId(),
+			"title":          issue.GetTitle(),
+			"body":           issue.GetBody(),
+			"status":         issue.GetStatus(),
+			"priority":       issue.GetPriority(),
+			"type":           issue.GetType(),
+			"source_project": issue.GetSourceProject(),
+			"target_project": issue.GetTargetProject(),
+			"source_agent":   issue.GetSourceAgent(),
+			"labels":         append([]string(nil), issue.GetLabels()...),
+			"comment_count":  issue.GetCommentCount(),
+		}
+		if ts := issue.GetAcknowledgedAt(); ts != nil {
+			entry["acknowledged_at"] = ts.AsTime().UTC().Format(time.RFC3339)
+		}
+		if ts := issue.GetResolvedAt(); ts != nil {
+			entry["resolved_at"] = ts.AsTime().UTC().Format(time.RFC3339)
+		}
+		if ts := issue.GetReopenedAt(); ts != nil {
+			entry["reopened_at"] = ts.AsTime().UTC().Format(time.RFC3339)
+		}
+		if ts := issue.GetClosedAt(); ts != nil {
+			entry["closed_at"] = ts.AsTime().UTC().Format(time.RFC3339)
+		}
+		if ts := issue.GetCreatedAt(); ts != nil {
+			entry["created_at"] = ts.AsTime().UTC().Format(time.RFC3339)
+		}
+		if ts := issue.GetUpdatedAt(); ts != nil {
+			entry["updated_at"] = ts.AsTime().UTC().Format(time.RFC3339)
+		}
+		result = append(result, entry)
+	}
+	return result
+}
+
+func sessionStartRulesToMaps(rules []*pb.SessionStartRule) []map[string]any {
+	result := make([]map[string]any, 0, len(rules))
+	for _, rule := range rules {
+		if rule == nil {
+			continue
+		}
+		entry := map[string]any{
+			"id":         rule.GetId(),
+			"project":    rule.GetProject(),
+			"content":    rule.GetContent(),
+			"edited_by":  rule.GetEditedBy(),
+			"priority":   rule.GetPriority(),
+			"version":    rule.GetVersion(),
+			"narrative":  rule.GetContent(),
+			"title":      rule.GetContent(),
+			"facts":      []string{},
+		}
+		if ts := rule.GetCreatedAt(); ts != nil {
+			entry["created_at"] = ts.AsTime().UTC().Format(time.RFC3339)
+		}
+		if ts := rule.GetUpdatedAt(); ts != nil {
+			entry["updated_at"] = ts.AsTime().UTC().Format(time.RFC3339)
+		}
+		result = append(result, entry)
+	}
+	return result
+}
+
+func sessionStartMemoriesToMaps(memories []*pb.SessionStartMemory) []map[string]any {
+	result := make([]map[string]any, 0, len(memories))
+	for _, memory := range memories {
+		if memory == nil {
+			continue
+		}
+		entry := map[string]any{
+			"id":           memory.GetId(),
+			"project":      memory.GetProject(),
+			"content":      memory.GetContent(),
+			"tags":         append([]string(nil), memory.GetTags()...),
+			"source_agent": memory.GetSourceAgent(),
+			"edited_by":    memory.GetEditedBy(),
+			"version":      memory.GetVersion(),
+		}
+		if ts := memory.GetCreatedAt(); ts != nil {
+			entry["created_at"] = ts.AsTime().UTC().Format(time.RFC3339)
+		}
+		if ts := memory.GetUpdatedAt(); ts != nil {
+			entry["updated_at"] = ts.AsTime().UTC().Format(time.RFC3339)
+		}
+		result = append(result, entry)
+	}
+	return result
+}
+
+// handleSessionStartContextStatic godoc
+// @Summary Get static session-start context
+// @Description Returns static session-start context sourced from the server gRPC implementation: active issues, behavioral rules, recent memories, and generated_at.
+// @Tags Context
+// @Produce json
+// @Security ApiKeyAuth
+// @Param project query string false "Project slug (required)"
+// @Param body body object false "POST body: {project, memories_limit, issues_limit}"
+// @Success 200 {object} sessionStartCompatibilityResponse
+// @Failure 400 {string} string "project required"
+// @Failure 500 {string} string "internal error"
+// @Router /api/context/session-start [post]
+// @Router /api/context/session-start [get]
+func (s *Service) handleSessionStartContextStatic(w http.ResponseWriter, r *http.Request) {
+	project := strings.TrimSpace(r.URL.Query().Get("project"))
+	memoriesLimit := int32(0)
+	issuesLimit := int32(0)
+
+	if r.Method == http.MethodPost && r.Body != nil {
+		var body struct {
+			Project       string `json:"project"`
+			MemoriesLimit int32  `json:"memories_limit"`
+			IssuesLimit   int32  `json:"issues_limit"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			http.Error(w, "Invalid JSON: "+err.Error(), http.StatusBadRequest)
+			return
+		}
+		if strings.TrimSpace(body.Project) != "" {
+			project = strings.TrimSpace(body.Project)
+		}
+		memoriesLimit = body.MemoriesLimit
+		issuesLimit = body.IssuesLimit
+	}
+
+	if project == "" {
+		http.Error(w, "project required", http.StatusBadRequest)
+		return
+	}
+	if err := ValidateProjectName(project); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	s.initMu.RLock()
+	grpcSrv := s.grpcInternalServer
+	s.initMu.RUnlock()
+	if grpcSrv == nil {
+		http.Error(w, "session-start service unavailable", http.StatusServiceUnavailable)
+		return
+	}
+
+	resp, err := grpcSrv.GetSessionStartContext(r.Context(), &pb.GetSessionStartContextRequest{
+		Project:       project,
+		MemoriesLimit: memoriesLimit,
+		IssuesLimit:   issuesLimit,
+	})
+	if err != nil {
+		if st, ok := grpcstatus.FromError(err); ok {
+			http.Error(w, st.Message(), grpcCodeToHTTP(st.Code()))
+			return
+		}
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	generatedAt := ""
+	if ts := resp.GetGeneratedAt(); ts != nil {
+		generatedAt = ts.AsTime().UTC().Format(time.RFC3339)
+	}
+
+	writeJSON(w, sessionStartCompatibilityResponse{
+		Issues:      sessionStartIssuesToMaps(resp.GetIssues()),
+		Rules:       sessionStartRulesToMaps(resp.GetRules()),
+		Memories:    sessionStartMemoriesToMaps(resp.GetMemories()),
+		GeneratedAt: generatedAt,
+	})
+}
+
+func grpcCodeToHTTP(code codes.Code) int {
+	switch code {
+	case codes.InvalidArgument:
+		return http.StatusBadRequest
+	case codes.NotFound:
+		return http.StatusNotFound
+	case codes.Unavailable:
+		return http.StatusServiceUnavailable
+	default:
+		return http.StatusInternalServerError
+	}
 }
 
 // handleContextInject godoc
