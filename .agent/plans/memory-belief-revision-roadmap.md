@@ -32,9 +32,11 @@ Minimum additive schema for P0:
 
 Implementation intent for this phase:
 - add migration(s) for the new columns,
+- update the GORM `Memory` model and the memory_store row <-> model mapping for every new field,
 - backfill safe defaults for existing rows where required,
 - keep read paths tolerant of null or default values,
 - define initial status vocabulary and lifecycle semantics,
+- document DB defaults, constraints, and first-pass indexes for the new fields,
 - ensure retrieval-time decay remains a computed concept only.
 
 ### Exit Criteria
@@ -53,7 +55,7 @@ Introduce bounded write-time candidate lookup and classify new memory writes int
 
 Target behavior:
 - retrieve top relevant existing memories for a new write,
-- classify the write as `ADD`, `NOOP`, `UPDATE`, or `INVALIDATE`,
+- classify the write as `ADD`, `NOOP`, `SUPERSEDE`, or `INVALIDATE`,
 - create lineage through `supersedes_id` when a new memory supersedes an older one,
 - transition older memory state using `status`, `status_reason`, and `valid_until` rather than deleting it,
 - initialize `confidence_score`, `source_type`, `source_ref`, and `last_confirmed_at` consistently.
@@ -65,10 +67,11 @@ This phase should stay conservative:
 
 ### Exit Criteria
 
-- The write path can perform at least `ADD`, `NOOP`, and one revision path (`UPDATE` or `INVALIDATE`) reliably.
+- The write path can perform at least `ADD`, `NOOP`, and one revision path (`SUPERSEDE` or `INVALIDATE`) reliably.
 - Near-duplicates no longer create uncontrolled append-only growth.
 - Superseded memories remain stored and structurally linked to the newer belief.
 - Invalidated beliefs close their trust window without being deleted.
+- Query plans for candidate lookup and supersession traversal are reviewed and remain bounded by the planned indexes rather than regressing into full-table scans.
 - Response extensions, if any, remain backward-compatible.
 
 ## Phase 2 — Recall Scoring with Temporal Validity + Decay
@@ -97,6 +100,7 @@ Behavioral goals:
 - Retrieval-time decay is fully computed and not persisted.
 - Expired or superseded memories no longer compete equally with current beliefs.
 - Existing recall APIs remain backward-compatible.
+- Index usage / query plans for the default recall path are checked and match the intended active-belief retrieval strategy.
 - The ranking formula is inspectable enough to support debugging and tuning.
 
 ## Phase 3 — Re-Verification and Manual Sweep Hooks
