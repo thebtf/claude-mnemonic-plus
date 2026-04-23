@@ -15,29 +15,23 @@
 
 AI coding agents forget everything between sessions. Every new conversation starts from zero — past decisions, bug fixes, architectural choices, and learned patterns are lost. You waste time re-explaining context, and agents repeat the same mistakes.
 
-Engram fixes this. It captures observations from coding sessions, stores them in PostgreSQL with vector embeddings, and automatically injects relevant memories into new sessions. One server, multiple workstations, zero context loss.
+Engram fixes this by keeping only the memory primitives that proved reliable in production: explicit issues, documents, memories, behavioral rules, credentials, and API tokens. One server, multiple workstations, zero context loss.
 
-Since learning-memory-v4, context injection treats **silence as valid**: when no observation passes the relevance gate, Engram returns an empty relevant-memory block instead of force-filling the prompt with top-importance noise. The inject path also defaults to the **unified retrieval pipeline** (`ENGRAM_INJECT_UNIFIED=true`), so inject and search now share the same scoring/filtering semantics.
+In v5.0.0, session-start inject is simplified to a static composite payload: open issues, always-inject behavioral rules, and recent memories. The old dynamic relevance, graph, reranking, and extraction stack is gone from the main product path.
 
-**7 consolidated MCP tools** replace 61 legacy tools, cutting context window usage by over 80%. Hybrid search combines full-text, vector similarity, and BM25 with cross-encoder reranking to surface exactly the memories that matter.
+A reduced static-first MCP surface remains for the surviving entity model, keeping context usage lean while preserving the workflows that actually worked.
 <!-- redoc:end:intro -->
 
 ---
 
 <!-- redoc:start:whats-new -->
-## What's New in v4.0.0
+## What's New in v5.0.0
 
 | Version | Highlight |
 |---------|-----------|
-| **v4.0.0** | Daemon Architecture — muxcore engine, gRPC transport, local persistent daemon, auto-binary plugin |
-| **v3.8.0** | Maintenance Observability — Monitor page with real-time progress, SSE events, Configuration panel |
-| **v3.7.1** | Issue types, multilingual FTS, markdown rendering, operator issue creation |
-| **v3.6.0** | Learning Memory v4 — unified retrieval pipeline, adaptive thresholds, typed search lanes |
-| **v3.5.0** | Hit rate analytics, file staleness detection, entity extraction, wiki generation |
-| **v3.4.0** | Cross-project issue tracker — agents file bugs against other agents |
-| **v3.0.0** | Write-merge — LLM-powered observation deduplication on store path |
-| **v2.4.0** | LLM-Driven Memory Extraction — `store(action="extract")` from raw content |
-| **v2.1.0** | MCP tool consolidation — 61 to 7 primary tools, >80% context window reduction |
+| **v5.0.0** | Cleaned Baseline — static-only storage, observations split, session-start gRPC + cache fallback |
+| **v4.4.0** | Loom tenant — background task execution and daemon-side project event bridge |
+| **v4.0.0** | Daemon architecture — muxcore engine, gRPC transport, local persistent daemon, auto-binary plugin |
 
 See [Releases](https://github.com/thebtf/engram/releases) for full changelog.
 <!-- redoc:end:whats-new -->
@@ -47,7 +41,7 @@ See [Releases](https://github.com/thebtf/engram/releases) for full changelog.
 <!-- redoc:start:architecture -->
 ## Architecture
 
-Single server on port `37777` serves the HTTP REST API, gRPC MCP service (via cmux), Vue 3 dashboard, and background workers. Each workstation runs a local daemon that connects to the server via gRPC. Multiple Claude Code sessions share one daemon.
+Single server on port `37777` serves the HTTP REST API, gRPC service (via cmux), Vue 3 dashboard, and the static storage/query surface. Each workstation runs a local daemon that connects to the server via gRPC. Multiple Claude Code sessions share one daemon.
 
 ```mermaid
 graph TB
@@ -69,25 +63,21 @@ graph TB
     subgraph "Engram Server :37777"
         Server[Worker]
         Server --> |HTTP API| API[REST Endpoints]
-        Server --> |MCP| MCP_T["SSE + Streamable HTTP"]
+        Server --> |gRPC| GRPC[Static session-start + tool bridge]
         Server --> |Web| Dash["Vue 3 Dashboard"]
-        Server --> |Background| BG["Summarizer + Insights"]
     end
 
-    Server --> PG[(PostgreSQL 17\n+ pgvector)]
-    Server -.-> LLM["LLM API\n(extraction/summarization)"]
-    Server -.-> EMB["Embedding API"]
-    Server -.-> RR["Reranker API"]
+    Server --> PG[(PostgreSQL 17)]
 ```
 
 **Server** (Docker on remote host / Unraid / NAS):
-- PostgreSQL 17 with pgvector (HNSW cosine index)
-- Worker — HTTP API, MCP SSE, MCP Streamable HTTP (`POST /mcp`), Vue 3 dashboard, consolidation scheduler, periodic summarizer
+- PostgreSQL 17
+- Worker — HTTP API, gRPC, Vue 3 dashboard, static entity stores
 
 **Client** (each workstation):
-- Hooks — capture observations from Claude Code sessions (11 lifecycle hooks)
-- MCP Plugin — connects Claude Code to the remote server
-- Slash commands — `/retro`, `/stats`, `/cleanup`, `/export`, `/setup`, `/doctor`, `/restart`
+- Hooks — session-start, session-end, and related Claude Code lifecycle integrations
+- MCP Plugin — connects Claude Code to the local daemon / server bridge
+- Slash commands — `/setup`, `/doctor`, `/restart` and memory-related workflows
 <!-- redoc:end:architecture -->
 
 ---
@@ -96,38 +86,27 @@ graph TB
 ## Features
 
 ### Search and Retrieve
-- **Hybrid search** — tsvector full-text + pgvector cosine similarity + BM25, fused with Reciprocal Rank Fusion
-- **Cross-encoder reranking** — API-based reranker for precision
-- **HyDE query expansion** — hypothetical document embeddings for better recall
-- **Knowledge graph** — 17 relation types, optional FalkorDB backend, visual explorer
-- **Preset queries** — `decisions`, `changes`, `how_it_works` for common lookups
+- **Static session-start payload** — issues + behavioral rules + memories via gRPC `GetSessionStartContext`
+- **Project-scoped memory recall** — simple SQL-backed retrieval for static memories
+- **Document search** — versioned documents and collection-backed search remain available
 
 ### Store and Organize
-- **LLM-driven extraction** — feed raw content, get structured observations (ADR-005)
-- **Reasoning traces** — System 2 Memory with structured chains and quality scores (ADR-003)
-- **Versioned documents** — collections with history, comments, and semantic search
+- **Memories** — explicit project-scoped notes in the `memories` table
+- **Behavioral rules** — always-inject guidance in the `behavioral_rules` table
+- **Versioned documents** — collections with history and comments
 - **Encrypted vault** — AES-256-GCM credential storage with scoped access
-- **Observation merging** — deduplicate and consolidate related memories
-
-### Consolidate and Maintain
-- **Memory decay** — daily exponential decay with access frequency boost
-- **Creative associations** — discovers CONTRADICTS, EXPLAINS, SHARES_THEME relations
-- **Quarterly forgetting** — archives low-relevance observations (protected types exempt)
-- **Periodic summarizer** — server-side pattern insight generation, no client dependency
-- **Importance scoring** — type-weighted scoring with concept, feedback, and retrieval bonuses
+- **Cross-project issues** — explicit operational coordination between agents/projects
 
 ### Resilience and Operations
-- **Embedding resilience** — 4-state circuit breaker with auto-recovery (ADR-004)
+- **Session-start cache fallback** — `${ENGRAM_DATA_DIR}/cache/session-start-{project-slug}.json` is used when the server is temporarily unavailable
+- **Version negotiation** — explicit major-version compatibility checks on the session-start path
 - **Config hot-reload** — change settings without restart
-- **Token budgeting** — context injection respects configurable token limits
-- **Closed-loop learning** — A/B injection strategies with outcome tracking
-- **Pre-edit guardrails** — recall by_file before modifications
+- **Graceful daemon restart** — binary swap and control socket flow remain in place
 
 ### Dashboard and UX
-- **Vue 3 dashboard** — 15 views: observations, search, graph, patterns, sessions, analytics, vault, learning, system health
-- **7 slash commands** — `/retro`, `/stats`, `/cleanup`, `/export`, `/setup`, `/doctor`, `/restart`
-- **11 lifecycle hooks** — session-start through stop
-- **Multi-workstation isolation** — workstation ID scoping with cross-workstation search
+- **Vue 3 dashboard** — focused on the surviving static entity surface
+- **Lifecycle hooks** — session-start / session-end and related integrations remain installed
+- **Multi-workstation support** — one server, multiple local daemons, shared static memory surface
 <!-- redoc:end:features -->
 
 ---
@@ -135,15 +114,12 @@ graph TB
 <!-- redoc:start:use-cases -->
 ## Use Cases
 
-- **Context continuity** — Start a new session and automatically recall relevant decisions, patterns, and prior work
-- **Silence over noise** — if nothing is relevant, inject returns an empty relevant-memory block instead of filler observations
-- **Unified inject/search semantics** — inject now uses the same retrieval path as search by default (`ENGRAM_INJECT_UNIFIED=true`)
-- **Architectural memory** — Query past design decisions before making new ones
-- **Pre-edit awareness** — Check what is known about a file before modifying it
-- **Pattern detection** — Surface recurring patterns across sessions and workstations
-- **Team knowledge sharing** — Multiple workstations sharing one memory server
-- **Credential management** — Store and retrieve API keys and secrets without .env files
-- **Session retrospectives** — Analyze past sessions for productivity insights
+- **Context continuity** — start a new session and receive a static session-start block with active issues, behavioral rules, and recent memories
+- **Offline fallback** — if the server is temporarily unavailable, the client can reuse the last successful session-start payload with a visible staleness banner
+- **Architectural memory** — query explicit memories and documents before making design changes
+- **Operational coordination** — agents file and resolve cross-project issues explicitly
+- **Credential management** — store and retrieve API keys and secrets without `.env` files
+- **Multi-workstation sharing** — multiple local daemons connect to one shared Engram server
 <!-- redoc:end:use-cases -->
 
 ---
@@ -256,7 +232,7 @@ The daemon starts automatically on first use. Multiple Claude Code sessions shar
 
 If not using the plugin, configure MCP directly in `~/.claude/settings.json`:
 
-#### Stdio (v4+ recommended)
+#### Stdio (v5 recommended)
 
 ```json
 {
@@ -274,29 +250,29 @@ Requires Go 1.25+ and Node.js (for dashboard).
 
 ```bash
 git clone https://github.com/thebtf/engram.git && cd engram
-make build    # builds dashboard + worker + mcp binaries
-make install  # installs plugin + starts worker
+make build    # builds dashboard + daemon + release assets
+make install  # installs plugin + starts daemon
 ```
 <!-- redoc:end:installation -->
 
 ---
 
 <!-- redoc:start:upgrading -->
-## Upgrading from v1.x to v2.x
+## Upgrading to v5.0.0
 
-**Tool consolidation:** 61 legacy tools are consolidated into 7 primary tools. Legacy tool names still work as dispatch aliases but are no longer listed in `tools/list`. Update your workflows to the new API:
+v5.0.0 is a **breaking cleanup release**.
 
-| Legacy Tool | v2.x Equivalent |
-|-------------|-----------------|
-| `search`, `decisions`, `how_it_works`, `find_by_file`, ... | `recall(action="search")`, `recall(action="preset", preset="decisions")`, etc. |
-| `edit_observation`, `merge_observations`, ... | `store(action="edit")`, `store(action="merge")`, etc. |
-| `get_memory_stats`, `bulk_delete_observations`, ... | `admin(action="stats")`, `admin(action="bulk_delete")`, etc. |
+What changed:
+- Engram now uses a static-only storage model for its primary runtime path
+- session-start inject is based on static issues + behavioral rules + memories
+- the old dynamic learning / graph / reranking / extraction stack is no longer part of the main product path
+- client and server now negotiate major-version compatibility for the session-start path
 
-**New environment variables:**
-- `ENGRAM_LLM_URL` / `ENGRAM_LLM_API_KEY` / `ENGRAM_LLM_MODEL` — for LLM-driven extraction
-- `ENGRAM_ENCRYPTION_KEY` — vault encryption (hex-encoded AES-256)
-- `ENGRAM_GRAPH_PROVIDER` — `falkordb` or empty (in-memory)
-- `ENGRAM_CONSOLIDATION_ENABLED` / `ENGRAM_SMART_GC_ENABLED` — consolidation features
+Upgrade steps:
+1. upgrade the plugin to `5.0.0`
+2. upgrade the daemon to `v5.0.0`
+3. restart Claude Code and the daemon
+4. verify plugin update detection and session-start cache fallback
 
 **Docker image:** Pull the latest from `ghcr.io/thebtf/engram:latest`. Database migrations run automatically on startup.
 <!-- redoc:end:upgrading -->
@@ -315,28 +291,18 @@ make install  # installs plugin + starts worker
 | `ENGRAM_WORKER_PORT` | `37777` | Server port |
 | `ENGRAM_API_TOKEN` | — | Bearer auth token |
 | `ENGRAM_AUTH_ADMIN_TOKEN` | — | Admin token |
-| `ENGRAM_EMBEDDING_BASE_URL` | — | OpenAI-compatible embedding endpoint |
-| `ENGRAM_EMBEDDING_API_KEY` | — | Embedding API key |
-| `ENGRAM_EMBEDDING_MODEL_NAME` | — | Embedding model name |
-| `ENGRAM_EMBEDDING_DIMENSIONS` | `4096` | Embedding vector dimensions |
-| `ENGRAM_LLM_URL` | — | LLM endpoint for extraction/summarization |
-| `ENGRAM_LLM_API_KEY` | — | LLM API key |
-| `ENGRAM_LLM_MODEL` | `gpt-4o-mini` | LLM model name |
-| `ENGRAM_RERANKING_API_URL` | — | Cross-encoder reranker endpoint |
-| `ENGRAM_ENCRYPTION_KEY` | — | Vault encryption key (hex-encoded AES-256) |
-| `ENGRAM_CONTEXT_MAX_TOKENS` | `8000` | Token budget for context injection |
-| `ENGRAM_INJECTION_FLOOR` | `0` | Minimum injected count. `0` keeps the silence path active; set `3` for legacy fill behavior |
-| `ENGRAM_INJECT_UNIFIED` | `true` | Use the unified retrieval pipeline for inject (disable only for emergency rollback) |
-| `ENGRAM_GRAPH_PROVIDER` | — | `falkordb` or empty (in-memory) |
-| `ENGRAM_CONSOLIDATION_ENABLED` | `false` | Enable memory consolidation |
-| `ENGRAM_SMART_GC_ENABLED` | `false` | Enable smart garbage collection |
+| `ENGRAM_VAULT_KEY` | — | Canonical vault key for credential encryption |
+| `ENGRAM_ENCRYPTION_KEY` | — | Legacy fallback vault key env var |
+| `ENGRAM_DATA_DIR` | auto | Daemon data directory (also used for session-start cache path) |
 
 ### Client (hooks)
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `ENGRAM_URL` | — | Full MCP endpoint URL for plugin |
+| `ENGRAM_URL` | — | Full MCP/server URL for plugin and hooks |
 | `ENGRAM_AUTH_ADMIN_TOKEN` | — | API token for plugin |
+| `ENGRAM_API_TOKEN` | — | Legacy fallback token env var for hooks / plugin runtime |
+| `ENGRAM_DATA_DIR` | auto | Cache and daemon state directory |
 | `ENGRAM_WORKSTATION_ID` | auto | Override workstation ID (8-char hex) |
 <!-- redoc:end:configuration -->
 
@@ -345,22 +311,17 @@ make install  # installs plugin + starts worker
 <!-- redoc:start:mcp-tools -->
 ## MCP Tools
 
-Engram exposes 7 primary tools that consolidate all memory operations. Each tool supports multiple actions.
+Engram exposes a reduced static-first MCP surface for the surviving entity model.
 
-### `recall` — Search and Retrieve
+Primary categories in v5:
+- issues / issue comments
+- memories / behavioral rules
+- documents
+- credentials / vault
+- loom background tasks
 
-| Action | Description |
-|--------|-------------|
-| `search` | Hybrid semantic + full-text search (default) |
-| `preset` | Preset queries: `decisions`, `changes`, `how_it_works` |
-| `by_file` | Find observations related to specific files |
-| `by_concept` | Find by concept tags |
-| `by_type` | Find by observation type |
-| `similar` | Vector similarity search |
-| `timeline` | Browse by time range |
-| `related` | Graph-based relation traversal |
-| `patterns` | Detected recurring patterns |
-| `get` | Get observation by ID |
+The old dynamic search / graph / learning-oriented tool surface is no longer the primary v5 path.
+
 | `sessions` | Search/list indexed sessions |
 | `explain` | Debug search result ranking |
 | `reasoning` | Retrieve reasoning traces |

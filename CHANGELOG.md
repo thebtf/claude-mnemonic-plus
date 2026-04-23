@@ -7,14 +7,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Removed (v5 US9)
+## [5.0.0] - 2026-04-23
+
+### Added
+
+- **Static session-start gRPC flow (US13)**: added `GetSessionStartContext` and `NegotiateVersion` to the gRPC API, worker compatibility endpoint `/api/context/session-start`, and hook-side local cache fallback at `${ENGRAM_DATA_DIR}/cache/session-start-{project-slug}.json`.
+
+### Changed
+
+- **Static-only product direction**: Engram now treats explicit writes and deterministic reads as the primary product contract. Session-start inject is simplified to issues + behavioral rules + memories.
+- **Version compatibility signaling**: session-start path now performs explicit major-version negotiation instead of silently tolerating client/server skew.
+- **Plugin/daemon release alignment**: plugin version `5.0.0` and daemon version `v5.0.0` are released together.
+
+### Removed
 
 - `internal/search` package deleted (search.Manager, RRF, MMR, LLM filter, search metrics)
 - `internal/search/expansion` package deleted (HyDE query expansion, Expander)
 - `recall` MCP tool reduced to trivial SQL filter (memoryStore.List + in-memory substring)
 - Dropped MCP tools: `search`, `timeline`, `decisions`, `changes`, `how_it_works`, `find_by_concept`, `find_by_type`, `get_recent_context`, `get_context_timeline`, `get_timeline_by_query`, `explain_search_ranking`
+- patterns subsystem
+- graph subsystem
+- learning / scoring / maintenance / consolidation loops
+- reranking / embeddings-era runtime stack
 - `ENGRAM_HYDE_ENABLED` env var removed
 - `ENGRAM_LLM_FILTER_ENABLED` env var removed
+
+### Breaking
+
+- observations-era dynamic runtime is no longer the primary storage/retrieval model
+- session-start uses static composite payloads rather than the old dynamic inject path
+- mixed major client/server versions must fail with an explicit compatibility error on the session-start path
+
+### Notes
+
+- Release notes: `docs/release-notes/v5.0.0.md`
 
 ## [3.7.1] - 2026-04-12
 
@@ -519,7 +545,8 @@ Initial release with full feature set.
 
 Originally based on [claude-mnemonic](https://github.com/lukaszraczylo/claude-mnemonic) by Lukasz Raczylo.
 
-[Unreleased]: https://github.com/thebtf/engram/compare/v3.7.0...HEAD
+[Unreleased]: https://github.com/thebtf/engram/compare/v5.0.0...HEAD
+[5.0.0]: https://github.com/thebtf/engram/compare/v3.7.1...v5.0.0
 [3.7.0]: https://github.com/thebtf/engram/releases/tag/v3.7.0
 [2.4.0]: https://github.com/thebtf/engram/compare/v2.3.1...v2.4.0
 [2.3.1]: https://github.com/thebtf/engram/compare/v2.3.0...v2.3.1

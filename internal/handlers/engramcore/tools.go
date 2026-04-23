@@ -129,4 +129,4 @@ func buildInnerBlock(contentJSON []byte) (json.RawMessage, error) {
 
 // daemonClientVersion is the ClientVersion string sent in gRPC
 // InitializeRequest. Bumped alongside Constitution §15 unified version.
-const daemonClientVersion = "v4.3.0"
+const daemonClientVersion = "v5.0.0"

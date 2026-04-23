@@ -439,11 +439,11 @@ func TestContract_ToolsCall_IsError_MatchesV42(t *testing.T) {
 }
 
 // TestContract_Initialize_RoutedByDispatcher verifies that the initialize method
-// returns the hardcoded daemon serverInfo (name=engram, version=v4.3.0) rather
+// returns the hardcoded daemon serverInfo (name=engram, version=v5.0.0) rather
 // than proxying to the backend server.
 //
 // DOCUMENTED DEVIATION FROM v4.2.0: v4.2.0 returned the backend server's
-// version string from the gRPC InitializeResponse. v4.3.0 returns the daemon's
+// version string from the gRPC InitializeResponse. The daemon now returns its
 // own version string. This is a deliberate change — the CC client uses serverInfo
 // for display only, and showing daemon vs server version avoids confusion when
 // the two are at different versions. The deviation does NOT break MCP protocol
@@ -489,9 +489,9 @@ func TestContract_Initialize_RoutedByDispatcher(t *testing.T) {
 	if got.Result.ServerInfo.Name != "engram" {
 		t.Errorf("serverInfo.name: got %q, want %q", got.Result.ServerInfo.Name, "engram")
 	}
-	if got.Result.ServerInfo.Version != "v4.3.0" {
+	if got.Result.ServerInfo.Version != "v5.0.0" {
 		t.Errorf("serverInfo.version: got %q, want %q (documented deviation from v4.2.0 which returned server version)",
-			got.Result.ServerInfo.Version, "v4.3.0")
+			got.Result.ServerInfo.Version, "v5.0.0")
 	}
 	if got.Result.ProtocolVersion != "2024-11-05" {
 		t.Errorf("protocolVersion: got %q, want %q", got.Result.ProtocolVersion, "2024-11-05")
