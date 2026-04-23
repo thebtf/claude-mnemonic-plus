@@ -256,10 +256,10 @@ v5.0.0 — это **breaking cleanup release**.
 - client и server теперь явно проверяют major-version compatibility на session-start path
 
 Шаги обновления:
-1. обновить plugin до `5.0.0`
-2. обновить daemon до `v5.0.0`
-3. перезапустить Claude Code и daemon
-4. проверить plugin update detection и session-start cache fallback
+1. обновите plugin до версии `5.0.0`
+2. обновите daemon до версии `v5.0.0`
+3. перезапустите Claude Code и daemon
+4. проверьте plugin update detection и session-start cache fallback
 
 **Docker-образ:** Используйте последнюю версию из `ghcr.io/thebtf/engram:latest`. Миграции БД выполняются автоматически при старте.
 <!-- redoc:end:upgrading -->
