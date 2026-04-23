@@ -8,9 +8,7 @@ function renderStatusline() {
 }
 
 if (require.main === module) {
-  (async () => {
-    await lib.RunStatuslineHook(async () => renderStatusline(), renderStatusline);
-  })();
+  lib.RunStatuslineHook(renderStatusline, renderStatusline);
 }
 
 module.exports = {
