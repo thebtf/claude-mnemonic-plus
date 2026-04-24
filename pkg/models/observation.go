@@ -236,7 +236,7 @@ func (j *JSONInt64Array) Scan(src interface{}) error {
 	case []byte:
 		data = v
 	default:
-		return nil
+		return fmt.Errorf("JSONInt64Array.Scan: unsupported type %T", src)
 	}
 
 	if len(data) == 0 {
