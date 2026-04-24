@@ -1651,11 +1651,6 @@ func (s *Server) handleAnalyzeSearchPatterns(_ context.Context, args json.RawMes
 	return string(output), nil
 }
 
-// handleGetObservationRelationships — removed in v5 (US3); observations table dropped.
-func (s *Server) handleGetObservationRelationships(_ context.Context, _ json.RawMessage) (string, error) {
-	return "", fmt.Errorf("get_observation_relationships removed in v5 (US3) — observations table dropped")
-}
-
 // handleSearchSessions — removed in v5 (US3); indexed_sessions table dropped.
 func (s *Server) handleSearchSessions(_ context.Context, _ json.RawMessage) (string, error) {
 	return "", fmt.Errorf("search_sessions removed in v5 (US3) — indexed_sessions table dropped")
@@ -1666,13 +1661,4 @@ func (s *Server) handleListSessions(_ context.Context, _ json.RawMessage) (strin
 	return "", fmt.Errorf("list_sessions removed in v5 (US3) — indexed_sessions table dropped")
 }
 
-// handleMergeObservations — removed in v5 (US3); observations table dropped.
-func (s *Server) handleMergeObservations(_ context.Context, _ json.RawMessage) (string, error) {
-	return "", fmt.Errorf("merge_observations removed in v5 (US3) — observations table dropped")
-}
-
-// handleEditObservation — removed in v5 (US3); observations table dropped.
-func (s *Server) handleEditObservation(_ context.Context, _ json.RawMessage) (string, error) {
-	return "", fmt.Errorf("edit_observation removed in v5 (US3) — observations table dropped")
-}
 
