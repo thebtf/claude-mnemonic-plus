@@ -22,12 +22,6 @@ const (
 	// DefaultObservationsLimit is the default number of observations to return.
 	DefaultObservationsLimit = 100
 
-	// DefaultSummariesLimit is the default number of summaries to return.
-	DefaultSummariesLimit = 50
-
-	// DefaultPromptsLimit is the default number of prompts to return.
-	DefaultPromptsLimit = 100
-
 	// DefaultSearchLimit is the default number of search results to return.
 	DefaultSearchLimit = 50
 

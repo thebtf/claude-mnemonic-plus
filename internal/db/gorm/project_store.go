@@ -5,9 +5,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"time"
 
-	"github.com/rs/zerolog/log"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
@@ -22,7 +20,6 @@ import (
 // When legacyID is non-empty, this function:
 //  1. Upserts the project row (idempotent by primary key).
 //  2. Appends legacyID to legacy_ids if not already present.
-//  3. Launches a background goroutine to re-associate observations from legacyID to newID.
 func UpsertProject(ctx context.Context, db *gorm.DB, newID, legacyID, gitRemote, relativePath, displayName string) error {
 	if newID == "" {
 		return fmt.Errorf("project newID must not be empty")
@@ -45,36 +42,10 @@ func UpsertProject(ctx context.Context, db *gorm.DB, newID, legacyID, gitRemote,
 		              WHERE id = ?
 		                AND NOT (COALESCE(legacy_ids, ARRAY[]::TEXT[]) @> ARRAY[?]::TEXT[])`
 		if err := db.WithContext(ctx).Exec(appendSQL, legacyID, newID, legacyID).Error; err != nil {
-			log.Warn().Err(err).Str("project", newID).Str("legacy_id", legacyID).Msg("failed to append legacy_id to project")
+			return fmt.Errorf("append legacy_id to project %s: %w", newID, err)
 		}
-
-		// Re-associate observations in the background with a timeout. Idempotent and non-blocking.
-		go func(oldID, canonicalID string) {
-			bgCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-			defer cancel()
-			if err := reassociateObservations(bgCtx, db, oldID, canonicalID); err != nil {
-				log.Warn().Err(err).Str("from", oldID).Str("to", canonicalID).Msg("observation re-association failed")
-			}
-		}(legacyID, newID)
 	}
 
-	return nil
-}
-
-// reassociateObservations migrates observations from an old project ID to the canonical one.
-// Safe to call multiple times — idempotent via WHERE project = oldID.
-func reassociateObservations(ctx context.Context, db *gorm.DB, oldID, newID string) error {
-	res := db.WithContext(ctx).Exec("UPDATE observations SET project = ? WHERE project = ?", newID, oldID)
-	if res.Error != nil {
-		return fmt.Errorf("reassociate observations %s -> %s: %w", oldID, newID, res.Error)
-	}
-	if res.RowsAffected > 0 {
-		log.Info().
-			Str("from", oldID).
-			Str("to", newID).
-			Int64("count", res.RowsAffected).
-			Msg("re-associated observations to canonical project ID")
-	}
 	return nil
 }
 

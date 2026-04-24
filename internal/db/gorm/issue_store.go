@@ -447,20 +447,12 @@ func (s *IssueStore) UpdateIssueFields(ctx context.Context, id int64, title, bod
 	return nil
 }
 
-// GetTrackedProjects returns the set of projects connected to engram.
-// A project is "tracked" if it has EITHER:
-//   - at least one observation in engram (its agents have been running → reachable), OR
-//   - at least one existing issue (source or target)
-//
-// Both criteria together answer the real question: "if I file an issue for project X,
-// will an agent working on X see it?". Pure observation-count or issue-count alone
-// would miss freshly-connected projects or projects that only received issues.
+// GetTrackedProjects returns the set of projects that have at least one issue
+// (as source or target). Used to determine which projects are reachable via engram.
 func (s *IssueStore) GetTrackedProjects(ctx context.Context) ([]string, error) {
 	var projects []string
 	err := s.db.WithContext(ctx).Raw(`
 		SELECT DISTINCT project FROM (
-			SELECT project FROM observations WHERE project != ''
-			UNION
 			SELECT target_project AS project FROM issues WHERE target_project != ''
 			UNION
 			SELECT source_project AS project FROM issues WHERE source_project != ''

@@ -24,24 +24,7 @@ const DefaultRelationsLimit = 50
 // @Failure 500 {string} string "internal error"
 // @Router /api/observations/{id}/relations [get]
 func (s *Service) handleGetRelations(w http.ResponseWriter, r *http.Request) {
-	idStr := chi.URLParam(r, "id")
-	id, err := strconv.ParseInt(idStr, 10, 64)
-	if err != nil {
-		http.Error(w, "invalid observation id", http.StatusBadRequest)
-		return
-	}
-
-	relations, err := s.relationStore.GetRelationsWithDetails(r.Context(), id)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	if relations == nil {
-		relations = []*models.RelationWithDetails{}
-	}
-
-	writeJSON(w, relations)
+	http.Error(w, "relations detail endpoint removed in v5", http.StatusGone)
 }
 
 // handleGetRelationGraph godoc
@@ -57,28 +40,7 @@ func (s *Service) handleGetRelations(w http.ResponseWriter, r *http.Request) {
 // @Failure 500 {string} string "internal error"
 // @Router /api/observations/{id}/graph [get]
 func (s *Service) handleGetRelationGraph(w http.ResponseWriter, r *http.Request) {
-	idStr := chi.URLParam(r, "id")
-	id, err := strconv.ParseInt(idStr, 10, 64)
-	if err != nil {
-		http.Error(w, "invalid observation id", http.StatusBadRequest)
-		return
-	}
-
-	// Get depth parameter (default 2)
-	depth := 2
-	if depthStr := r.URL.Query().Get("depth"); depthStr != "" {
-		if d, err := strconv.Atoi(depthStr); err == nil && d > 0 && d <= 5 {
-			depth = d
-		}
-	}
-
-	graph, err := s.relationStore.GetRelationGraph(r.Context(), id, depth)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	writeJSON(w, graph)
+	http.Error(w, "relation graph endpoint removed in v5", http.StatusGone)
 }
 
 // handleGetRelatedObservations godoc

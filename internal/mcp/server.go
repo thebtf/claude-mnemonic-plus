@@ -464,15 +464,15 @@ func (s *Server) primaryTools() []Tool {
 	return []Tool{
 		{
 			Name:        "recall",
-			Description: "Search and retrieve memories. Actions: search (default, trivial SQL filter over memories), by_file, related, get, sessions, reasoning, hit_rate, wake_up, taxonomy, tunnels.",
+			Description: "Search and retrieve memories. Actions: search (default, trivial SQL filter over memories), by_file, related, sessions, reasoning.",
 			tier:        tierCore,
 			InputSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"action":         map[string]any{"type": "string", "enum": []string{"search", "by_file", "related", "get", "sessions", "reasoning", "hit_rate", "wake_up", "taxonomy", "tunnels"}, "default": "search", "description": "Action to perform"},
+					"action":         map[string]any{"type": "string", "enum": []string{"search", "by_file", "related", "sessions", "reasoning"}, "default": "search", "description": "Action to perform"},
 					"query":          map[string]any{"type": "string", "description": "Search query / substring filter (for search, sessions)"},
 					"files":          map[string]any{"type": "string", "description": "File paths (for action=by_file)"},
-					"id":             map[string]any{"type": "number", "description": "Observation ID (for action=get, related)"},
+					"id":             map[string]any{"type": "number", "description": "Observation ID (for action=related)"},
 					"project":        map[string]any{"type": "string", "description": "Project name filter"},
 					"limit":          map[string]any{"type": "number", "description": "Max results"},
 					"min_confidence": map[string]any{"type": "number", "description": "Min confidence 0-1 (for action=related)"},
@@ -656,19 +656,6 @@ func (s *Server) handleToolsList(req *Request) *Response {
 			InputSchema: map[string]any{
 				"type":       "object",
 				"properties": map[string]any{},
-			},
-		},
-		{
-			Name:        "bulk_delete_observations",
-			Description: "Delete multiple observations by their IDs. Returns count of successfully deleted observations.",
-			tier:        tierAdmin,
-			InputSchema: map[string]any{
-				"type":     "object",
-				"required": []string{"ids"},
-				"properties": map[string]any{
-					"ids":            map[string]any{"type": "array", "items": map[string]any{"type": "number"}, "description": "Array of observation IDs to delete"},
-					"delete_vectors": map[string]any{"type": "boolean", "default": true, "description": "Also delete associated vectors"},
-				},
 			},
 		},
 		{
@@ -1218,49 +1205,16 @@ func (s *Server) callTool(ctx context.Context, name string, args json.RawMessage
 		return s.handleFindSimilarObservations(ctx, args)
 	case "get_memory_stats":
 		return s.handleGetMemoryStats(ctx)
-	case "bulk_delete_observations":
-		return s.handleBulkDeleteObservations(ctx, args)
-	case "bulk_mark_superseded":
-		return s.handleBulkMarkSuperseded(ctx, args)
-	case "bulk_boost_observations":
-		return s.handleBulkBoostObservations(ctx, args)
-	case "merge_observations":
-		return s.handleMergeObservations(ctx, args)
 	case "store_rule":
 		return s.handleStoreRule(ctx, args)
 	case "list_rules":
 		return s.handleListRules(ctx, args)
-	case "get_observation":
-		return s.handleGetObservation(ctx, args)
-	case "edit_observation":
-		return s.handleEditObservation(ctx, args)
-	case "get_observation_quality":
-		return s.handleGetObservationQuality(ctx, args)
-	case "tag_observation":
-		return s.handleTagObservation(ctx, args)
-	case "get_observations_by_tag":
-		return s.handleGetObservationsByTag(ctx, args)
-	case "get_temporal_trends":
-		return s.handleGetTemporalTrends(ctx, args)
-	case "get_data_quality_report":
-		return s.handleGetDataQualityReport(ctx, args)
-	case "batch_tag_by_pattern":
-		return s.handleBatchTagByPattern(ctx, args)
-	case "explain_search_ranking":
-		// v5 (US9): explain_search_ranking removed — internal/search dropped.
-		return "", fmt.Errorf("tool %q removed in v5 (internal/search dropped)", name)
-	case "export_observations":
-		return s.handleExportObservations(ctx, args)
 	case "issues":
 		return s.handleIssues(ctx, args)
 	case "check_system_health":
 		return s.handleCheckSystemHealth(ctx)
 	case "analyze_search_patterns":
 		return s.handleAnalyzeSearchPatterns(ctx, args)
-	case "get_observation_scoring_breakdown":
-		return s.handleGetObservationScoringBreakdown(ctx, args)
-	case "analyze_observation_importance":
-		return s.handleAnalyzeObservationImportance(ctx, args)
 	case "search_sessions":
 		return s.handleSearchSessions(ctx, args)
 	case "list_sessions":
@@ -1327,8 +1281,6 @@ func (s *Server) callTool(ctx context.Context, name string, args json.RawMessage
 		return s.handleListCredentials(ctx, args)
 	case "vault_delete":
 		return s.handleDeleteCredential(ctx, args)
-	case "find_by_file_context":
-		return s.handleFindByFileContext(ctx, args)
 	case "store_memory":
 		return s.handleStoreMemory(ctx, args)
 	case "recall_memory":
@@ -1505,72 +1457,6 @@ func (s *Server) handleGetMemoryStats(ctx context.Context) (string, error) {
 }
 
 // handleBulkDeleteObservations — removed in v5 (US3); observations table dropped.
-func (s *Server) handleBulkDeleteObservations(_ context.Context, _ json.RawMessage) (string, error) {
-	return "", fmt.Errorf("bulk_delete_observations removed in v5 (US3) — observations table replaced by memories")
-}
-
-// handleBulkMarkSuperseded — removed in v5 (US3); observations table dropped.
-func (s *Server) handleBulkMarkSuperseded(_ context.Context, _ json.RawMessage) (string, error) {
-	return "", fmt.Errorf("bulk_mark_superseded removed in v5 (US3) — observations table dropped")
-}
-
-// handleBulkBoostObservations — removed in v5 (US3); observations table dropped.
-func (s *Server) handleBulkBoostObservations(_ context.Context, _ json.RawMessage) (string, error) {
-	return "", fmt.Errorf("bulk_boost_observations removed in v5 (US3) — observations table dropped")
-}
-
-// handleMergeObservations — removed in v5 (US3); observations table dropped.
-func (s *Server) handleMergeObservations(_ context.Context, _ json.RawMessage) (string, error) {
-	return "", fmt.Errorf("merge_observations removed in v5 (US3) — observations table dropped")
-}
-
-// handleGetObservation — removed in v5 (US3); observations table dropped.
-func (s *Server) handleGetObservation(_ context.Context, _ json.RawMessage) (string, error) {
-	return "", fmt.Errorf("get_observation removed in v5 (US3) — use recall(action=\"get\") instead")
-}
-
-// handleEditObservation — removed in v5 (US3); observations table dropped.
-func (s *Server) handleEditObservation(_ context.Context, _ json.RawMessage) (string, error) {
-	return "", fmt.Errorf("edit_observation removed in v5 (US3) — observations table dropped")
-}
-
-// handleGetObservationQuality — removed in v5 (US3); observations table dropped.
-func (s *Server) handleGetObservationQuality(_ context.Context, _ json.RawMessage) (string, error) {
-	return "", fmt.Errorf("get_observation_quality removed in v5 (US3) — observations table dropped")
-}
-
-// handleTagObservation — removed in v5 (US3); observations table dropped.
-func (s *Server) handleTagObservation(_ context.Context, _ json.RawMessage) (string, error) {
-	return "", fmt.Errorf("tag_observation removed in v5 (US3) — observations table dropped")
-}
-
-// handleGetObservationsByTag — removed in v5 (US3); observations table dropped.
-func (s *Server) handleGetObservationsByTag(_ context.Context, _ json.RawMessage) (string, error) {
-	return "", fmt.Errorf("get_observations_by_tag removed in v5 (US3) — observations table dropped")
-}
-
-// handleGetTemporalTrends — removed in v5 (US3); observations table dropped.
-func (s *Server) handleGetTemporalTrends(_ context.Context, _ json.RawMessage) (string, error) {
-	return "", fmt.Errorf("get_temporal_trends removed in v5 (US3) — observations table dropped")
-}
-
-// handleGetDataQualityReport — removed in v5 (US3); observations table dropped.
-func (s *Server) handleGetDataQualityReport(_ context.Context, _ json.RawMessage) (string, error) {
-	return "", fmt.Errorf("get_data_quality_report removed in v5 (US3) — observations table dropped")
-}
-
-// handleBatchTagByPattern — removed in v5 (US3); observations table dropped.
-func (s *Server) handleBatchTagByPattern(_ context.Context, _ json.RawMessage) (string, error) {
-	return "", fmt.Errorf("batch_tag_by_pattern removed in v5 (US3) — observations table dropped")
-}
-
-// handleExplainSearchRanking was removed in v5 (US9): internal/search dropped.
-
-// handleExportObservations — removed in v5 (US3); observations table dropped.
-func (s *Server) handleExportObservations(_ context.Context, _ json.RawMessage) (string, error) {
-	return "", fmt.Errorf("export_observations removed in v5 (US3) — observations table dropped")
-}
-
 // handleBackfillStatus returns backfill run status via the injected status function.
 func (s *Server) handleBackfillStatus() (string, error) {
 	if s.backfillStatusFunc == nil {
@@ -1765,255 +1651,28 @@ func (s *Server) handleAnalyzeSearchPatterns(_ context.Context, args json.RawMes
 	return string(output), nil
 }
 
-// handleGetObservationRelationships returns the relationship graph for an observation.
-func (s *Server) handleGetObservationRelationships(ctx context.Context, args json.RawMessage) (string, error) {
-	m, err := parseArgs(args)
-	if err != nil {
-		return "", err
-	}
-
-	var params struct {
-		ID       int64
-		MaxDepth int
-	}
-	params.ID = coerceInt64(m["id"], 0)
-	params.MaxDepth = coerceInt(m["max_depth"], 0)
-
-	if params.ID <= 0 {
-		return "", fmt.Errorf("id is required and must be positive")
-	}
-	if params.MaxDepth <= 0 {
-		params.MaxDepth = 2
-	}
-	if params.MaxDepth > 5 {
-		params.MaxDepth = 5
-	}
-
-	if s.relationStore == nil {
-		return "", fmt.Errorf("relation store not available")
-	}
-
-	// Get the relationship graph
-	graph, err := s.relationStore.GetRelationGraph(ctx, params.ID, params.MaxDepth)
-	if err != nil {
-		return "", fmt.Errorf("get relation graph: %w", err)
-	}
-
-	// Build response with additional context
-	type RelationInfo struct {
-		Type        string  `json:"type"`
-		SourceTitle string  `json:"source_title,omitempty"`
-		TargetTitle string  `json:"target_title,omitempty"`
-		SourceType  string  `json:"source_type,omitempty"`
-		TargetType  string  `json:"target_type,omitempty"`
-		ID          int64   `json:"id"`
-		SourceID    int64   `json:"source_id"`
-		TargetID    int64   `json:"target_id"`
-		Confidence  float64 `json:"confidence"`
-	}
-
-	type GraphResponse struct {
-		Relations      []RelationInfo `json:"relations"`
-		UniqueNodes    []int64        `json:"unique_nodes"`
-		CenterID       int64          `json:"center_id"`
-		MaxDepth       int            `json:"max_depth"`
-		TotalRelations int            `json:"total_relations"`
-	}
-
-	// Collect unique node IDs
-	nodeSet := make(map[int64]bool)
-	nodeSet[params.ID] = true
-
-	relations := make([]RelationInfo, 0, len(graph.Relations))
-	for _, r := range graph.Relations {
-		nodeSet[r.Relation.SourceID] = true
-		nodeSet[r.Relation.TargetID] = true
-
-		relations = append(relations, RelationInfo{
-			ID:          r.Relation.ID,
-			SourceID:    r.Relation.SourceID,
-			TargetID:    r.Relation.TargetID,
-			Type:        string(r.Relation.RelationType),
-			Confidence:  r.Relation.Confidence,
-			SourceTitle: r.SourceTitle,
-			TargetTitle: r.TargetTitle,
-			SourceType:  string(r.SourceType),
-			TargetType:  string(r.TargetType),
-		})
-	}
-
-	// Convert node set to slice
-	nodes := make([]int64, 0, len(nodeSet))
-	for id := range nodeSet {
-		nodes = append(nodes, id)
-	}
-
-	response := GraphResponse{
-		CenterID:       params.ID,
-		MaxDepth:       params.MaxDepth,
-		TotalRelations: len(relations),
-		Relations:      relations,
-		UniqueNodes:    nodes,
-	}
-
-	output, err := json.Marshal(response)
-	if err != nil {
-		return "", fmt.Errorf("marshal response: %w", err)
-	}
-	return string(output), nil
+// handleGetObservationRelationships — removed in v5 (US3); observations table dropped.
+func (s *Server) handleGetObservationRelationships(_ context.Context, _ json.RawMessage) (string, error) {
+	return "", fmt.Errorf("get_observation_relationships removed in v5 (US3) — observations table dropped")
 }
 
-// handleGetObservationScoringBreakdown — removed in v5 (US3); observations table dropped.
-func (s *Server) handleGetObservationScoringBreakdown(_ context.Context, _ json.RawMessage) (string, error) {
-	return "", fmt.Errorf("get_observation_scoring_breakdown removed in v5 (US3) — observations table dropped")
+// handleSearchSessions — removed in v5 (US3); indexed_sessions table dropped.
+func (s *Server) handleSearchSessions(_ context.Context, _ json.RawMessage) (string, error) {
+	return "", fmt.Errorf("search_sessions removed in v5 (US3) — indexed_sessions table dropped")
 }
 
-// handleAnalyzeObservationImportance — removed in v5 (US3); observations table dropped.
-func (s *Server) handleAnalyzeObservationImportance(_ context.Context, _ json.RawMessage) (string, error) {
-	return "", fmt.Errorf("analyze_observation_importance removed in v5 (US3) — observations table dropped")
+// handleListSessions — removed in v5 (US3); indexed_sessions table dropped.
+func (s *Server) handleListSessions(_ context.Context, _ json.RawMessage) (string, error) {
+	return "", fmt.Errorf("list_sessions removed in v5 (US3) — indexed_sessions table dropped")
 }
 
-// handleSearchSessions handles full-text search across indexed sessions.
-func (s *Server) handleSearchSessions(ctx context.Context, args json.RawMessage) (string, error) {
-	if s.sessionIdxStore == nil {
-		return "", fmt.Errorf("session indexing not configured")
-	}
-
-	m, err := parseArgs(args)
-	if err != nil {
-		return "", err
-	}
-
-	var params struct {
-		Query string
-		Limit int
-	}
-	params.Query = coerceString(m["query"], "")
-	params.Limit = coerceInt(m["limit"], 0)
-	if params.Query == "" {
-		return "", fmt.Errorf("query is required")
-	}
-	if params.Limit <= 0 {
-		params.Limit = 10
-	}
-
-	results, err := s.sessionIdxStore.SearchSessions(ctx, params.Query, params.Limit)
-	if err != nil {
-		return "", fmt.Errorf("search sessions: %w", err)
-	}
-
-	type sessionResult struct {
-		ID            string  `json:"id"`
-		WorkstationID string  `json:"workstation_id"`
-		ProjectPath   string  `json:"project_path,omitempty"`
-		ExchangeCount int     `json:"exchange_count"`
-		Rank          float64 `json:"rank"`
-		Snippet       string  `json:"snippet,omitempty"`
-	}
-
-	out := make([]sessionResult, 0, len(results))
-	for _, r := range results {
-		sr := sessionResult{
-			ID:            r.Session.ID,
-			WorkstationID: r.Session.WorkstationID,
-			ExchangeCount: r.Session.ExchangeCount,
-			Rank:          r.Rank,
-		}
-		if r.Session.ProjectPath.Valid {
-			sr.ProjectPath = r.Session.ProjectPath.String
-		}
-		if r.Session.Content.Valid && len(r.Session.Content.String) > 0 {
-			snippet := r.Session.Content.String
-			if len(snippet) > 200 {
-				snippet = snippet[:200]
-			}
-			sr.Snippet = snippet
-		}
-		out = append(out, sr)
-	}
-
-	data, err := json.Marshal(out)
-	if err != nil {
-		return "", fmt.Errorf("marshal results: %w", err)
-	}
-	return string(data), nil
+// handleMergeObservations — removed in v5 (US3); observations table dropped.
+func (s *Server) handleMergeObservations(_ context.Context, _ json.RawMessage) (string, error) {
+	return "", fmt.Errorf("merge_observations removed in v5 (US3) — observations table dropped")
 }
 
-// handleListSessions lists indexed Claude Code sessions.
-func (s *Server) handleListSessions(ctx context.Context, args json.RawMessage) (string, error) {
-	if s.sessionIdxStore == nil {
-		return "", fmt.Errorf("session indexing not configured")
-	}
-
-	m, err := parseArgs(args)
-	if err != nil {
-		return "", err
-	}
-
-	var params struct {
-		WorkstationID string
-		ProjectID     string
-		Limit         int
-		Offset        int
-	}
-	params.WorkstationID = coerceString(m["workstation_id"], "")
-	params.ProjectID = coerceString(m["project_id"], "")
-	params.Limit = coerceInt(m["limit"], 0)
-	params.Offset = coerceInt(m["offset"], 0)
-	if params.Limit <= 0 {
-		params.Limit = 20
-	}
-
-	opts := sessions.ListOptions{
-		WorkstationID: params.WorkstationID,
-		ProjectID:     params.ProjectID,
-		Limit:         params.Limit,
-		Offset:        params.Offset,
-	}
-
-	list, err := s.sessionIdxStore.ListSessions(ctx, opts)
-	if err != nil {
-		return "", fmt.Errorf("list sessions: %w", err)
-	}
-
-	type sessionItem struct {
-		ID            string `json:"id"`
-		WorkstationID string `json:"workstation_id"`
-		ProjectID     string `json:"project_id"`
-		ProjectPath   string `json:"project_path,omitempty"`
-		ExchangeCount int    `json:"exchange_count"`
-		GitBranch     string `json:"git_branch,omitempty"`
-		LastMsgAt     string `json:"last_msg_at,omitempty"`
-	}
-
-	out := make([]sessionItem, 0, len(list))
-	for _, sess := range list {
-		item := sessionItem{
-			ID:            sess.ID,
-			WorkstationID: sess.WorkstationID,
-			ProjectID:     sess.ProjectID,
-			ExchangeCount: sess.ExchangeCount,
-		}
-		if sess.ProjectPath.Valid {
-			item.ProjectPath = sess.ProjectPath.String
-		}
-		if sess.GitBranch.Valid {
-			item.GitBranch = sess.GitBranch.String
-		}
-		if sess.LastMsgAt.Valid {
-			item.LastMsgAt = sess.LastMsgAt.Time.UTC().Format(time.RFC3339)
-		}
-		out = append(out, item)
-	}
-
-	data, err := json.Marshal(out)
-	if err != nil {
-		return "", fmt.Errorf("marshal results: %w", err)
-	}
-	return string(data), nil
+// handleEditObservation — removed in v5 (US3); observations table dropped.
+func (s *Server) handleEditObservation(_ context.Context, _ json.RawMessage) (string, error) {
+	return "", fmt.Errorf("edit_observation removed in v5 (US3) — observations table dropped")
 }
 
-// handleFindByFileContext — removed in v5 (US3); observations table dropped.
-func (s *Server) handleFindByFileContext(_ context.Context, _ json.RawMessage) (string, error) {
-	return "", fmt.Errorf("find_by_file_context removed in v5 (US3) — observations table dropped")
-}

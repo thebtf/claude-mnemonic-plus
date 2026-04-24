@@ -55,9 +55,6 @@ func (s *Server) handleRecall(ctx context.Context, args json.RawMessage) (string
 	case "related":
 		return s.handleFindRelatedObservations(ctx, args)
 
-	case "get":
-		return s.handleGetObservation(ctx, args)
-
 	case "sessions":
 		query := coerceString(m["query"], "")
 		if query != "" {
@@ -72,20 +69,9 @@ func (s *Server) handleRecall(ctx context.Context, args json.RawMessage) (string
 	case "reasoning":
 		return s.handleReasoningSearch(ctx, args)
 
-	case "hit_rate":
-		return "", fmt.Errorf("recall: action %q not supported in v5 (hit rate analytics depended on observations/injection_log)", action)
-
-	// Palace actions
-	case "wake_up":
-		return s.handleWakeUp(ctx, args)
-	case "taxonomy":
-		return s.handleTaxonomy(ctx, args)
-	case "tunnels":
-		return s.handleTunnels(ctx, args)
-
 	default:
 		return "", fmt.Errorf(
-			"unknown recall action: %q (valid: search, by_file, related, get, sessions, reasoning, hit_rate, wake_up, taxonomy, tunnels)",
+			"unknown recall action: %q (valid: search, by_file, related, sessions, reasoning)",
 			action,
 		)
 	}
@@ -186,11 +172,6 @@ func (s *Server) handleRecallSearch(ctx context.Context, m map[string]any) (stri
 	return string(output), nil
 }
 
-// handleHitRateAnalytics was observation-backed in pre-v5 engram.
-// v5 removed the underlying observations/injection_log analytics path.
-func (s *Server) handleHitRateAnalytics(context.Context, json.RawMessage) (string, error) {
-	return "", fmt.Errorf("hit_rate analytics not available in v5 (observation/injection_log pipeline removed)")
-}
 
 // handleReasoningSearch retrieves reasoning traces by project.
 func (s *Server) handleReasoningSearch(ctx context.Context, args json.RawMessage) (string, error) {

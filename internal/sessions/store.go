@@ -72,24 +72,8 @@ func (s *Store) UpsertSession(_ context.Context, _ map[string]any) error {
 	return unsupportedIndexedSessionsError("upsert session")
 }
 
-// CheckSessionsExist returns the same sentinel as other indexed_sessions-backed
-// operations so live worker endpoints can surface an explicit v5-disabled
-// compatibility response instead of pretending every requested session is missing.
+// CheckSessionsExist returns an explicit unsupported error; indexed_sessions removed in v5.
 func (s *Store) CheckSessionsExist(_ context.Context, _ []string) ([]string, error) {
 	return nil, unsupportedIndexedSessionsError("check sessions exist")
 }
 
-// ListSessions returns an explicit error because indexed_sessions was removed in v5.
-func (s *Store) ListSessions(_ context.Context, _ ListOptions) ([]SessionSummary, error) {
-	return nil, unsupportedIndexedSessionsError("list sessions")
-}
-
-// SearchSessions returns an explicit error because indexed_sessions was removed in v5.
-func (s *Store) SearchSessions(_ context.Context, _ string, _ int) ([]SessionSearchResult, error) {
-	return nil, unsupportedIndexedSessionsError("search sessions")
-}
-
-// GetSessionMtime returns an explicit error because indexed_sessions was removed in v5.
-func (s *Store) GetSessionMtime(_ context.Context, _ string) (time.Time, bool, error) {
-	return time.Time{}, false, unsupportedIndexedSessionsError("get session mtime")
-}

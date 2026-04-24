@@ -39,49 +39,6 @@ func GetTaxonomy(ctx context.Context, db *gorm.DB, project string) ([]TaxonomyNo
 	return nodes, nil
 }
 
-// TaxonomyStats holds aggregate statistics for the taxonomy.
-type TaxonomyStats struct {
-	Projects          int `json:"projects"`
-	Types             int `json:"types"`
-	Concepts          int `json:"concepts"`
-	TotalObservations int `json:"total_observations"`
-}
-
-// GetStats returns aggregate taxonomy statistics.
-func GetStats(ctx context.Context, db *gorm.DB) (*TaxonomyStats, error) {
-	var stats TaxonomyStats
-
-	// Count distinct projects
-	if err := db.WithContext(ctx).Raw(
-		`SELECT COUNT(DISTINCT project) FROM observations WHERE is_superseded = 0 AND is_archived = 0`,
-	).Scan(&stats.Projects).Error; err != nil {
-		return nil, err
-	}
-
-	// Count distinct types
-	if err := db.WithContext(ctx).Raw(
-		`SELECT COUNT(DISTINCT type) FROM observations WHERE is_superseded = 0 AND is_archived = 0`,
-	).Scan(&stats.Types).Error; err != nil {
-		return nil, err
-	}
-
-	// Count distinct concepts
-	if err := db.WithContext(ctx).Raw(
-		`SELECT COUNT(DISTINCT c.concept) FROM observations o, jsonb_array_elements_text(o.concepts) AS c(concept) WHERE o.is_superseded = 0 AND o.is_archived = 0`,
-	).Scan(&stats.Concepts).Error; err != nil {
-		return nil, err
-	}
-
-	// Total active observations
-	if err := db.WithContext(ctx).Raw(
-		`SELECT COUNT(*) FROM observations WHERE is_superseded = 0 AND is_archived = 0`,
-	).Scan(&stats.TotalObservations).Error; err != nil {
-		return nil, err
-	}
-
-	return &stats, nil
-}
-
 func projectFilter(project string) string {
 	if project == "" {
 		return ""
