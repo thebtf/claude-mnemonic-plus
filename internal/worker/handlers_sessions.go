@@ -468,32 +468,6 @@ func (s *Service) handleSummarize(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 }
 
-// ExtractLearningsRequest is the request body for learning extraction.
-type ExtractLearningsRequest struct {
-	Messages []json.RawMessage `json:"messages"`
-	Project  string            `json:"project"`
-}
-
-// handleExtractLearnings godoc
-// @Summary Extract learnings from session
-// @Description Runs LLM-based extraction of behavioral patterns from a session transcript and stores resulting guidance observations.
-// @Tags Sessions
-// @Accept json
-// @Produce json
-// @Security ApiKeyAuth
-// @Param id path int true "Session database ID"
-// @Param body body ExtractLearningsRequest true "Session messages and project"
-// @Success 200 {object} map[string]interface{}
-// @Failure 400 {string} string "invalid request body"
-// @Failure 500 {string} string "extraction failed"
-// @Failure 503 {string} string "service not ready"
-// @Router /api/sessions/{id}/extract-learnings [post]
-func (s *Service) handleExtractLearnings(w http.ResponseWriter, r *http.Request) {
-	// Learning extraction via LLM was removed in v5. Endpoint kept for client
-	// compatibility but always returns disabled so callers can detect and skip.
-	writeJSON(w, map[string]any{"status": "disabled", "count": 0})
-}
-
 // maxSessionIndexBody is the per-request body limit for session indexing (5 MB).
 const maxSessionIndexBody = 5 * 1024 * 1024
 
@@ -648,15 +622,9 @@ type CheckSessionsRequest struct {
 // @Failure 503 {string} string "service not ready"
 // @Router /api/sessions/check [post]
 func (s *Service) handleCheckSessions(w http.ResponseWriter, r *http.Request) {
-	s.initMu.RLock()
-	store := s.sessionIdxStore
-	s.initMu.RUnlock()
-
-	if store == nil {
-		http.Error(w, "service not ready", http.StatusServiceUnavailable)
-		return
-	}
-
+	// indexed_sessions table removed in v5; sessionIdxStore is never populated.
+	// Decode request body to return the caller's IDs in the "missing" field for
+	// API compatibility, then report the feature as disabled.
 	var req CheckSessionsRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "invalid request body", http.StatusBadRequest)
@@ -668,32 +636,9 @@ func (s *Service) handleCheckSessions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	existing, err := store.CheckSessionsExist(r.Context(), req.SessionIDs)
-	if err != nil {
-		if errors.Is(err, sessions.ErrIndexedSessionsUnsupported) {
-			writeJSON(w, map[string]any{
-				"missing":    req.SessionIDs,
-				"status":     "disabled",
-				"deprecated": "indexed session checks removed in v5",
-			})
-			return
-		}
-		log.Error().Err(err).Msg("Failed to check session existence")
-		http.Error(w, "database error", http.StatusInternalServerError)
-		return
-	}
-
-	existingSet := make(map[string]struct{}, len(existing))
-	for _, id := range existing {
-		existingSet[id] = struct{}{}
-	}
-
-	missing := make([]string, 0, len(req.SessionIDs))
-	for _, id := range req.SessionIDs {
-		if _, ok := existingSet[id]; !ok {
-			missing = append(missing, id)
-		}
-	}
-
-	writeJSON(w, map[string]any{"missing": missing})
+	writeJSON(w, map[string]any{
+		"missing":    req.SessionIDs,
+		"status":     "disabled",
+		"deprecated": "indexed session checks removed in v5",
+	})
 }

@@ -1,13 +1,10 @@
 package aaak
 
 import (
-	"context"
-	"fmt"
 	cryptorand "crypto/rand"
 	"encoding/binary"
+	"fmt"
 	"strings"
-
-	"gorm.io/gorm"
 )
 
 // GenerateCode creates a 3-char uppercase code for an entity name.
@@ -69,47 +66,3 @@ func GenerateCode(name string, existing map[string]bool) string {
 	return clean[:3]
 }
 
-// LookupCodes reads AAAK codes from entity observation metadata in the database.
-// Returns a map of lowercase entity name → 3-char code.
-func LookupCodes(ctx context.Context, db *gorm.DB, project string) (map[string]string, error) {
-	if db == nil {
-		return make(map[string]string), nil
-	}
-
-	var rows []struct {
-		Title     string
-		Narrative string
-	}
-
-	q := db.WithContext(ctx).
-		Table("observations").
-		Select("title, COALESCE(narrative, '') as narrative").
-		Where("type = 'entity' AND is_superseded = 0 AND is_archived = 0")
-
-	if project != "" {
-		q = q.Where("project = ?", project)
-	}
-
-	if err := q.Find(&rows).Error; err != nil {
-		return nil, fmt.Errorf("lookup aaak codes: %w", err)
-	}
-
-	codes := make(map[string]string, len(rows))
-	for _, row := range rows {
-		name := strings.ToLower(strings.TrimSpace(row.Title))
-		if name == "" {
-			continue
-		}
-		// Extract aaak_code from narrative JSON if present
-		// Narrative contains EntityMetadata JSON — look for "aaak_code":"XXX"
-		if idx := strings.Index(row.Narrative, `"aaak_code":"`); idx >= 0 {
-			start := idx + len(`"aaak_code":"`)
-			end := strings.Index(row.Narrative[start:], `"`)
-			if end > 0 && end <= 5 {
-				codes[name] = row.Narrative[start : start+end]
-			}
-		}
-	}
-
-	return codes, nil
-}

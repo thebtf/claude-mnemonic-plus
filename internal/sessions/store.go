@@ -9,7 +9,6 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"time"
 
 	gormdb "github.com/thebtf/engram/internal/db/gorm"
 	"gorm.io/gorm"
@@ -21,38 +20,6 @@ import (
 type Store struct {
 	db    *gorm.DB
 	rawDB *sql.DB
-}
-
-// ListOptions configures a ListSessions query.
-type ListOptions struct {
-	WorkstationID string
-	ProjectID     string
-	Limit         int
-	Offset        int
-}
-
-// SessionSummary is a lightweight session record returned by list/search.
-// Replaces the removed gormdb.IndexedSession type.
-// Fields use sql.Null* to keep existing callers compiling without changes.
-type SessionSummary struct {
-	ID            string
-	WorkstationID string
-	ProjectID     string
-	ProjectPath   sql.NullString
-	GitBranch     sql.NullString
-	FirstMsgAt    sql.NullTime
-	LastMsgAt     sql.NullTime
-	ExchangeCount int
-	Content       sql.NullString
-	ToolCounts    sql.NullString
-	FileMtime     sql.NullTime
-	IndexedAt     time.Time
-}
-
-// SessionSearchResult wraps a SessionSummary with a relevance rank.
-type SessionSearchResult struct {
-	Session SessionSummary
-	Rank    float64
 }
 
 var ErrIndexedSessionsUnsupported = errors.New("indexed_sessions support removed in v5; capability is not available")
@@ -72,24 +39,8 @@ func (s *Store) UpsertSession(_ context.Context, _ map[string]any) error {
 	return unsupportedIndexedSessionsError("upsert session")
 }
 
-// CheckSessionsExist returns the same sentinel as other indexed_sessions-backed
-// operations so live worker endpoints can surface an explicit v5-disabled
-// compatibility response instead of pretending every requested session is missing.
+// CheckSessionsExist returns an explicit unsupported error; indexed_sessions removed in v5.
 func (s *Store) CheckSessionsExist(_ context.Context, _ []string) ([]string, error) {
 	return nil, unsupportedIndexedSessionsError("check sessions exist")
 }
 
-// ListSessions returns an explicit error because indexed_sessions was removed in v5.
-func (s *Store) ListSessions(_ context.Context, _ ListOptions) ([]SessionSummary, error) {
-	return nil, unsupportedIndexedSessionsError("list sessions")
-}
-
-// SearchSessions returns an explicit error because indexed_sessions was removed in v5.
-func (s *Store) SearchSessions(_ context.Context, _ string, _ int) ([]SessionSearchResult, error) {
-	return nil, unsupportedIndexedSessionsError("search sessions")
-}
-
-// GetSessionMtime returns an explicit error because indexed_sessions was removed in v5.
-func (s *Store) GetSessionMtime(_ context.Context, _ string) (time.Time, bool, error) {
-	return time.Time{}, false, unsupportedIndexedSessionsError("get session mtime")
-}

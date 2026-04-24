@@ -3,7 +3,6 @@ package worker
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"runtime"
@@ -171,64 +170,6 @@ func (s *Service) handleGetObservations(w http.ResponseWriter, r *http.Request) 
 		resp["project_display_name"] = s.getProjectDisplayName(r.Context(), project)
 	}
 	writeJSON(w, resp)
-}
-
-// handleGetSummaries godoc
-// @Summary List summaries
-// @Description Session summaries endpoint removed in v5. Returns 501 Not Implemented after request validation.
-// @Tags Observations
-// @Produce json
-// @Security ApiKeyAuth
-// @Param project query string false "Filter by project"
-// @Param query query string false "Semantic search query"
-// @Param limit query int false "Number of results (default 50)"
-// @Success 501 {string} string "session summaries endpoint removed in v5; session_summaries persistence was dropped in US3-PR-B"
-// @Failure 400 {string} string "bad request"
-// @Router /api/summaries [get]
-func (s *Service) handleGetSummaries(w http.ResponseWriter, r *http.Request) {
-	limit := gorm.ParseLimitParam(r, DefaultSummariesLimit)
-	project := r.URL.Query().Get("project")
-	query := r.URL.Query().Get("query")
-
-	// Validate project name to prevent path traversal
-	if err := ValidateProjectName(project); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-
-	_ = limit
-	_ = query
-
-	http.Error(w, "session summaries endpoint removed in v5; session_summaries persistence was dropped in US3-PR-B", http.StatusNotImplemented)
-}
-
-// handleGetPrompts godoc
-// @Summary List user prompts
-// @Description User prompts endpoint removed in v5. Returns 501 Not Implemented after request validation.
-// @Tags Observations
-// @Produce json
-// @Security ApiKeyAuth
-// @Param project query string false "Filter by project"
-// @Param query query string false "Semantic search query"
-// @Param limit query int false "Number of results (default 100)"
-// @Success 501 {string} string "user prompts endpoint removed in v5; prompt persistence was dropped in US3-PR-B"
-// @Failure 400 {string} string "bad request"
-// @Router /api/prompts [get]
-func (s *Service) handleGetPrompts(w http.ResponseWriter, r *http.Request) {
-	limit := gorm.ParseLimitParam(r, DefaultPromptsLimit)
-	project := r.URL.Query().Get("project")
-	query := r.URL.Query().Get("query")
-
-	// Validate project name to prevent path traversal
-	if err := ValidateProjectName(project); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-
-	_ = limit
-	_ = query
-
-	http.Error(w, "user prompts endpoint removed in v5; prompt persistence was dropped in US3-PR-B", http.StatusNotImplemented)
 }
 
 // handleGetProjects godoc
@@ -512,69 +453,6 @@ func (s *Service) handleVectorHealth(w http.ResponseWriter, _ *http.Request) {
 	})
 }
 
-// UpdateObservationRequest is the request body for updating an observation.
-type UpdateObservationRequest struct {
-	Title         *string  `json:"title,omitempty"`
-	Subtitle      *string  `json:"subtitle,omitempty"`
-	Narrative     *string  `json:"narrative,omitempty"`
-	Scope         *string  `json:"scope,omitempty"`
-	Facts         []string `json:"facts,omitempty"`
-	Concepts      []string `json:"concepts,omitempty"`
-	FilesRead     []string `json:"files_read,omitempty"`
-	FilesModified []string `json:"files_modified,omitempty"`
-}
-
-// handleUpdateObservation godoc
-// @Summary Update an observation
-// @Description Observation update endpoint removed in v5. Returns 501 Not Implemented after request validation.
-// @Tags Observations
-// @Accept json
-// @Produce json
-// @Security ApiKeyAuth
-// @Param id path int true "Observation ID"
-// @Param body body UpdateObservationRequest true "Fields to update"
-// @Success 501 {string} string "observation update endpoint removed in v5; observations persistence was dropped in US3-PR-B"
-// @Failure 400 {string} string "bad request"
-// @Router /api/observations/{id} [put]
-func (s *Service) handleUpdateObservation(w http.ResponseWriter, r *http.Request) {
-	id, ok := parseIDParam(w, r.PathValue("id"), "observation")
-	if !ok {
-		return
-	}
-
-	var req UpdateObservationRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "invalid request body: "+err.Error(), http.StatusBadRequest)
-		return
-	}
-
-	_ = id
-	_ = req
-
-	http.Error(w, "observation update endpoint removed in v5; observations persistence was dropped in US3-PR-B", http.StatusNotImplemented)
-}
-
-// handleGetObservationByID godoc
-// @Summary Get observation by ID
-// @Description Observation lookup endpoint removed in v5. Returns 501 Not Implemented after request validation.
-// @Tags Observations
-// @Produce json
-// @Security ApiKeyAuth
-// @Param id path int true "Observation ID"
-// @Success 501 {string} string "observation lookup endpoint removed in v5; observations persistence was dropped in US3-PR-B"
-// @Failure 400 {string} string "bad request"
-// @Router /api/observations/{id} [get]
-func (s *Service) handleGetObservationByID(w http.ResponseWriter, r *http.Request) {
-	id, ok := parseIDParam(w, r.PathValue("id"), "observation")
-	if !ok {
-		return
-	}
-
-	_ = id
-
-	http.Error(w, "observation lookup endpoint removed in v5; observations persistence was dropped in US3-PR-B", http.StatusNotImplemented)
-}
-
 // handleGraphStats godoc
 // @Summary Get graph statistics
 // @Description Returns graph statistics for the dashboard, using relation data to compute knowledge graph metrics.
@@ -651,80 +529,6 @@ func (s *Service) handleVectorMetrics(w http.ResponseWriter, _ *http.Request) {
 		"enabled": false,
 		"message": "Vector storage removed in v5 (content_chunks table dropped)",
 	})
-}
-
-// bulkDeleteRequest is the JSON body for DELETE /api/observations/bulk.
-type bulkDeleteRequest struct {
-	IDs []int64 `json:"ids"`
-}
-
-// handleBulkDeleteREST godoc
-// @Summary Bulk delete observations
-// @Description Bulk observation delete endpoint removed in v5. Returns 501 Not Implemented after request validation.
-// @Tags Observations
-// @Accept json
-// @Produce json
-// @Security ApiKeyAuth
-// @Param body body bulkDeleteRequest true "Observation IDs to delete"
-// @Success 501 {string} string "bulk observation delete endpoint removed in v5; observations persistence was dropped in US3-PR-B"
-// @Failure 400 {string} string "bad request"
-// @Router /api/observations/bulk [delete]
-func (s *Service) handleBulkDeleteREST(w http.ResponseWriter, r *http.Request) {
-	var req bulkDeleteRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "invalid JSON body: "+err.Error(), http.StatusBadRequest)
-		return
-	}
-
-	if len(req.IDs) == 0 {
-		http.Error(w, "ids is required and must not be empty", http.StatusBadRequest)
-		return
-	}
-	if len(req.IDs) > 100 {
-		http.Error(w, "ids must not exceed 100 entries per request", http.StatusBadRequest)
-		return
-	}
-
-	http.Error(w, "bulk observation delete endpoint removed in v5; observations persistence was dropped in US3-PR-B", http.StatusNotImplemented)
-}
-
-// bulkScopeChangeRequest is the JSON body for PATCH /api/observations/bulk-scope.
-type bulkScopeChangeRequest struct {
-	IDs   []int64 `json:"ids"`
-	Scope string  `json:"scope"` // "global" or "project"
-}
-
-// handleBulkScopeChange godoc
-// @Summary Bulk update observation scope
-// @Description Bulk observation scope endpoint removed in v5. Returns 501 Not Implemented after request validation.
-// @Tags Observations
-// @Accept json
-// @Produce json
-// @Security ApiKeyAuth
-// @Param body body bulkScopeChangeRequest true "IDs and new scope"
-// @Success 501 {string} string "bulk observation scope endpoint removed in v5; observations persistence was dropped in US3-PR-B"
-// @Failure 400 {string} string "bad request"
-// @Router /api/observations/bulk-scope [patch]
-func (s *Service) handleBulkScopeChange(w http.ResponseWriter, r *http.Request) {
-	var req bulkScopeChangeRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "invalid JSON body: "+err.Error(), http.StatusBadRequest)
-		return
-	}
-
-	if len(req.IDs) == 0 {
-		http.Error(w, "ids is required and must not be empty", http.StatusBadRequest)
-		return
-	}
-	switch req.Scope {
-	case "global", "project":
-		// valid
-	default:
-		http.Error(w, "scope must be 'global' or 'project'", http.StatusBadRequest)
-		return
-	}
-
-	http.Error(w, "bulk observation scope endpoint removed in v5; observations persistence was dropped in US3-PR-B", http.StatusNotImplemented)
 }
 
 const noHitRateAnalyticsDataMessage = "No hit rate analytics data available. Hit rate analytics is disabled in v5 (injection_log was dropped in US1)."

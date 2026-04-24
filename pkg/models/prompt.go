@@ -2,6 +2,8 @@
 package models
 
 // UserPrompt represents a user prompt captured during a session.
+// The user_prompts table was dropped in v5 (US3); this type is retained
+// for test hook injection and in-memory pipeline usage only.
 type UserPrompt struct {
 	ClaudeSessionID     string `db:"claude_session_id" json:"claude_session_id"`
 	PromptText          string `db:"prompt_text" json:"prompt_text"`
@@ -13,6 +15,8 @@ type UserPrompt struct {
 }
 
 // UserPromptWithSession includes session context for search results.
+// The user_prompts table was dropped in v5 (US3); this type is retained
+// for test hook injection and in-memory pipeline usage only.
 type UserPromptWithSession struct {
 	Project      string `db:"project" json:"project"`
 	SDKSessionID string `db:"sdk_session_id" json:"sdk_session_id"`

@@ -808,7 +808,6 @@ func (s *Service) setupRoutes() {
 		r.Post("/api/instincts/import", s.handleInstinctsImport)
 
 		// Backfill endpoints
-		r.Post("/api/backfill", s.handleBackfillIngest)
 		r.Post("/api/backfill/session", s.handleBackfillSession)
 		r.Get("/api/backfill/status", s.handleBackfillStatus)
 		r.Post("/api/import/feedback", s.handleImportFeedback)
@@ -831,7 +830,6 @@ func (s *Service) setupRoutes() {
 		r.Post("/api/sessions/{id}/init", s.handleSessionStart)
 		r.Post("/api/sessions/subagent-complete", s.handleSubagentComplete)
 		r.Post("/api/sessions/{id}/summarize", s.handleSummarize)
-		r.Post("/api/sessions/{id}/extract-learnings", s.handleExtractLearnings)
 
 		// Session transcript indexing (client pushes JSONL for FTS)
 		r.Post("/api/sessions/index", s.handleIndexSession)
@@ -842,10 +840,6 @@ func (s *Service) setupRoutes() {
 
 		// Data routes
 		r.Get("/api/observations", s.handleGetObservations)
-		r.Get("/api/observations/{id}", s.handleGetObservationByID)
-		r.Put("/api/observations/{id}", s.handleUpdateObservation)
-		r.Get("/api/summaries", s.handleGetSummaries)
-		r.Get("/api/prompts", s.handleGetPrompts)
 		r.Get("/api/projects", s.handleGetProjects)
 		r.Delete("/api/projects/{id}", s.handleDeleteProject)
 		r.Get("/api/stats", s.handleGetStats)
@@ -883,24 +877,10 @@ func (s *Service) setupRoutes() {
 		r.Get("/api/observations/{id}/graph", s.handleGetRelationGraph)
 		r.Get("/api/observations/{id}/related", s.handleGetRelatedObservations)
 
-		// Bulk import, export, and archival routes
-		r.Post("/api/observations/bulk-import", s.handleBulkImport)
-		r.Get("/api/observations/export", s.handleExportObservations)
-		r.Post("/api/observations/archive", s.handleArchiveObservations)
-		r.Post("/api/observations/{id}/unarchive", s.handleUnarchiveObservation)
-		r.Get("/api/observations/archived", s.handleGetArchivedObservations)
-		r.Get("/api/observations/archival-stats", s.handleGetArchivalStats)
-
 		// Search analytics
 		r.Get("/api/search/recent", s.handleGetRecentQueries)
 		r.Get("/api/search/analytics", s.handleGetSearchAnalytics)
 		r.Post("/api/analytics/search-misses", s.handleSearchMissAnalytics)
-
-		// Duplicate detection
-		r.Get("/api/observations/duplicates", s.handleFindDuplicates)
-
-		// Bulk status operations
-		r.Post("/api/observations/bulk-status", s.handleBulkStatusUpdate)
 
 		// Telemetry
 		r.Get("/api/telemetry/similarity", s.handleGetSimilarityTelemetry)
@@ -924,21 +904,8 @@ func (s *Service) setupRoutes() {
 		r.Get("/api/memories", s.handleListMemories)
 		r.Delete("/api/memories/{id}", s.handleDeleteMemoryByID)
 
-		// Tag routes
-		r.Post("/api/observations/{id}/tags", s.handleTagObservation)
-		r.Get("/api/observations/by-tag/{tag}", s.handleGetObservationsByTag)
-		r.Post("/api/observations/batch-tag", s.handleBatchTagObservations)
-		r.Get("/api/observations/tag-cloud", s.handleTagCloud)
-
-		// Bulk observation operations
-		r.Delete("/api/observations/bulk", s.handleBulkDeleteREST)
-		r.Patch("/api/observations/bulk-scope", s.handleBulkScopeChange)
-
 		// Token stats
 		r.Get("/api/auth/tokens/{id}/stats", s.handleGetTokenStats)
-
-		// Analytics routes
-		r.Get("/api/analytics/trends", s.handleGetTrends)
 
 		// Config
 		r.Get("/api/config", s.handleGetConfig)

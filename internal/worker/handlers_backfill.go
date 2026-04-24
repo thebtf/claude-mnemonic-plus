@@ -20,35 +20,6 @@ import (
 	"github.com/thebtf/engram/pkg/models"
 )
 
-// BackfillRequest is the request body for POST /api/backfill.
-type BackfillRequest struct {
-	// SessionID is a unique identifier for the source session (e.g. filename hash).
-	SessionID string `json:"session_id"`
-	// Project is the project path from session metadata.
-	Project string `json:"project"`
-	// RunID groups observations from the same backfill run (for rollback).
-	RunID string `json:"run_id"`
-	// Observations are the extracted observations to store.
-	Observations []BackfillObservation `json:"observations"`
-}
-
-// BackfillObservation is a single observation from a backfill extraction.
-type BackfillObservation struct {
-	Type      string   `json:"type"`
-	Outcome   string   `json:"outcome"`
-	Title     string   `json:"title"`
-	Narrative string   `json:"narrative"`
-	Concepts  []string `json:"concepts"`
-	Files     []string `json:"files"`
-}
-
-// BackfillResponse is the response for POST /api/backfill.
-type BackfillResponse struct {
-	Stored  int `json:"stored"`
-	Skipped int `json:"skipped"`
-	Errors  int `json:"errors"`
-}
-
 // BackfillStatus holds status information for GET /api/backfill/status.
 type BackfillStatus struct {
 	TotalRuns        int                 `json:"total_runs"`
@@ -95,48 +66,6 @@ func (t *backfillTracker) snapshot() map[string]*RunInfo {
 		cp[k] = &vcopy
 	}
 	return cp
-}
-
-// handleBackfillIngest godoc
-// @Summary Ingest backfill observations
-// @Description Observation-era backfill ingest was removed in v5. The endpoint remains for compatibility and returns an explicit deprecation response.
-// @Tags Backfill
-// @Accept json
-// @Produce json
-// @Security ApiKeyAuth
-// @Param body body BackfillRequest true "Backfill observations"
-// @Success 200 {object} BackfillResponse
-// @Failure 400 {string} string "bad request"
-// @Router /api/backfill [post]
-func (s *Service) handleBackfillIngest(w http.ResponseWriter, r *http.Request) {
-	var req BackfillRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Invalid JSON: "+err.Error(), http.StatusBadRequest)
-		return
-	}
-
-	if req.RunID == "" {
-		http.Error(w, "run_id is required", http.StatusBadRequest)
-		return
-	}
-	if len(req.Observations) == 0 {
-		json.NewEncoder(w).Encode(BackfillResponse{})
-		return
-	}
-
-	resp := BackfillResponse{Skipped: len(req.Observations)}
-	runInfo := s.backfillTracker.getOrCreate(req.RunID)
-	runInfo.Stored += resp.Stored
-	runInfo.Skipped += resp.Skipped
-	runInfo.Errors += resp.Errors
-	runInfo.Sessions++
-
-	writeJSON(w, map[string]any{
-		"stored":     resp.Stored,
-		"skipped":    resp.Skipped,
-		"errors":     resp.Errors,
-		"deprecated": "observation backfill ingest removed in v5",
-	})
 }
 
 // handleBackfillStatus godoc
