@@ -143,6 +143,8 @@ function processLines(lines: string[]): string {
   const isCodeLine = (line: string, _bufferLen: number): boolean => {
     const trimmed = line.trimStart()
     if (trimmed === '') return false // handled by blank-line lookahead below
+    // Separator lines (dashes, equals) — part of table/code output when in context
+    if (_bufferLen > 0 && /^[-=]{4,}$/.test(trimmed)) return true
     // Shell prompts: /, $, #, >, PS C:\...>
     if (/^[/$#>]/.test(trimmed)) return true
     if (/^\(.*\)\s*(PS\s+)?[A-Z]:\\.*>/i.test(trimmed)) return true
