@@ -154,6 +154,12 @@ function processLines(lines: string[]): string {
     if (/^(\t|    )/.test(line) && !/^(\t|    )[-*+\d]/.test(line)) return true
     if (/^\w[\w_-]*:\s*".+"$/.test(trimmed)) return true
     if (bufferLen > 0 && /^\w[\w_-]*:\s*\S/.test(trimmed)) return true
+    // YAML top-level keys (word: or word:\n) — start a code block
+    if (/^\w[\w_-]*:\s*$/.test(trimmed)) return true
+    // YAML scalar values: key: number or key: ip/cidr
+    if (/^\w[\w_-]*:\s+\d/.test(trimmed)) return true
+    // YAML list items in code context
+    if (bufferLen > 0 && /^-\s+\w[\w_-]*:/.test(trimmed)) return true
     if (/^\d+\.\d+\.\d+\.\d+\/\d+\s+dev\s+/.test(trimmed)) return true
     return false
   }
