@@ -151,7 +151,21 @@ function typeBadgeClass(type: string): string {
 
 function shortProject(project: string): string {
   if (!project) return '?'
+  // Use server-provided display name if available
   if (projectNames.value[project]) return projectNames.value[project]
+  // Strip D:\Dev\ or similar path prefixes
+  if (/^[A-Z]:\\/.test(project)) {
+    const parts = project.split(/[/\\]/)
+    return parts[parts.length - 1] || project
+  }
+  // Hash-only slugs (e.g. "689ee718") — show as truncated hash
+  if (/^[0-9a-f]{6,}$/i.test(project)) {
+    return project.slice(0, 8)
+  }
+  // name_hash format (e.g. "engram_67e398f8") — strip hash suffix
+  if (/^(.+)_[0-9a-f]{6,}$/i.test(project)) {
+    return project.replace(/_[0-9a-f]{6,}$/i, '')
+  }
   const parts = project.split('/')
   return parts[parts.length - 1] || project
 }
