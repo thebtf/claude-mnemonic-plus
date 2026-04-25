@@ -10,18 +10,18 @@ marked.use({
   async: true,
 })
 
-// Language aliases for common shorthand
+// Language aliases
 const langAliases: Record<string, string> = {
   sh: 'bash', shell: 'bash', zsh: 'bash',
   js: 'javascript', ts: 'typescript',
   py: 'python', rb: 'ruby',
   yml: 'yaml', dockerfile: 'docker',
   console: 'bash', terminal: 'bash',
+  ps: 'powershell', ps1: 'powershell',
 }
 
-// Languages shiki supports (subset we care about)
 const supportedLangs = new Set([
-  'javascript', 'typescript', 'python', 'go', 'rust', 'bash', 'shell',
+  'javascript', 'typescript', 'python', 'go', 'rust', 'bash',
   'json', 'yaml', 'toml', 'html', 'css', 'vue', 'sql', 'docker',
   'markdown', 'diff', 'ini', 'xml', 'c', 'cpp', 'java', 'ruby',
   'php', 'swift', 'kotlin', 'lua', 'powershell', 'graphql', 'nginx',
@@ -34,10 +34,9 @@ function resolveLanguage(lang: string | undefined): string | null {
   return supportedLangs.has(resolved) ? resolved : null
 }
 
-// Custom renderer for code blocks with shiki
+// Shiki-powered code renderer
 const renderer = new marked.Renderer()
 
-// We'll collect code blocks and highlight them async after marked sync pass
 interface PendingHighlight {
   id: string
   code: string
@@ -50,8 +49,6 @@ let highlightCounter = 0
 renderer.code = function (this: unknown, token: Tokens.Code): string {
   const { text, lang } = token
   const resolvedLang = resolveLanguage(lang)
-
-  // Diff detection: if lang is 'diff' or content has +/- line prefixes
   const isDiff = lang === 'diff' || (!lang && looksLikeDiff(text))
 
   if (resolvedLang || isDiff) {
@@ -61,11 +58,9 @@ renderer.code = function (this: unknown, token: Tokens.Code): string {
       code: text,
       lang: isDiff ? 'diff' : resolvedLang,
     })
-    // Placeholder replaced after async shiki pass
     return `<div id="${id}" class="shiki-placeholder"><pre><code>${escapeHtml(text)}</code></pre></div>`
   }
 
-  // Fallback: plain code block
   return `<pre class="code-block"><code>${escapeHtml(text)}</code></pre>`
 }
 
@@ -88,136 +83,9 @@ function escapeHtml(text: string): string {
 }
 
 /**
- * Auto-detect terminal output and wrap in fenced code blocks.
- * Only for content that doesn't already have fencing.
- */
-function preProcessCodeBlocks(text: string): string {
-  // If text already has fenced code blocks, only process unfenced regions
-  if (text.includes('```')) return processUnfencedRegions(text)
-
-  return processLines(text.split('\n'))
-}
-
-/**
- * Split text into fenced (pass-through) and unfenced (auto-detect) regions.
- */
-function processUnfencedRegions(text: string): string {
-  const lines = text.split('\n')
-  const result: string[] = []
-  let unfencedBuffer: string[] = []
-  let inFence = false
-
-  for (const line of lines) {
-    if (/^```/.test(line.trim())) {
-      if (!inFence) {
-        // Flush unfenced buffer before entering fence
-        if (unfencedBuffer.length > 0) {
-          result.push(processLines(unfencedBuffer))
-          unfencedBuffer = []
-        }
-        inFence = true
-        result.push(line)
-      } else {
-        inFence = false
-        result.push(line)
-      }
-    } else if (inFence) {
-      result.push(line)
-    } else {
-      unfencedBuffer.push(line)
-    }
-  }
-
-  // Flush remaining unfenced
-  if (unfencedBuffer.length > 0) {
-    result.push(processLines(unfencedBuffer))
-  }
-
-  return result.join('\n')
-}
-
-function processLines(lines: string[]): string {
-  const result: string[] = []
-  let codeBuffer: string[] = []
-
-  const isCodeLine = (line: string, _bufferLen: number): boolean => {
-    const trimmed = line.trimStart()
-    if (trimmed === '') return false // handled by blank-line lookahead below
-    // Separator lines (dashes, equals) — part of table/code output when in context
-    if (_bufferLen > 0 && /^[-=]{4,}$/.test(trimmed)) return true
-    // Shell prompts: /, $, #, >, PS C:\...>
-    if (/^[/$#>]/.test(trimmed)) return true
-    if (/^\(.*\)\s*(PS\s+)?[A-Z]:\\.*>/i.test(trimmed)) return true
-    if (/^PS\s+[A-Z]:\\.*>/i.test(trimmed)) return true
-    // CLI warning/error lines
-    if (/^(warning|error|Error|mesh-ctl|fatal|WARN|ERR):/i.test(trimmed)) return true
-    // Network/system output
-    if (/^(inet6?|link\/|valid_lft|mtu |scope |brd )/.test(trimmed)) return true
-    if (/^\d+:\s+\S+@?\S*:?\s/.test(trimmed)) return true
-    // Tabular data rows
-    if (/^[a-z][\w-]+\s+(master|endpoint|client|server)\s+\d/i.test(trimmed)) return true
-    // ALL-CAPS header row
-    if (/^[A-Z_]{3,}(\s+[A-Z_]{2,}){2,}/.test(trimmed)) return true
-    // Indented lines (not markdown lists)
-    if (/^(\t|    )/.test(line) && !/^(\t|    )[-*+\d]/.test(line)) return true
-    // YAML: key: "quoted value"
-    if (/^\w[\w_-]*:\s*".+"$/.test(trimmed)) return true
-    // YAML: key: (empty — map/list start)
-    if (/^\w[\w_-]*:\s*$/.test(trimmed)) return true
-    // YAML: key: any_value (when inside code context OR looks config-like)
-    if (/^\w[\w_-]*:\s+\S/.test(trimmed)) return true
-    // YAML list items
-    if (/^-\s+\w[\w_-]*:/.test(trimmed)) return true
-    // IP routes
-    if (/^\d+\.\d+\.\d+\.\d+\/\d+\s+dev\s+/.test(trimmed)) return true
-    return false
-  }
-
-  function flushCode() {
-    if (codeBuffer.length >= 2) {
-      result.push('```')
-      result.push(...codeBuffer)
-      result.push('```')
-    } else {
-      result.push(...codeBuffer)
-    }
-    codeBuffer = []
-  }
-
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i]
-
-    // Blank line inside code block: keep if next non-blank line is also code
-    if (line.trim() === '' && codeBuffer.length > 0) {
-      // Peek ahead: find next non-blank line
-      let nextCodeIdx = -1
-      for (let j = i + 1; j < lines.length && j <= i + 3; j++) {
-        if (lines[j].trim() !== '') {
-          nextCodeIdx = j
-          break
-        }
-      }
-      if (nextCodeIdx !== -1 && isCodeLine(lines[nextCodeIdx], codeBuffer.length)) {
-        codeBuffer.push(line) // keep blank line inside code block
-        continue
-      }
-    }
-
-    if (isCodeLine(line, codeBuffer.length)) {
-      codeBuffer.push(line)
-    } else {
-      if (codeBuffer.length > 0) flushCode()
-      result.push(line)
-    }
-  }
-  if (codeBuffer.length > 0) flushCode()
-
-  return result.join('\n')
-}
-
-/**
- * Render markdown with syntax highlighting.
- * Returns HTML string with shiki-highlighted code blocks.
+ * Render markdown with shiki syntax highlighting.
+ * Markdown is rendered as-is — no auto-detection of code blocks.
+ * Content must use proper fenced code blocks (```lang ... ```) for highlighting.
  */
 export async function renderMarkdownAsync(text: string): Promise<string> {
   if (!text) return ''
@@ -225,8 +93,7 @@ export async function renderMarkdownAsync(text: string): Promise<string> {
   pendingHighlights = []
   highlightCounter = 0
 
-  const processed = preProcessCodeBlocks(text)
-  let html = await marked.parse(processed)
+  let html = await marked.parse(text)
 
   // Replace placeholders with shiki-highlighted code
   for (const { id, code, lang } of pendingHighlights) {
@@ -247,7 +114,7 @@ export async function renderMarkdownAsync(text: string): Promise<string> {
         `<div class="shiki-block">${highlighted}</div>`
       )
     } catch {
-      // Shiki failed for this block — keep fallback
+      // Shiki failed — keep fallback
     }
   }
 
@@ -258,11 +125,10 @@ export async function renderMarkdownAsync(text: string): Promise<string> {
 }
 
 /**
- * Sync fallback (no highlighting) — for places that can't await.
+ * Sync fallback (no shiki highlighting).
  */
 export function renderMarkdown(text: string): string {
   if (!text) return ''
-  const processed = preProcessCodeBlocks(text)
-  const html = marked.parse(processed) as string
+  const html = marked.parse(text) as string
   return DOMPurify.sanitize(html)
 }

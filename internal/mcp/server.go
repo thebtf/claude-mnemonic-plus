@@ -452,6 +452,22 @@ Use ` + "`store(action=\"import\", path=\"...\")`" + ` to bulk import pre-author
 **Debugging:** ` + "`recall(action=\"related\", id=N)`" + ` to trace cause chains.
 **Secrets:** ` + "`vault(action=\"store\")`" + ` for API keys. Never store secrets in observations.
 
+## Markdown Formatting (MANDATORY for all text content)
+
+All text rendered in the dashboard supports full Markdown with syntax highlighting.
+**Always use proper formatting** — never paste raw unformatted code or terminal output.
+
+- **Code:** wrap in fenced blocks with language tag: ` + "````" + `go\\nfunc main(){}\\n` + "````" + `
+- **Terminal:** ` + "````" + `bash\\n$ command\\noutput\\n` + "````" + `
+- **Diffs:** ` + "````" + `diff\\n-old line\\n+new line\\n` + "````" + `
+- **YAML/JSON/Config:** ` + "````" + `yaml\\nkey: value\\n` + "````" + `
+- **Inline code:** ` + "\\`" + `variable_name` + "\\`" + ` for identifiers, paths, commands
+- **Lists:** ` + "`- item`" + ` for findings, steps, bullet points
+- **Bold:** ` + "`**important**`" + ` for emphasis
+
+This applies to: ` + "`store(content=...)`" + `, ` + "`issues(body=..., comment=...)`" + `, ` + "`docs(content=...)`" + `.
+Unfenced text renders as plain paragraphs — code without fencing is unreadable.
+
 ## Advanced: All Tools
 
 By default, engram exposes 9 consolidated tools (above). Each tool supports multiple actions.
