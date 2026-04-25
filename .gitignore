@@ -27,6 +27,7 @@ coverage.html
 
 # Node.js / Vue
 ui/node_modules/
+ui/bun.lock
 ui/dist/
 ui/.vite/
 ui/package.json
@@ -86,6 +87,7 @@ docs/dist
 
 # Agent working state (entire directory)
 .agent/
+.agent-archive-*/
 
 # Local Go caches (non-standard GOPATH layouts used in CI and Docker builds)
 .gocache/
