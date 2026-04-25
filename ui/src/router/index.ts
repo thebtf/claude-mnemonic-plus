@@ -51,6 +51,12 @@ const routes = [
     component: () => import('@/views/AdminView.vue'),
     meta: { requiresAdmin: true },
   },
+  {
+    path: '/:pathMatch(.*)*',
+    name: 'not-found',
+    component: () => import('@/views/HomeView.vue'),
+    meta: { public: false },
+  },
 ]
 
 const router = createRouter({

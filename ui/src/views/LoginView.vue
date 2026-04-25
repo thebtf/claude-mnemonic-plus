@@ -1,13 +1,16 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 import { useRouter } from 'vue-router'
+import { Loader2, Mail, Key, AlertCircle } from 'lucide-vue-next'
 import { useAuth } from '@/composables/useAuth'
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
+import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import { Button } from '@/components/ui/button'
 
 const router = useRouter()
 const { login, loginWithCredentials } = useAuth()
-
-// Tab state: 'credentials' | 'token'
-const activeTab = ref<'credentials' | 'token'>('credentials')
 
 // Token login state
 const token = ref('')
@@ -65,142 +68,113 @@ async function handleEmailLogin() {
   }
 }
 
-function switchTab(tab: 'credentials' | 'token') {
-  activeTab.value = tab
+function handleTabChange() {
   error.value = ''
 }
 </script>
 
 <template>
-  <div class="min-h-screen flex items-center justify-center bg-slate-950 px-4">
-    <div class="w-full max-w-sm">
-      <!-- Logo -->
-      <div class="text-center mb-8">
-        <div
-          class="w-16 h-16 mx-auto mb-4 rounded-2xl bg-gradient-to-br from-claude-500 to-claude-700 flex items-center justify-center shadow-lg"
-        >
-          <i class="fas fa-brain text-3xl text-white" />
-        </div>
-        <h1 class="text-2xl font-bold text-white">
-          <span class="text-claude-400">Engram</span>
-        </h1>
-        <p class="text-sm text-slate-400 mt-1">Persistent Memory System</p>
-      </div>
-
-      <!-- Login Card -->
-      <div class="bg-slate-800/50 border border-slate-700/50 rounded-xl p-6 shadow-2xl">
-        <!-- Tabs -->
-        <div class="flex rounded-lg bg-slate-900/50 p-1 mb-5">
-          <button
-            type="button"
-            class="flex-1 py-2 text-sm font-medium rounded-md transition-colors"
-            :class="
-              activeTab === 'credentials'
-                ? 'bg-claude-500 text-white'
-                : 'text-slate-400 hover:text-white'
-            "
-            @click="switchTab('credentials')"
-          >
-            Email
-          </button>
-          <button
-            type="button"
-            class="flex-1 py-2 text-sm font-medium rounded-md transition-colors"
-            :class="
-              activeTab === 'token'
-                ? 'bg-claude-500 text-white'
-                : 'text-slate-400 hover:text-white'
-            "
-            @click="switchTab('token')"
-          >
-            Token
-          </button>
-        </div>
-
-        <!-- Email/Password Form -->
-        <form v-if="activeTab === 'credentials'" @submit.prevent="handleEmailLogin">
-          <div class="space-y-4">
-            <div>
-              <label class="block text-sm font-medium text-slate-300 mb-1">Email</label>
-              <input
-                v-model="email"
-                type="email"
-                required
-                autocomplete="email"
-                placeholder="you@example.com"
-                class="w-full px-4 py-3 rounded-lg bg-slate-900/50 border border-slate-600/50 text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-claude-500/50 focus:border-claude-500 transition-colors"
-                :disabled="submitting"
-              />
-            </div>
-            <div>
-              <label class="block text-sm font-medium text-slate-300 mb-1">Password</label>
-              <input
-                v-model="password"
-                type="password"
-                required
-                autocomplete="current-password"
-                placeholder="Enter your password"
-                class="w-full px-4 py-3 rounded-lg bg-slate-900/50 border border-slate-600/50 text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-claude-500/50 focus:border-claude-500 transition-colors"
-                :disabled="submitting"
-              />
-            </div>
+  <div class="min-h-screen flex items-center justify-center bg-background px-4">
+    <div class="w-full max-w-md">
+      <Card>
+        <CardHeader class="text-center pb-4">
+          <div class="w-14 h-14 mx-auto mb-4 rounded-2xl bg-primary flex items-center justify-center">
+            <span class="text-primary-foreground font-bold text-xl">E</span>
           </div>
+          <CardTitle class="text-2xl">Sign in to engram</CardTitle>
+          <CardDescription>Choose your sign-in method below</CardDescription>
+        </CardHeader>
 
-          <!-- Error message -->
-          <p v-if="error" class="mt-3 text-sm text-red-400">
-            <i class="fas fa-exclamation-circle mr-1" />
-            {{ error }}
-          </p>
+        <CardContent>
+          <Tabs default-value="credentials" @update:model-value="handleTabChange">
+            <TabsList class="w-full mb-6">
+              <TabsTrigger value="credentials" class="flex-1">
+                <Mail class="w-4 h-4 mr-2" />
+                Email
+              </TabsTrigger>
+              <TabsTrigger value="token" class="flex-1">
+                <Key class="w-4 h-4 mr-2" />
+                Token
+              </TabsTrigger>
+            </TabsList>
 
-          <button
-            type="submit"
-            class="mt-4 w-full py-3 rounded-lg bg-claude-500 text-white font-semibold hover:bg-claude-400 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-            :disabled="submitting"
-          >
-            <i v-if="submitting" class="fas fa-spinner fa-spin mr-2" />
-            {{ submitting ? 'Logging in...' : 'Login' }}
-          </button>
+            <!-- Email / Password tab -->
+            <TabsContent value="credentials">
+              <form @submit.prevent="handleEmailLogin" class="space-y-4">
+                <div class="space-y-2">
+                  <Label for="email">Email</Label>
+                  <Input
+                    id="email"
+                    v-model="email"
+                    type="email"
+                    autocomplete="email"
+                    placeholder="you@example.com"
+                    :disabled="submitting"
+                  />
+                </div>
+                <div class="space-y-2">
+                  <Label for="password">Password</Label>
+                  <Input
+                    id="password"
+                    v-model="password"
+                    type="password"
+                    autocomplete="current-password"
+                    placeholder="Enter your password"
+                    :disabled="submitting"
+                  />
+                </div>
 
-          <p class="mt-4 text-center text-sm text-slate-400">
-            Have an invitation?
-            <router-link to="/register" class="text-claude-400 hover:text-claude-300 transition-colors">
-              Register
-            </router-link>
-          </p>
-        </form>
+                <p v-if="error" class="flex items-center gap-2 text-sm text-destructive">
+                  <AlertCircle class="w-4 h-4 shrink-0" />
+                  {{ error }}
+                </p>
 
-        <!-- Token Form -->
-        <form v-else @submit.prevent="handleTokenLogin">
-          <label for="token-input" class="block text-sm font-medium text-slate-300 mb-2">
-            Admin Token
-          </label>
+                <Button type="submit" class="w-full" :disabled="submitting">
+                  <Loader2 v-if="submitting" class="w-4 h-4 mr-2 animate-spin" />
+                  {{ submitting ? 'Logging in...' : 'Login' }}
+                </Button>
 
-          <input
-            id="token-input"
-            v-model="token"
-            type="password"
-            placeholder="Enter your admin token"
-            autocomplete="current-password"
-            class="w-full px-4 py-3 rounded-lg bg-slate-900/50 border border-slate-600/50 text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-claude-500/50 focus:border-claude-500 transition-colors"
-            :disabled="submitting"
-          />
+                <p class="text-center text-sm text-muted-foreground">
+                  Have an invitation?
+                  <router-link
+                    to="/register"
+                    class="text-primary hover:text-primary/80 font-medium transition-colors"
+                  >
+                    Register
+                  </router-link>
+                </p>
+              </form>
+            </TabsContent>
 
-          <!-- Error message -->
-          <p v-if="error" class="mt-3 text-sm text-red-400">
-            <i class="fas fa-exclamation-circle mr-1" />
-            {{ error }}
-          </p>
+            <!-- Token tab -->
+            <TabsContent value="token">
+              <form @submit.prevent="handleTokenLogin" class="space-y-4">
+                <div class="space-y-2">
+                  <Label for="token-input">Admin Token</Label>
+                  <Input
+                    id="token-input"
+                    v-model="token"
+                    type="password"
+                    autocomplete="current-password"
+                    placeholder="Enter your admin token"
+                    :disabled="submitting"
+                  />
+                </div>
 
-          <button
-            type="submit"
-            class="mt-4 w-full py-3 rounded-lg bg-claude-500 text-white font-semibold hover:bg-claude-400 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-            :disabled="submitting"
-          >
-            <i v-if="submitting" class="fas fa-spinner fa-spin mr-2" />
-            {{ submitting ? 'Logging in...' : 'Login' }}
-          </button>
-        </form>
-      </div>
+                <p v-if="error" class="flex items-center gap-2 text-sm text-destructive">
+                  <AlertCircle class="w-4 h-4 shrink-0" />
+                  {{ error }}
+                </p>
+
+                <Button type="submit" class="w-full" :disabled="submitting">
+                  <Loader2 v-if="submitting" class="w-4 h-4 mr-2 animate-spin" />
+                  {{ submitting ? 'Logging in...' : 'Login' }}
+                </Button>
+              </form>
+            </TabsContent>
+          </Tabs>
+        </CardContent>
+      </Card>
     </div>
   </div>
 </template>

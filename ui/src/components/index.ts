@@ -1,5 +1,3 @@
-export { default as Badge } from './Badge.vue'
-export { default as Card } from './Card.vue'
-export { default as IconBox } from './IconBox.vue'
-export { default as Header } from './Header.vue'
-export { default as StatsCards } from './StatsCards.vue'
+// Component barrel exports
+// Old components (Badge, Card, IconBox, Header, TimeRangeSelector) were removed in PR 7.
+// Use shadcn/ui components from @/components/ui/ instead.

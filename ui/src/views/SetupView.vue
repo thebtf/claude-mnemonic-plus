@@ -1,6 +1,11 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 import { useRouter } from 'vue-router'
+import { Loader2, AlertCircle } from 'lucide-vue-next'
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import { Button } from '@/components/ui/button'
 
 const router = useRouter()
 const email = ref('')
@@ -46,78 +51,66 @@ async function handleSetup() {
 </script>
 
 <template>
-  <div class="min-h-screen flex items-center justify-center bg-slate-950 px-4">
-    <div class="w-full max-w-sm">
-      <!-- Logo -->
-      <div class="text-center mb-8">
-        <div
-          class="w-16 h-16 mx-auto mb-4 rounded-2xl bg-gradient-to-br from-claude-500 to-claude-700 flex items-center justify-center shadow-lg"
-        >
-          <i class="fas fa-brain text-3xl text-white" />
-        </div>
-        <h1 class="text-2xl font-bold text-white">
-          <span class="text-claude-400">Engram</span> Setup
-        </h1>
-        <p class="text-sm text-slate-400 mt-1">Create your admin account</p>
-      </div>
-
-      <!-- Setup Card -->
-      <form
-        class="bg-slate-800/50 border border-slate-700/50 rounded-xl p-6 shadow-2xl"
-        @submit.prevent="handleSetup"
-      >
-        <div class="space-y-4">
-          <div>
-            <label class="block text-sm font-medium text-slate-300 mb-1">Email</label>
-            <input
-              v-model="email"
-              type="email"
-              required
-              autocomplete="email"
-              class="w-full px-4 py-3 rounded-lg bg-slate-900/50 border border-slate-600/50 text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-claude-500/50 focus:border-claude-500 transition-colors"
-              :disabled="submitting"
-              placeholder="admin@example.com"
-            />
+  <div class="min-h-screen flex items-center justify-center bg-background px-4">
+    <div class="w-full max-w-md">
+      <Card>
+        <CardHeader class="text-center pb-4">
+          <div class="w-14 h-14 mx-auto mb-4 rounded-2xl bg-primary flex items-center justify-center">
+            <span class="text-primary-foreground font-bold text-xl">E</span>
           </div>
-          <div>
-            <label class="block text-sm font-medium text-slate-300 mb-1">Password</label>
-            <input
-              v-model="password"
-              type="password"
-              required
-              autocomplete="new-password"
-              class="w-full px-4 py-3 rounded-lg bg-slate-900/50 border border-slate-600/50 text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-claude-500/50 focus:border-claude-500 transition-colors"
-              :disabled="submitting"
-              placeholder="Min 8 characters"
-            />
-          </div>
-          <div>
-            <label class="block text-sm font-medium text-slate-300 mb-1">Confirm Password</label>
-            <input
-              v-model="confirmPassword"
-              type="password"
-              required
-              autocomplete="new-password"
-              class="w-full px-4 py-3 rounded-lg bg-slate-900/50 border border-slate-600/50 text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-claude-500/50 focus:border-claude-500 transition-colors"
-              :disabled="submitting"
-            />
-          </div>
-        </div>
+          <CardTitle class="text-2xl">Set up engram</CardTitle>
+          <CardDescription>Create the first admin account</CardDescription>
+        </CardHeader>
 
-        <!-- Error message -->
-        <p v-if="error" class="mt-3 text-sm text-red-400">
-          <i class="fas fa-exclamation-circle mr-1" />{{ error }}
-        </p>
+        <CardContent>
+          <form @submit.prevent="handleSetup" class="space-y-4">
+            <div class="space-y-2">
+              <Label for="setup-email">Email</Label>
+              <Input
+                id="setup-email"
+                v-model="email"
+                type="email"
+                autocomplete="email"
+                placeholder="admin@example.com"
+                :disabled="submitting"
+              />
+            </div>
 
-        <button
-          type="submit"
-          class="mt-4 w-full py-3 rounded-lg bg-claude-500 text-white font-semibold hover:bg-claude-400 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-          :disabled="submitting"
-        >
-          <i v-if="submitting" class="fas fa-spinner fa-spin mr-2" />
-          {{ submitting ? 'Creating account...' : 'Create Admin Account' }}
-        </button>
-      </form>
+            <div class="space-y-2">
+              <Label for="setup-password">Password</Label>
+              <Input
+                id="setup-password"
+                v-model="password"
+                type="password"
+                autocomplete="new-password"
+                placeholder="Min 8 characters"
+                :disabled="submitting"
+              />
+            </div>
+
+            <div class="space-y-2">
+              <Label for="setup-confirm-password">Confirm Password</Label>
+              <Input
+                id="setup-confirm-password"
+                v-model="confirmPassword"
+                type="password"
+                autocomplete="new-password"
+                :disabled="submitting"
+              />
+            </div>
+
+            <p v-if="error" class="flex items-center gap-2 text-sm text-destructive">
+              <AlertCircle class="w-4 h-4 shrink-0" />
+              {{ error }}
+            </p>
+
+            <Button type="submit" class="w-full" :disabled="submitting">
+              <Loader2 v-if="submitting" class="w-4 h-4 mr-2 animate-spin" />
+              {{ submitting ? 'Creating account...' : 'Create Admin Account' }}
+            </Button>
+          </form>
+        </CardContent>
+      </Card>
     </div>
   </div>
 </template>
