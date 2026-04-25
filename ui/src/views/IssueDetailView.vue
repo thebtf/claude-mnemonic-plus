@@ -546,13 +546,13 @@ onMounted(loadIssue)
 
 <style scoped>
 .markdown-body :deep(code) {
-  @apply bg-muted px-1 py-0.5 rounded text-sm font-mono;
+  @apply bg-muted px-1.5 py-0.5 rounded text-[13px] font-mono text-foreground;
 }
 .markdown-body :deep(pre) {
-  @apply bg-muted p-3 rounded-lg overflow-x-auto my-2;
+  @apply bg-muted border border-border rounded-lg overflow-x-auto my-2 p-0;
 }
 .markdown-body :deep(pre code) {
-  @apply bg-transparent p-0;
+  @apply bg-transparent p-3 block text-[13px] leading-relaxed whitespace-pre;
 }
 .markdown-body :deep(ul),
 .markdown-body :deep(ol) {
@@ -578,5 +578,21 @@ onMounted(loadIssue)
 }
 .markdown-body :deep(h3) {
   @apply text-base font-bold mt-2 mb-1;
+}
+.markdown-body :deep(blockquote) {
+  @apply border-l-2 border-primary/40 pl-3 my-2 text-muted-foreground italic;
+}
+.markdown-body :deep(hr) {
+  @apply border-border my-3;
+}
+.markdown-body :deep(table) {
+  @apply w-full border-collapse my-2 text-sm;
+}
+.markdown-body :deep(th),
+.markdown-body :deep(td) {
+  @apply border border-border px-2 py-1 text-left;
+}
+.markdown-body :deep(th) {
+  @apply bg-muted font-medium;
 }
 </style>
