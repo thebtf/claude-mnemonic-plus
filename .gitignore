@@ -104,6 +104,9 @@ continuity.txt
 # Playwright MCP test artifacts
 .playwright-mcp/
 
+# shadcn IDE extension config (auto-generated, not for repo)
+.mcp.json
+
 # Marketplace submodule (separate repo)
 engram-marketplace/
 .aider*

@@ -4,6 +4,7 @@ type ColorMode = 'light' | 'dark'
 
 const mode = ref<ColorMode>('light')
 const isInitialized = ref(false)
+let watchStarted = false
 
 function applyMode(value: ColorMode) {
   if (value === 'dark') {
@@ -25,11 +26,16 @@ export function useColorMode() {
       applyMode(mode.value)
       isInitialized.value = true
     }
-  })
 
-  watch(mode, (newMode) => {
-    localStorage.setItem('theme', newMode)
-    applyMode(newMode)
+    // Create the watch only once at module level — prevents a new watcher
+    // being registered on every useColorMode() call.
+    if (!watchStarted) {
+      watchStarted = true
+      watch(mode, (newMode) => {
+        localStorage.setItem('theme', newMode)
+        applyMode(newMode)
+      })
+    }
   })
 
   function toggleColorMode() {

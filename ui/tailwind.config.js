@@ -4,7 +4,7 @@ export default {
     "./index.html",
     "./src/**/*.{vue,js,ts,jsx,tsx}",
   ],
-  darkMode: ['class', "class"],
+  darkMode: 'class',
   theme: {
   	extend: {
   		fontFamily: {
@@ -62,23 +62,12 @@ export default {
   				border: 'hsl(var(--sidebar-border))',
   				ring: 'hsl(var(--sidebar-ring))'
   			},
+  			// Alias kept for AppSidebar.vue — maps to primary token
   			claude: {
-  				'50': '#fef7ee',
-  				'100': '#fdedd3',
-  				'200': '#fad7a6',
-  				'300': '#f6b96e',
-  				'400': '#f19235',
-  				'500': '#ee7410',
-  				'600': '#df5a07',
-  				'700': '#b94109',
-  				'800': '#93350e',
-  				'900': '#772d0f'
+  				'400': 'hsl(var(--primary))',
+  				'500': 'hsl(var(--primary))',
+  				'700': 'hsl(var(--primary))',
   			},
-  			data: {
-  				'400': '#60A5FA',
-  				'500': '#3B82F6',
-  				'600': '#2563EB'
-  			}
   		},
   		borderRadius: {
   			lg: 'var(--radius)',

@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted } from 'vue'
+import { Search } from 'lucide-vue-next'
 
 const props = defineProps<{
   modelValue?: string
@@ -59,7 +60,7 @@ onUnmounted(() => {
 <template>
   <form @submit.prevent="handleSubmit" :class="compact ? 'max-w-lg' : 'w-full'">
     <div class="relative">
-      <i class="fas fa-magnifying-glass absolute left-3 top-1/2 -translate-y-1/2 text-slate-500 text-sm" />
+      <Search class="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" :size="14" />
       <input
         ref="inputRef"
         :value="localValue"
@@ -69,7 +70,7 @@ onUnmounted(() => {
         type="text"
         :placeholder="placeholder || 'Search observations...  /'"
         :class="[
-          'w-full pl-9 pr-4 rounded-lg bg-slate-800/50 border text-white placeholder-slate-500 text-sm focus:outline-none focus:ring-2 focus:ring-claude-500/50 focus:border-claude-500 transition-colors',
+          'w-full pl-9 pr-4 rounded-lg bg-muted border text-foreground placeholder:text-muted-foreground text-sm focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary transition-colors',
           compact ? 'py-2 border-slate-700/50' : 'py-3 border-slate-600/50',
         ]"
       />
