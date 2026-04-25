@@ -8,6 +8,7 @@ import { useColorMode } from '@/composables/useColorMode'
 import AppSidebar from '@/components/layout/AppSidebar.vue'
 import { SidebarProvider, SidebarInset, SidebarTrigger } from '@/components/ui/sidebar'
 import { Separator } from '@/components/ui/separator'
+import { Toaster } from '@/components/ui/sonner'
 import { Loader2, RefreshCw, ArrowUpCircle, CheckCircle, AlertCircle } from 'lucide-vue-next'
 
 const route = useRoute()
@@ -43,6 +44,7 @@ onMounted(() => {
 
 <template>
   <div class="min-h-screen bg-background text-foreground">
+    <Toaster rich-colors position="bottom-right" />
     <!-- Loading spinner -->
     <div v-if="loading" class="min-h-screen flex items-center justify-center">
       <Loader2 class="animate-spin text-muted-foreground" :size="24" />

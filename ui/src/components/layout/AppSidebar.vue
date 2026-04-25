@@ -90,9 +90,9 @@ async function handleLogout() {
       </div>
     </SidebarHeader>
 
-    <SidebarContent>
+    <SidebarContent class="px-2">
       <!-- Main navigation -->
-      <SidebarMenu>
+      <SidebarMenu class="gap-1">
         <SidebarMenuItem v-for="item in navItems" :key="item.name">
           <SidebarMenuButton
             as-child
