@@ -116,6 +116,24 @@ func (s *CredentialStore) List(ctx context.Context, project string) ([]*models.C
 	return result, nil
 }
 
+// ListAll returns all active (non-soft-deleted) credentials across all projects,
+// ordered by project then key. Used by the dashboard admin view.
+func (s *CredentialStore) ListAll(ctx context.Context) ([]*models.Credential, error) {
+	var rows []Credential
+	err := s.db.WithContext(ctx).
+		Where("deleted_at IS NULL").
+		Order("project ASC, key ASC").
+		Find(&rows).Error
+	if err != nil {
+		return nil, fmt.Errorf("list all credentials: %w", err)
+	}
+	result := make([]*models.Credential, len(rows))
+	for i := range rows {
+		result[i] = credentialRowToModel(&rows[i])
+	}
+	return result, nil
+}
+
 // Delete permanently removes the credential matching (project, key).
 // Returns gorm.ErrRecordNotFound if no row exists.
 //

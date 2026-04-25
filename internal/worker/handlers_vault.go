@@ -47,12 +47,28 @@ func (s *Service) handleListCredentials(w http.ResponseWriter, r *http.Request) 
 	type credItem struct {
 		Name      string `json:"name"`
 		Scope     string `json:"scope"`
-		CreatedAt string `json:"created_at"`
+		CreatedAt string `json:"created_at,omitempty"`
 		ID        int64  `json:"id"`
 	}
 
+	// When no project specified, list ALL credentials (dashboard admin view).
 	if project == "" {
-		writeJSON(w, []credItem{})
+		allCreds, err := s.credentialStore.ListAll(r.Context())
+		if err != nil {
+			log.Error().Err(err).Msg("list all credentials failed")
+			http.Error(w, "failed to list credentials", http.StatusInternalServerError)
+			return
+		}
+		items := make([]credItem, 0, len(allCreds))
+		for _, c := range allCreds {
+			items = append(items, credItem{
+				Name:      c.Key,
+				Scope:     c.Scope,
+				ID:        c.ID,
+				CreatedAt: c.CreatedAt.Format(time.RFC3339),
+			})
+		}
+		writeJSON(w, items)
 		return
 	}
 
