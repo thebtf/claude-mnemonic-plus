@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, computed } from 'vue'
+import { ref, onMounted, computed, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
   ArrowLeft,
@@ -10,7 +10,7 @@ import {
 } from 'lucide-vue-next'
 import { fetchIssue, updateIssue, deleteIssue, type Issue, type IssueComment } from '@/utils/api'
 import { formatRelativeTime } from '@/utils/formatters'
-import { renderMarkdown } from '@/composables/useMarkdown'
+import { renderMarkdownAsync } from '@/composables/useMarkdown'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
@@ -125,6 +125,22 @@ const timeline = computed(() => {
   if (!issue.value) return []
   return buildTimeline(issue.value, comments.value)
 })
+
+// Async-rendered markdown bodies (shiki highlighted)
+const renderedBodies = ref<Record<number, string>>({})
+
+async function renderTimelineBodies() {
+  const events = timeline.value
+  const results: Record<number, string> = {}
+  for (let i = 0; i < events.length; i++) {
+    if (events[i].body) {
+      results[i] = await renderMarkdownAsync(events[i].body!)
+    }
+  }
+  renderedBodies.value = results
+}
+
+watch(timeline, () => { renderTimelineBodies() }, { immediate: true })
 
 function buildTimeline(iss: Issue, cmts: IssueComment[]): TimelineEvent[] {
   const events: TimelineEvent[] = []
@@ -485,8 +501,8 @@ onMounted(loadIssue)
             </div>
             <div
               v-if="event.body"
-              class="markdown-body mt-1.5 text-sm text-muted-foreground break-words"
-              v-html="renderMarkdown(event.body)"
+              class="markdown-body mt-1.5 text-sm break-words"
+              v-html="renderedBodies[idx] || event.body"
             />
           </div>
         </div>
@@ -594,5 +610,28 @@ onMounted(loadIssue)
 }
 .markdown-body :deep(th) {
   @apply bg-muted font-medium;
+}
+
+/* Shiki dual-theme: light theme by default, dark theme when .dark class */
+.markdown-body :deep(.shiki-block pre) {
+  @apply rounded-lg border border-border overflow-x-auto my-2 p-3 text-[13px] leading-relaxed;
+}
+.markdown-body :deep(.shiki),
+.markdown-body :deep(.shiki span) {
+  color: var(--shiki-light) !important;
+  background-color: var(--shiki-light-bg) !important;
+}
+:global(.dark) .markdown-body :deep(.shiki),
+:global(.dark) .markdown-body :deep(.shiki span) {
+  color: var(--shiki-dark) !important;
+  background-color: var(--shiki-dark-bg) !important;
+}
+
+/* Diff highlighting */
+.markdown-body :deep(.diff.add) {
+  @apply bg-green-100 dark:bg-green-900/30;
+}
+.markdown-body :deep(.diff.remove) {
+  @apply bg-red-100 dark:bg-red-900/30;
 }
 </style>

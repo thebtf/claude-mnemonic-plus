@@ -576,7 +576,14 @@ func (s *Server) primaryTools() []Tool {
 				"`project` = YOUR current working project slug (identifies who is acting — audit trail).\n" +
 				"`target_project` = project the issue is FOR (where it will be injected).\n" +
 				"Lifecycle: open → acknowledged (auto) → resolved → closed ⟲ reopened.\n" +
-				"Target agent resolves, source agent closes. Only source or dashboard operator can close.",
+				"Target agent resolves, source agent closes. Only source or dashboard operator can close.\n\n" +
+				"FORMATTING (body and comments support Markdown — rendered in dashboard):\n" +
+				"- Wrap code in fenced blocks: ```go\\nfunc main(){}\\n``` (with language tag)\n" +
+				"- Wrap terminal output: ```bash\\n$ command\\noutput\\n```\n" +
+				"- Wrap diffs: ```diff\\n-old line\\n+new line\\n```\n" +
+				"- Use **bold**, *italic*, `inline code` for emphasis\n" +
+				"- Use - bullet lists for steps/findings\n" +
+				"- Do NOT paste raw unformatted code/output — always fence it.",
 			tier:        tierCore,
 			InputSchema: issuesToolSchema(),
 		},
