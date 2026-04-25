@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 import { useSSE, useUpdate } from '@/composables'
-import SearchBar from '@/components/search/SearchBar.vue'
 import { ArrowUpCircle, Loader2, CheckCircle, AlertCircle, X } from 'lucide-vue-next'
 
 const { isConnected, isProcessing } = useSSE()
@@ -9,12 +8,6 @@ const { updateInfo, updateStatus, isUpdating, applyUpdate } = useUpdate()
 
 const showUpdateModal = ref(false)
 const isRestarting = ref(false)
-const searchQuery = ref('')
-
-function handleSearch(_q: string) {
-  // search route does not exist — no-op
-  searchQuery.value = ''
-}
 
 const restartWorker = async () => {
   isRestarting.value = true
@@ -49,15 +42,7 @@ const waitForWorker = async (maxAttempts = 30, delayMs = 500): Promise<void> => 
 </script>
 
 <template>
-  <header class="flex items-center justify-between gap-4 mb-6">
-    <!-- Search bar -->
-    <SearchBar
-      v-model="searchQuery"
-      :compact="true"
-      class="flex-1"
-      @submit="handleSearch"
-    />
-
+  <header class="flex items-center justify-end gap-4 mb-6">
     <!-- Right actions -->
     <div class="flex items-center gap-3">
       <!-- Update Available -->

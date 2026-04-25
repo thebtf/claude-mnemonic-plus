@@ -179,7 +179,7 @@ const issueTypes = [
 <template>
   <div class="space-y-4">
     <!-- Header -->
-    <div class="flex items-center justify-between">
+    <div class="flex items-center justify-between flex-wrap gap-3">
       <h1 class="text-xl font-semibold">Issues</h1>
       <div class="flex items-center gap-3">
         <span class="text-sm text-muted-foreground">{{ total }} total</span>
