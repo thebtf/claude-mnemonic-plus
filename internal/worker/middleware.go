@@ -189,7 +189,7 @@ func NewTokenAuth(token string) (*TokenAuth, error) {
 	}
 
 	if token == "" && !authDisabled {
-		log.Warn().Msg("auth: ENGRAM_API_TOKEN not set and ENGRAM_AUTH_DISABLED not set — authentication will be enforced at startup")
+		log.Warn().Msg("auth: ENGRAM_AUTH_ADMIN_TOKEN not set and ENGRAM_AUTH_DISABLED not set — authentication will be enforced at startup")
 	}
 
 	return ta, nil

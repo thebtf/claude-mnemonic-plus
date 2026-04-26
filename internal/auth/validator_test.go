@@ -210,6 +210,24 @@ func TestValidate_StoreError_PropagatesAsAuthFailure(t *testing.T) {
 	assert.False(t, errors.Is(err, auth.ErrEmptyToken))
 }
 
+func TestValidate_EmptyMaster_KeycardStillWorks(t *testing.T) {
+	t.Parallel()
+	// FR-1 + Validator doc string: when masterToken is empty, only Tier-2
+	// validation runs. Verifies the documented "no operator key configured;
+	// dashboard-issued keycards are the sole authentication path" mode.
+	raw := "engram_d00dd00d000000000000beef"
+	keycard := makeKeycard(t, "uuid-em", raw, "read-write", false)
+	store := &stubStore{byPrefix: map[string][]gormdb.APIToken{"d00dd00d": {keycard}}}
+	v := auth.NewValidator("", store)
+
+	id, err := v.Validate(context.Background(), raw)
+
+	require.NoError(t, err)
+	assert.Equal(t, auth.SourceClient, id.Source)
+	assert.Equal(t, auth.RoleReadWrite, id.Role)
+	assert.Equal(t, "uuid-em", id.KeycardID)
+}
+
 func TestValidate_MasterAndKeycardDistinguishable(t *testing.T) {
 	t.Parallel()
 	// Verifies FR-1 storage disjointness from the validator's perspective:

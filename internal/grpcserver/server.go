@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"sync"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -45,7 +46,8 @@ type ToolDef struct {
 type Server struct {
 	pb.UnimplementedEngramServiceServer
 	handler   MCPHandler
-	validator *auth.Validator    // nil = auth disabled
+	mu        sync.RWMutex       // guards validator pointer swaps
+	validator *auth.Validator    // nil = auth disabled; read under mu.RLock
 	db        *gorm.DB           // injected by worker after DB is ready
 	bus       *projectevents.Bus // in-process project lifecycle event bus
 }
@@ -84,8 +86,21 @@ func New(handler MCPHandler, validator *auth.Validator) (*grpc.Server, *Server) 
 // a hook point for future operator-key rotation. Production wiring already
 // receives the validator at New time; this setter exists for symmetry with
 // SetDB / SetBus.
+//
+// Concurrent reads from the auth interceptors are serialised through s.mu
+// — every validateBearer call takes RLock, so SetValidator's Lock/Unlock
+// is the only writer. Without the mutex the pointer swap races with reads.
 func (s *Server) SetValidator(v *auth.Validator) {
+	s.mu.Lock()
 	s.validator = v
+	s.mu.Unlock()
+}
+
+// currentValidator returns the live validator under read lock.
+func (s *Server) currentValidator() *auth.Validator {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.validator
 }
 
 // SetDB wires the database connection into the gRPC server after async initialization
@@ -168,6 +183,13 @@ func extractBearer(md metadata.MD) string {
 //   - revoked              → Unauthenticated "token revoked"
 //   - other (DB error)     → Internal "auth: store unavailable"
 func (s *Server) validateBearer(ctx context.Context) (auth.Identity, error) {
+	v := s.currentValidator()
+	if v == nil {
+		// Auth disabled deployments skip the interceptor entirely; if we
+		// reach here without a validator, fail closed.
+		return auth.Identity{}, status.Error(codes.Internal, "auth: validator not configured")
+	}
+
 	md, ok := metadata.FromIncomingContext(ctx)
 	if !ok {
 		return auth.Identity{}, status.Error(codes.Unauthenticated, "missing metadata")
@@ -177,7 +199,7 @@ func (s *Server) validateBearer(ctx context.Context) (auth.Identity, error) {
 		return auth.Identity{}, status.Error(codes.Unauthenticated, "missing authorization header")
 	}
 
-	id, err := s.validator.Validate(ctx, raw)
+	id, err := v.Validate(ctx, raw)
 	switch {
 	case err == nil:
 		return id, nil
@@ -186,6 +208,12 @@ func (s *Server) validateBearer(ctx context.Context) (auth.Identity, error) {
 	case errors.Is(err, auth.ErrInvalidCredentials):
 		return auth.Identity{}, status.Error(codes.Unauthenticated, "invalid token")
 	case errors.Is(err, auth.ErrRevoked):
+		// Currently unreachable: gormdb.TokenStore.FindByPrefix already
+		// filters revoked rows at the SQL layer ("AND NOT revoked"), so
+		// the validator never observes a revoked candidate. Kept as the
+		// explicit mapping for the day FindByPrefix changes contract OR
+		// a different TokenStoreReader implementation surfaces revoked
+		// rows for audit logging.
 		return auth.Identity{}, status.Error(codes.Unauthenticated, "token revoked")
 	default:
 		// DB error or unexpected bcrypt failure. Surface as Internal so

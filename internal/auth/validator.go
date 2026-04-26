@@ -16,21 +16,25 @@ import (
 // shape "engram_" + 32 hex chars (= 7 + 32 = 39 chars total). The first 8 hex
 // chars form a non-unique prefix index in the api_tokens table; collisions are
 // resolved by bcrypt comparison over the candidate set.
+//
+// These constants are EXPORTED so the issuance code in
+// internal/worker/handlers_auth.go can reuse them — single source of truth
+// prevents prefix-format drift across producer (handler) and consumer
+// (validator).
 const (
-	// tokenRawPrefix is the literal byte sequence every dashboard-issued
+	// TokenRawPrefix is the literal byte sequence every dashboard-issued
 	// keycard begins with. Tokens lacking this prefix are rejected without
 	// touching the database.
-	tokenRawPrefix = "engram_"
+	TokenRawPrefix = "engram_"
 
-	// tokenPrefixLen is the number of characters AFTER tokenRawPrefix that
-	// form the database prefix index. Mirrors the issuance code in
-	// internal/worker/handlers_auth.go.
-	tokenPrefixLen = 8
+	// TokenPrefixLen is the number of characters AFTER TokenRawPrefix that
+	// form the database prefix index.
+	TokenPrefixLen = 8
 
-	// tokenMinLen is the smallest length a candidate keycard can validly
+	// TokenMinLen is the smallest length a candidate keycard can validly
 	// have: prefix + index. Anything shorter cannot match any prefix index
 	// row, so we reject it pre-DB.
-	tokenMinLen = len(tokenRawPrefix) + tokenPrefixLen // 7 + 8 = 15
+	TokenMinLen = len(TokenRawPrefix) + TokenPrefixLen // 7 + 8 = 15
 )
 
 // TokenStoreReader is the narrow read-side contract Validator depends on. The
@@ -107,10 +111,10 @@ func (v *Validator) Validate(ctx context.Context, raw string) (Identity, error) 
 	}
 
 	// Tier 2 shape gate.
-	if !strings.HasPrefix(raw, tokenRawPrefix) || len(raw) < tokenMinLen {
+	if !strings.HasPrefix(raw, TokenRawPrefix) || len(raw) < TokenMinLen {
 		return Identity{}, ErrInvalidCredentials
 	}
-	prefix := raw[len(tokenRawPrefix) : len(tokenRawPrefix)+tokenPrefixLen]
+	prefix := raw[len(TokenRawPrefix) : len(TokenRawPrefix)+TokenPrefixLen]
 
 	candidates, err := v.store.FindByPrefix(ctx, prefix)
 	if err != nil {

@@ -41,11 +41,14 @@ const sessionCookieName = "engram_session"
 // sessionMaxAge is the session cookie lifetime (30 days).
 const sessionMaxAge = 30 * 24 * 3600
 
-// tokenRawPrefix is the prefix for generated client API tokens.
-const tokenRawPrefix = "engram_"
-
-// tokenPrefixLen is the number of hex chars after "engram_" used for prefix lookup.
-const tokenPrefixLen = 8
+// Token-shape constants are owned by internal/auth (single source of truth)
+// and re-exported here as package-local aliases so the issuance code stays
+// readable. Editing the literal values is a contract change and must happen
+// in internal/auth/validator.go, not here.
+const (
+	tokenRawPrefix = authpkg.TokenRawPrefix
+	tokenPrefixLen = authpkg.TokenPrefixLen
+)
 
 // loginRequest is the JSON body for POST /api/auth/login.
 type loginRequest struct {
@@ -295,10 +298,13 @@ func (s *Service) requireSessionAdmin(w http.ResponseWriter, r *http.Request) bo
 		return true
 	}
 	if !id.IsSessionAdmin() {
-		http.Error(w,
-			`{"error":"issuance requires browser session — log in to the dashboard at /login"}`,
-			http.StatusForbidden,
-		)
+		// JSON body — set Content-Type explicitly. http.Error would emit
+		// text/plain even with a JSON-shaped string.
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusForbidden)
+		_ = json.NewEncoder(w).Encode(map[string]string{
+			"error": "issuance requires browser session — log in to the dashboard at /login",
+		})
 		return true
 	}
 	return false

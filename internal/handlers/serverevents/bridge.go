@@ -72,7 +72,7 @@ type ProjectTracker interface {
 // reconciliation. This was caught in PR #171 review.
 type Bridge struct {
 	clientID  string // "${pid}-${startUnix}" per proto-extensions.md
-	token     string // ENGRAM_AUTH_ADMIN_TOKEN; empty = no auth
+	token     string // ENGRAM_TOKEN (per-workstation keycard); empty = no auth
 	serverURL string // ENGRAM_SERVER_URL
 	logger    *slog.Logger
 	reg       *registry.Registry
