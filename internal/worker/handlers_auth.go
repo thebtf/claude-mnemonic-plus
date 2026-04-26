@@ -19,6 +19,8 @@ import (
 	"github.com/rs/zerolog/log"
 	"gorm.io/gorm"
 	"golang.org/x/crypto/bcrypt"
+
+	authpkg "github.com/thebtf/engram/internal/auth"
 )
 
 // isAuthDisabled returns true when ENGRAM_AUTH_DISABLED env var is "true" or "1".
@@ -39,11 +41,14 @@ const sessionCookieName = "engram_session"
 // sessionMaxAge is the session cookie lifetime (30 days).
 const sessionMaxAge = 30 * 24 * 3600
 
-// tokenRawPrefix is the prefix for generated client API tokens.
-const tokenRawPrefix = "engram_"
-
-// tokenPrefixLen is the number of hex chars after "engram_" used for prefix lookup.
-const tokenPrefixLen = 8
+// Token-shape constants are owned by internal/auth (single source of truth)
+// and re-exported here as package-local aliases so the issuance code stays
+// readable. Editing the literal values is a contract change and must happen
+// in internal/auth/validator.go, not here.
+const (
+	tokenRawPrefix = authpkg.TokenRawPrefix
+	tokenPrefixLen = authpkg.TokenPrefixLen
+)
 
 // loginRequest is the JSON body for POST /api/auth/login.
 type loginRequest struct {
@@ -223,6 +228,10 @@ func (s *Service) handleAuthMe(w http.ResponseWriter, r *http.Request) {
 // @Failure 500 {string} string "internal error"
 // @Router /api/auth/tokens [get]
 func (s *Service) handleListTokens(w http.ResponseWriter, r *http.Request) {
+	if s.requireSessionAdmin(w, r) {
+		return
+	}
+
 	s.initMu.RLock()
 	tokenStore := s.tokenStore
 	s.initMu.RUnlock()
@@ -274,6 +283,33 @@ func (s *Service) handleListTokens(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// requireSessionAdmin enforces FR-6 / Clarification C4: keycard issuance and
+// management endpoints accept ONLY browser-session admins. Bearer-authenticated
+// callers — operator key OR worker keycard — are rejected with 403 even when
+// they would otherwise carry admin role.
+//
+// Returns true when the caller is rejected (and the response has been written);
+// the handler should return immediately. Returns false when the caller passes
+// the gate.
+func (s *Service) requireSessionAdmin(w http.ResponseWriter, r *http.Request) bool {
+	id, ok := authpkg.IdentityFrom(r.Context())
+	if !ok {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return true
+	}
+	if !id.IsSessionAdmin() {
+		// JSON body — set Content-Type explicitly. http.Error would emit
+		// text/plain even with a JSON-shaped string.
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusForbidden)
+		_ = json.NewEncoder(w).Encode(map[string]string{
+			"error": "issuance requires browser session — log in to the dashboard at /login",
+		})
+		return true
+	}
+	return false
+}
+
 // handleCreateToken godoc
 // @Summary Create a new API token
 // @Description Generates a new client API token with the specified name and scope. The raw token is returned only once.
@@ -284,10 +320,15 @@ func (s *Service) handleListTokens(w http.ResponseWriter, r *http.Request) {
 // @Param body body tokenCreateRequest true "Token creation parameters"
 // @Success 200 {object} map[string]interface{}
 // @Failure 400 {string} string "bad request"
+// @Failure 403 {string} string "forbidden — issuance requires browser session"
 // @Failure 409 {string} string "conflict"
 // @Failure 500 {string} string "internal error"
 // @Router /api/auth/tokens [post]
 func (s *Service) handleCreateToken(w http.ResponseWriter, r *http.Request) {
+	if s.requireSessionAdmin(w, r) {
+		return
+	}
+
 	s.initMu.RLock()
 	tokenStore := s.tokenStore
 	s.initMu.RUnlock()
@@ -365,6 +406,10 @@ func (s *Service) handleCreateToken(w http.ResponseWriter, r *http.Request) {
 // @Failure 500 {string} string "internal error"
 // @Router /api/auth/tokens/{id} [delete]
 func (s *Service) handleRevokeToken(w http.ResponseWriter, r *http.Request) {
+	if s.requireSessionAdmin(w, r) {
+		return
+	}
+
 	s.initMu.RLock()
 	tokenStore := s.tokenStore
 	s.initMu.RUnlock()
@@ -407,6 +452,10 @@ func (s *Service) handleRevokeToken(w http.ResponseWriter, r *http.Request) {
 // @Failure 500 {string} string "internal error"
 // @Router /api/auth/tokens/{id}/stats [get]
 func (s *Service) handleGetTokenStats(w http.ResponseWriter, r *http.Request) {
+	if s.requireSessionAdmin(w, r) {
+		return
+	}
+
 	s.initMu.RLock()
 	tokenStore := s.tokenStore
 	s.initMu.RUnlock()

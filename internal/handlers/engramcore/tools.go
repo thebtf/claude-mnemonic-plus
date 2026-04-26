@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"github.com/thebtf/engram/internal/config"
 	"github.com/thebtf/engram/internal/module"
 	pb "github.com/thebtf/engram/proto/engram/v1"
 	muxcore "github.com/thebtf/mcp-mux/muxcore"
@@ -25,7 +26,7 @@ func (m *Module) ProxyTools(ctx context.Context, p muxcore.ProjectContext) ([]mo
 	if err != nil {
 		return nil, err
 	}
-	token := m.envFor(p, "ENGRAM_AUTH_ADMIN_TOKEN")
+	token := m.envFor(p, config.EnvWorkstationToken)
 	project := m.cache.Resolve(p)
 
 	conn, err := m.pool.getOrDialGRPC(serverURL, token)
@@ -79,7 +80,7 @@ func (m *Module) ProxyHandleTool(ctx context.Context, p muxcore.ProjectContext, 
 	if err != nil {
 		return nil, err
 	}
-	token := m.envFor(p, "ENGRAM_AUTH_ADMIN_TOKEN")
+	token := m.envFor(p, config.EnvWorkstationToken)
 	project := m.cache.Resolve(p)
 
 	conn, err := m.pool.getOrDialGRPC(serverURL, token)

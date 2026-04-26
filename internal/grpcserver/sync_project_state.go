@@ -119,9 +119,9 @@ func (s *Server) SyncProjectState(ctx context.Context, req *pb.SyncProjectStateR
 // Used exclusively in tests to inject a real DB without reconstructing the full server.
 func (s *Server) withDB(db *gorm.DB) *Server {
 	return &Server{
-		handler: s.handler,
-		token:   s.token,
-		db:      db,
-		bus:     s.bus,
+		handler:   s.handler,
+		validator: s.validator,
+		db:        db,
+		bus:       s.bus,
 	}
 }

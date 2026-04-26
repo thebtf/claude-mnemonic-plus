@@ -19,6 +19,7 @@ import (
 	"github.com/rs/zerolog/log"
 	"github.com/soheilhy/cmux"
 	httpSwagger "github.com/swaggo/http-swagger"
+	"github.com/thebtf/engram/internal/auth"
 	"github.com/thebtf/engram/internal/chunking"
 	gochunking "github.com/thebtf/engram/internal/chunking/golang"
 	mdchunking "github.com/thebtf/engram/internal/chunking/markdown"
@@ -386,7 +387,9 @@ func (s *Service) initializeAsync() {
 	// Dedup config removed in v5 (US11) — SDK processor uses fixed defaults.
 	s.initMu.Unlock()
 
-	// Wire token store into auth middleware for client token lookups
+	// Wire token store into auth middleware for client token lookups.
+	// Also wire the shared *auth.Validator (constructed below alongside the
+	// gRPC server) so HTTP and gRPC share one validation chain (FR-2).
 	if s.tokenAuth != nil {
 		s.tokenAuth.SetTokenStore(tokenStore)
 	}
@@ -482,8 +485,24 @@ func (s *Service) initializeAsync() {
 
 	// Wire gRPC server: create adapter over mcpServer and register with the server.
 	// initMu protects s.grpcServer — the cmux goroutine polls for it.
+	//
+	// Auth (FR-2 / Plan ADR-002): build the shared *auth.Validator from the
+	// operator key (server-host env) and the freshly-constructed tokenStore,
+	// then pass it to grpcserver.New. The same validator backs the HTTP
+	// middleware in Phase 3; until then HTTP keeps its inline check.
+	//
+	// Pass nil validator when ENGRAM_AUTH_DISABLED=true is the deliberate
+	// operator choice (mirrors the empty-token branch the previous code took).
 	adapter := &mcpHandlerAdapter{mcpServer: mcpServer}
-	grpcSrv, grpcInternalSrv := grpcserver.New(adapter)
+	var grpcValidator *auth.Validator
+	if !strings.EqualFold(strings.TrimSpace(os.Getenv("ENGRAM_AUTH_DISABLED")), "true") {
+		grpcValidator = auth.NewValidator(config.GetWorkerToken(), tokenStore)
+	}
+	// Share the validator with the HTTP middleware (FR-2: symmetric validation).
+	if s.tokenAuth != nil && grpcValidator != nil {
+		s.tokenAuth.SetValidator(grpcValidator)
+	}
+	grpcSrv, grpcInternalSrv := grpcserver.New(adapter, grpcValidator)
 	grpcInternalSrv.SetDB(store.DB)
 	grpcInternalSrv.SetBus(s.eventBus)
 	s.initMu.Lock()

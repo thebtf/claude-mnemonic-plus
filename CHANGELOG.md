@@ -7,6 +7,58 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [6.0.0] - 2026-04-26
+
+### BREAKING CHANGES
+
+- **Two-tier token model.** The daemon and plugin no longer accept the
+  operator key on workstations. Each workstation now reads `ENGRAM_TOKEN`
+  — a per-workstation API token (worker keycard) issued via the dashboard
+  `/tokens` page. The operator key (`ENGRAM_AUTH_ADMIN_TOKEN`) lives ONLY
+  on the server host.
+- **Plugin `.mcp.json` env rename.** `ENGRAM_AUTH_ADMIN_TOKEN` →
+  `ENGRAM_TOKEN`. No legacy fallback chain — pre-v6 configurations stop
+  working until re-issued.
+- **Daemon fail-fast on missing token.** When `ENGRAM_URL` is set but
+  `ENGRAM_TOKEN` is empty, the daemon writes a single user-actionable
+  stderr line and exits 1. Replaces the previous silent graceful-degrade
+  to `loom_*-only` (which masked PR #203's regression for days).
+- **Issuance hardening.** `POST/GET/DELETE /api/auth/tokens` and
+  `GET /api/auth/tokens/{id}/stats` now require an admin browser session
+  cookie. Bearer-token authentication (operator key OR worker keycard) is
+  rejected with 403. CI scripts that previously minted keycards via the
+  master token MUST migrate to a browser session.
+
+### Migration steps for existing users
+
+1. Update the plugin via your marketplace mechanism (`/plugin update
+   engram@engram` or equivalent).
+2. Open `<your-server-url>/tokens` in a browser, log in as admin.
+3. Click "Generate token", name it after this workstation, scope
+   `read-write`, copy the value once.
+4. Run `/engram:setup`, paste the new keycard. Update
+   `~/.claude/settings.json` to set `ENGRAM_TOKEN` and remove any leftover
+   `ENGRAM_AUTH_ADMIN_TOKEN` / `ENGRAM_API_TOKEN` entries.
+5. Restart Claude Code. The daemon now exits loudly on misconfig.
+
+### Added
+
+- `internal/auth` package — single source of truth for token validation
+  shared by HTTP middleware AND gRPC interceptor (FR-2). Two-strategy
+  chain (master constant-time compare + prefix-and-bcrypt keycard lookup).
+- gRPC `streamAuthInterceptor` covers `ProjectEvents` stream (US5).
+- Connection-pool keying by credential hash in `engramcore/grpcpool.go`
+  (FR-7). Two workstation sessions with distinct keycards no longer share
+  a pooled gRPC connection.
+- `internal/config/envnames.go` — single source of truth for env-var names.
+
+### Removed
+
+- Legacy `ENGRAM_API_TOKEN` env-var read paths (none remaining anywhere
+  in the codebase). FR-5 / ADR-004 prohibits fallback chains.
+- Inline bcrypt + prefix-lookup in `internal/worker/middleware.go` —
+  superseded by `auth.Validator` delegate.
+
 ## [5.0.0] - 2026-04-23
 
 ### Added

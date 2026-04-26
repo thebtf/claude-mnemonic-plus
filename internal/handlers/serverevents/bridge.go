@@ -15,6 +15,7 @@ import (
 	"google.golang.org/grpc/keepalive"
 	"google.golang.org/grpc/metadata"
 
+	"github.com/thebtf/engram/internal/config"
 	"github.com/thebtf/engram/internal/module"
 	"github.com/thebtf/engram/internal/module/registry"
 	pb "github.com/thebtf/engram/proto/engram/v1"
@@ -71,7 +72,7 @@ type ProjectTracker interface {
 // reconciliation. This was caught in PR #171 review.
 type Bridge struct {
 	clientID  string // "${pid}-${startUnix}" per proto-extensions.md
-	token     string // ENGRAM_AUTH_ADMIN_TOKEN; empty = no auth
+	token     string // ENGRAM_TOKEN (per-workstation keycard); empty = no auth
 	serverURL string // ENGRAM_SERVER_URL
 	logger    *slog.Logger
 	reg       *registry.Registry
@@ -104,14 +105,23 @@ func NewBridge(logger *slog.Logger, reg *registry.Registry, tracker ProjectTrack
 	startUnix := time.Now().Unix()
 	clientID := fmt.Sprintf("%d-%d", pid, startUnix)
 
-	serverURL := os.Getenv("ENGRAM_SERVER_URL")
+	// Precedence aligned with internal/config/envnames.go: EnvServerURL
+	// ("ENGRAM_URL") is canonical, EnvServerURLAlt ("ENGRAM_SERVER_URL")
+	// is the deprecated fallback. Reading them in the opposite order would
+	// let a divergent migration deploy serve tools/call and the
+	// serverevents bridge from two different backends within the same
+	// daemon process.
+	serverURL := os.Getenv(config.EnvServerURL)
 	if serverURL == "" {
-		if fallback := os.Getenv("ENGRAM_URL"); fallback != "" {
+		if fallback := os.Getenv(config.EnvServerURLAlt); fallback != "" {
 			serverURL = fallback
-			logger.Warn("ENGRAM_URL is deprecated for bridge configuration; please use ENGRAM_SERVER_URL instead")
+			logger.Warn("ENGRAM_SERVER_URL is deprecated for bridge configuration; please use ENGRAM_URL instead")
 		}
 	}
-	token := os.Getenv("ENGRAM_AUTH_ADMIN_TOKEN")
+	// FR-3 / Plan ADR-003: workstation reads the client-semantic env var.
+	// The pre-v6 ENGRAM_AUTH_ADMIN_TOKEN is intentionally NOT consulted here
+	// (FR-5 — no legacy fallback chains).
+	token := os.Getenv(config.EnvWorkstationToken)
 
 	return &Bridge{
 		clientID:  clientID,
