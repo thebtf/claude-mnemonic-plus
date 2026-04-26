@@ -2,6 +2,8 @@ package grpcserver
 
 import (
 	"context"
+	"errors"
+	"strings"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -9,7 +11,7 @@ import (
 	"google.golang.org/grpc/status"
 	"gorm.io/gorm"
 
-	"github.com/thebtf/engram/internal/config"
+	"github.com/thebtf/engram/internal/auth"
 	"github.com/thebtf/engram/internal/mcp"
 	"github.com/thebtf/engram/internal/worker/projectevents"
 	pb "github.com/thebtf/engram/proto/engram/v1"
@@ -35,22 +37,30 @@ type ToolDef struct {
 }
 
 // Server implements the EngramService gRPC server.
+//
+// Authentication is delegated to *auth.Validator (FR-2 / Plan ADR-002): the
+// same validation chain runs on HTTP and gRPC, so a bearer that authenticates
+// over `/api/...` MUST authenticate equivalently over gRPC. The validator is
+// nil ONLY when ENGRAM_AUTH_DISABLED=true is the operator's deliberate choice.
 type Server struct {
 	pb.UnimplementedEngramServiceServer
-	handler MCPHandler
-	token   string             // from ENGRAM_AUTH_ADMIN_TOKEN; empty means auth disabled
-	db      *gorm.DB           // injected by worker after DB is ready
-	bus     *projectevents.Bus // in-process project lifecycle event bus
+	handler   MCPHandler
+	validator *auth.Validator    // nil = auth disabled
+	db        *gorm.DB           // injected by worker after DB is ready
+	bus       *projectevents.Bus // in-process project lifecycle event bus
 }
 
-// New creates a new gRPC server with an optional auth interceptor.
-// The returned *grpc.Server has EngramService already registered.
-func New(handler MCPHandler) (*grpc.Server, *Server) {
-	token := config.GetWorkerToken()
-
+// New creates a new gRPC server. The returned *grpc.Server has EngramService
+// already registered AND has unary + streaming auth interceptors wired (no-op
+// when validator is nil — used only by tests and by ENGRAM_AUTH_DISABLED
+// deployments).
+//
+// Pass validator = nil to skip authentication. Production callers MUST pass a
+// non-nil validator constructed via auth.NewValidator.
+func New(handler MCPHandler, validator *auth.Validator) (*grpc.Server, *Server) {
 	srv := &Server{
-		handler: handler,
-		token:   token,
+		handler:   handler,
+		validator: validator,
 	}
 
 	opts := []grpc.ServerOption{
@@ -58,13 +68,24 @@ func New(handler MCPHandler) (*grpc.Server, *Server) {
 		grpc.MaxSendMsgSize(16 << 20),
 	}
 
-	if token != "" {
-		opts = append(opts, grpc.UnaryInterceptor(srv.authInterceptor))
+	if validator != nil {
+		opts = append(opts,
+			grpc.UnaryInterceptor(srv.authInterceptor),
+			grpc.StreamInterceptor(srv.streamAuthInterceptor),
+		)
 	}
 
 	gs := grpc.NewServer(opts...)
 	pb.RegisterEngramServiceServer(gs, srv)
 	return gs, srv
+}
+
+// SetValidator swaps the validator after construction. Used in tests and as
+// a hook point for future operator-key rotation. Production wiring already
+// receives the validator at New time; this setter exists for symmetry with
+// SetDB / SetBus.
+func (s *Server) SetValidator(v *auth.Validator) {
+	s.validator = v
 }
 
 // SetDB wires the database connection into the gRPC server after async initialization
@@ -124,38 +145,104 @@ func (s *Server) CallTool(ctx context.Context, req *pb.CallToolRequest) (*pb.Cal
 	}, nil
 }
 
-// authInterceptor validates the Bearer token from gRPC metadata.
-// Ping is always allowed through regardless of token.
+// extractBearer pulls the bearer token from gRPC metadata, stripping the
+// optional "Bearer " prefix. Returns empty string when no authorization
+// header is present (caller decides whether that's an error).
+func extractBearer(md metadata.MD) string {
+	values := md.Get("authorization")
+	if len(values) == 0 {
+		return ""
+	}
+	return strings.TrimPrefix(values[0], "Bearer ")
+}
+
+// validateBearer runs the validator and maps the outcome to a gRPC status
+// error. Returns (Identity, nil) on success.
+//
+// Error mapping follows FR-2 + spec §5.2 Error Path Table:
+//
+//   - missing metadata     → Unauthenticated "missing metadata"
+//   - missing header       → Unauthenticated "missing authorization header"
+//   - empty token after strip → Unauthenticated "missing authorization header"
+//   - invalid credentials  → Unauthenticated "invalid token"
+//   - revoked              → Unauthenticated "token revoked"
+//   - other (DB error)     → Internal "auth: store unavailable"
+func (s *Server) validateBearer(ctx context.Context) (auth.Identity, error) {
+	md, ok := metadata.FromIncomingContext(ctx)
+	if !ok {
+		return auth.Identity{}, status.Error(codes.Unauthenticated, "missing metadata")
+	}
+	raw := extractBearer(md)
+	if raw == "" {
+		return auth.Identity{}, status.Error(codes.Unauthenticated, "missing authorization header")
+	}
+
+	id, err := s.validator.Validate(ctx, raw)
+	switch {
+	case err == nil:
+		return id, nil
+	case errors.Is(err, auth.ErrEmptyToken):
+		return auth.Identity{}, status.Error(codes.Unauthenticated, "missing authorization header")
+	case errors.Is(err, auth.ErrInvalidCredentials):
+		return auth.Identity{}, status.Error(codes.Unauthenticated, "invalid token")
+	case errors.Is(err, auth.ErrRevoked):
+		return auth.Identity{}, status.Error(codes.Unauthenticated, "token revoked")
+	default:
+		// DB error or unexpected bcrypt failure. Surface as Internal so
+		// monitoring distinguishes auth-rejected (Unauthenticated) from
+		// auth-broken (Internal).
+		return auth.Identity{}, status.Error(codes.Internal, "auth: store unavailable")
+	}
+}
+
+// authInterceptor is the unary gRPC server interceptor. Ping is always allowed
+// through regardless of credentials. All other RPCs are validated through the
+// shared *auth.Validator. Successful identities are stored in the request
+// context via auth.WithIdentity so downstream handlers can read role/source.
 func (s *Server) authInterceptor(
 	ctx context.Context,
-	req interface{},
+	req any,
 	info *grpc.UnaryServerInfo,
 	handler grpc.UnaryHandler,
-) (interface{}, error) {
-	// Ping is a health-check — skip auth so monitoring tools work without credentials.
+) (any, error) {
 	if info.FullMethod == pb.EngramService_Ping_FullMethodName {
 		return handler(ctx, req)
 	}
 
-	md, ok := metadata.FromIncomingContext(ctx)
-	if !ok {
-		return nil, status.Error(codes.Unauthenticated, "missing metadata")
+	id, err := s.validateBearer(ctx)
+	if err != nil {
+		return nil, err
 	}
 
-	values := md.Get("authorization")
-	if len(values) == 0 {
-		return nil, status.Error(codes.Unauthenticated, "missing authorization header")
-	}
-
-	token := values[0]
-	// Accept both "Bearer <token>" and raw token.
-	if len(token) > 7 && token[:7] == "Bearer " {
-		token = token[7:]
-	}
-
-	if token != s.token {
-		return nil, status.Error(codes.Unauthenticated, "invalid token")
-	}
-
+	ctx = auth.WithIdentity(ctx, id)
 	return handler(ctx, req)
 }
+
+// streamAuthInterceptor is the streaming gRPC server interceptor. Ping is not
+// streaming; SyncProjectState is unary; ProjectEvents is the only streaming
+// method on the engram surface. The interceptor validates the bearer at stream
+// open. Per-event re-validation (FR-6 revocation honour mid-stream) lives in
+// the ProjectEvents emitter (see project_events.go).
+func (s *Server) streamAuthInterceptor(
+	srv any,
+	ss grpc.ServerStream,
+	info *grpc.StreamServerInfo,
+	handler grpc.StreamHandler,
+) error {
+	id, err := s.validateBearer(ss.Context())
+	if err != nil {
+		return err
+	}
+
+	wrapped := &authedStream{ServerStream: ss, ctx: auth.WithIdentity(ss.Context(), id)}
+	return handler(srv, wrapped)
+}
+
+// authedStream overrides Context() so handlers downstream of the interceptor
+// see the auth-enriched context.
+type authedStream struct {
+	grpc.ServerStream
+	ctx context.Context
+}
+
+func (a *authedStream) Context() context.Context { return a.ctx }

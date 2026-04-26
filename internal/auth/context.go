@@ -17,55 +17,51 @@ import "context"
 // MAY alias auth.RoleKey to its own authRoleKey{} (same Type Identity is not
 // required — both consumers will be migrated together in Phase 3).
 
-type roleKeyType struct{}
-type sourceKeyType struct{}
+type identityKeyType struct{}
 
-// RoleKey is the context value key under which Identity.Role is stored. Read
-// it via IdentityFrom or directly with ctx.Value(auth.RoleKey).
-var RoleKey = roleKeyType{}
+// IdentityKey is the canonical context value key for the resolved Identity.
+// Both transports (HTTP middleware, gRPC interceptor) store the entire
+// Identity (Role + Source + KeycardID) under this single key after
+// authentication succeeds. Downstream handlers read it via IdentityFrom,
+// or read individual scalars via RoleFrom / SourceFrom.
+//
+// The key is unexported as a type but exported as a value singleton so
+// other packages can reach into context.Value directly when an interface
+// boundary makes IdentityFrom inconvenient.
+var IdentityKey = identityKeyType{}
 
-// SourceKey is the context value key under which Identity.Source is stored.
-// Issuance endpoints (FR-6 / Clarification C4) MUST gate on this value being
-// SourceSession; bearer-based callers (master OR client) MUST be rejected.
-var SourceKey = sourceKeyType{}
-
-// WithIdentity returns a new context carrying id under the canonical Role and
-// Source keys. Intended to be called once per request after Validator.Validate
-// (or after a session-cookie path resolves the user role).
+// WithIdentity returns a new context carrying id under IdentityKey. Intended
+// to be called once per request after Validator.Validate (or after a
+// session-cookie path resolves the user role). The full Identity (including
+// KeycardID for SourceClient) is preserved so issuance audit / stats handlers
+// can attribute requests to a specific keycard.
 func WithIdentity(ctx context.Context, id Identity) context.Context {
-	ctx = context.WithValue(ctx, RoleKey, id.Role)
-	ctx = context.WithValue(ctx, SourceKey, id.Source)
-	return ctx
+	return context.WithValue(ctx, IdentityKey, id)
 }
 
 // IdentityFrom extracts an Identity from ctx. The second return is false when
-// no role has been set on the context — callers should treat that as
-// "unauthenticated" and respond accordingly. KeycardID is NOT round-tripped
-// through context (issuance/audit handlers that need it should consult their
-// own state).
+// no Identity has been set on the context — callers should treat that as
+// "unauthenticated" and respond accordingly.
 func IdentityFrom(ctx context.Context) (Identity, bool) {
-	role, ok := ctx.Value(RoleKey).(Role)
-	if !ok {
-		return Identity{}, false
-	}
-	src, _ := ctx.Value(SourceKey).(Source)
-	return Identity{Role: role, Source: src}, true
+	id, ok := ctx.Value(IdentityKey).(Identity)
+	return id, ok
 }
 
 // RoleFrom returns the role string for backward-compat with handlers that
-// previously read worker.authRoleKey{}. Empty string if no role.
+// previously read worker.authRoleKey{}. Empty string when no Identity is on
+// the context.
 func RoleFrom(ctx context.Context) string {
-	if role, ok := ctx.Value(RoleKey).(Role); ok {
-		return string(role)
+	if id, ok := IdentityFrom(ctx); ok {
+		return string(id.Role)
 	}
 	return ""
 }
 
-// SourceFrom returns the auth source string. Empty string if no source set
-// (e.g., authentication was disabled).
+// SourceFrom returns the auth source string. Empty string when no Identity is
+// on the context (e.g., authentication was disabled).
 func SourceFrom(ctx context.Context) string {
-	if src, ok := ctx.Value(SourceKey).(Source); ok {
-		return string(src)
+	if id, ok := IdentityFrom(ctx); ok {
+		return string(id.Source)
 	}
 	return ""
 }
