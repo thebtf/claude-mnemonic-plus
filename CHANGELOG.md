@@ -15,8 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   operator key on workstations. Each workstation now reads `ENGRAM_TOKEN`
   — a per-workstation API token (worker keycard) issued via the dashboard
   `/tokens` page. The operator key (`ENGRAM_AUTH_ADMIN_TOKEN`) lives ONLY
-  on the server host. Spec:
-  `.agent/specs/auth-two-tier-tokens/spec.md`.
+  on the server host.
 - **Plugin `.mcp.json` env rename.** `ENGRAM_AUTH_ADMIN_TOKEN` →
   `ENGRAM_TOKEN`. No legacy fallback chain — pre-v6 configurations stop
   working until re-issued.

@@ -53,12 +53,14 @@ type Server struct {
 }
 
 // New creates a new gRPC server. The returned *grpc.Server has EngramService
-// already registered AND has unary + streaming auth interceptors wired (no-op
-// when validator is nil — used only by tests and by ENGRAM_AUTH_DISABLED
-// deployments).
+// already registered AND has unary + streaming auth interceptors wired
+// unconditionally. The interceptors bypass auth when the live validator is
+// nil — used by tests and by ENGRAM_AUTH_DISABLED deployments — but they
+// honour any validator installed later via SetValidator without restart.
 //
-// Pass validator = nil to skip authentication. Production callers MUST pass a
-// non-nil validator constructed via auth.NewValidator.
+// Pass validator = nil to start with auth disabled; SetValidator(v) at any
+// later time re-enables it. Production callers SHOULD pass a non-nil
+// validator at New time.
 func New(handler MCPHandler, validator *auth.Validator) (*grpc.Server, *Server) {
 	srv := &Server{
 		handler:   handler,
@@ -68,13 +70,14 @@ func New(handler MCPHandler, validator *auth.Validator) (*grpc.Server, *Server) 
 	opts := []grpc.ServerOption{
 		grpc.MaxRecvMsgSize(16 << 20), // 16 MB
 		grpc.MaxSendMsgSize(16 << 20),
-	}
-
-	if validator != nil {
-		opts = append(opts,
-			grpc.UnaryInterceptor(srv.authInterceptor),
-			grpc.StreamInterceptor(srv.streamAuthInterceptor),
-		)
+		// Always register the interceptors. They are runtime-no-op when the
+		// live validator is nil (auth disabled), and runtime-enforce when
+		// SetValidator promotes the server out of bootstrap. Conditional
+		// registration would lock the server into the construction-time
+		// auth state and silently leave RPCs unprotected after a
+		// nil → non-nil swap.
+		grpc.UnaryInterceptor(srv.authInterceptor),
+		grpc.StreamInterceptor(srv.streamAuthInterceptor),
 	}
 
 	gs := grpc.NewServer(opts...)
@@ -237,6 +240,13 @@ func (s *Server) authInterceptor(
 		return handler(ctx, req)
 	}
 
+	// Auth disabled (no validator installed) — bypass entirely. This is the
+	// runtime check that lets SetValidator(v) flip the server from bootstrap
+	// to enforced without recreating the gRPC server.
+	if s.currentValidator() == nil {
+		return handler(ctx, req)
+	}
+
 	id, err := s.validateBearer(ctx)
 	if err != nil {
 		return nil, err
@@ -257,6 +267,11 @@ func (s *Server) streamAuthInterceptor(
 	info *grpc.StreamServerInfo,
 	handler grpc.StreamHandler,
 ) error {
+	// Auth disabled (no validator installed) — bypass entirely.
+	if s.currentValidator() == nil {
+		return handler(srv, ss)
+	}
+
 	id, err := s.validateBearer(ss.Context())
 	if err != nil {
 		return err

@@ -118,7 +118,8 @@ func TestValidate_ValidPrefix_NoMatchInStore(t *testing.T) {
 	}
 	v := auth.NewValidator("master-secret", store)
 
-	_, err := v.Validate(context.Background(), "engram_abcd1234ZZZZZZZZZZZZ")
+	// 39-char total: TokenRawPrefix (7) + 32 hex chars.
+	_, err := v.Validate(context.Background(), "engram_abcd1234000000000000000000000000")
 
 	assert.True(t, errors.Is(err, auth.ErrInvalidCredentials))
 	assert.Equal(t, 1, store.prefixCalls)
@@ -126,7 +127,7 @@ func TestValidate_ValidPrefix_NoMatchInStore(t *testing.T) {
 
 func TestValidate_ValidPrefix_NonRevokedMatch(t *testing.T) {
 	t.Parallel()
-	raw := "engram_deadbeef0000000000000001"
+	raw := "engram_deadbeef000000000000000000000001"
 	keycard := makeKeycard(t, "uuid-1", raw, "read-write", false)
 	store := &stubStore{
 		byPrefix: map[string][]gormdb.APIToken{
@@ -147,7 +148,7 @@ func TestValidate_ValidPrefix_NonRevokedMatch(t *testing.T) {
 
 func TestValidate_ValidPrefix_ReadOnlyScope(t *testing.T) {
 	t.Parallel()
-	raw := "engram_cafef00d00000000000000ro"
+	raw := "engram_cafef00d000000000000000000000002"
 	keycard := makeKeycard(t, "uuid-ro", raw, "read-only", false)
 	store := &stubStore{byPrefix: map[string][]gormdb.APIToken{"cafef00d": {keycard}}}
 	v := auth.NewValidator("master-secret", store)
@@ -161,8 +162,8 @@ func TestValidate_ValidPrefix_ReadOnlyScope(t *testing.T) {
 
 func TestValidate_PrefixCollision_TwoCandidates_OneMatches(t *testing.T) {
 	t.Parallel()
-	rawA := "engram_facade00000000000000000aa"
-	rawB := "engram_facade00000000000000000bb"
+	rawA := "engram_facade00000000000000000000000aaa"
+	rawB := "engram_facade00000000000000000000000bbb"
 	cardA := makeKeycard(t, "uuid-a", rawA, "read-write", false)
 	cardB := makeKeycard(t, "uuid-b", rawB, "read-only", false)
 	store := &stubStore{
@@ -184,9 +185,9 @@ func TestValidate_PrefixCollision_TwoCandidates_OneMatches(t *testing.T) {
 
 func TestValidate_PrefixCollision_NeitherMatches(t *testing.T) {
 	t.Parallel()
-	otherRaw := "engram_facade00000000000000000xx"
-	cardA := makeKeycard(t, "uuid-a", "engram_facade00000000000000000aa", "read-write", false)
-	cardB := makeKeycard(t, "uuid-b", "engram_facade00000000000000000bb", "read-only", false)
+	otherRaw := "engram_facade00000000000000000000000fff"
+	cardA := makeKeycard(t, "uuid-a", "engram_facade00000000000000000000000aaa", "read-write", false)
+	cardB := makeKeycard(t, "uuid-b", "engram_facade00000000000000000000000bbb", "read-only", false)
 	store := &stubStore{
 		byPrefix: map[string][]gormdb.APIToken{"facade00": {cardA, cardB}},
 	}
@@ -202,7 +203,7 @@ func TestValidate_StoreError_PropagatesAsAuthFailure(t *testing.T) {
 	store := &stubStore{returnErr: errors.New("db down")}
 	v := auth.NewValidator("master-secret", store)
 
-	_, err := v.Validate(context.Background(), "engram_abcd1234ZZZZZZZZZZZZ")
+	_, err := v.Validate(context.Background(), "engram_abcd1234000000000000000000000000")
 
 	require.Error(t, err)
 	// Adapters expect ErrInvalidCredentials OR a wrapped store error; the
@@ -215,7 +216,7 @@ func TestValidate_EmptyMaster_KeycardStillWorks(t *testing.T) {
 	// FR-1 + Validator doc string: when masterToken is empty, only Tier-2
 	// validation runs. Verifies the documented "no operator key configured;
 	// dashboard-issued keycards are the sole authentication path" mode.
-	raw := "engram_d00dd00d000000000000beef"
+	raw := "engram_d00dd00d000000000000000000000003"
 	keycard := makeKeycard(t, "uuid-em", raw, "read-write", false)
 	store := &stubStore{byPrefix: map[string][]gormdb.APIToken{"d00dd00d": {keycard}}}
 	v := auth.NewValidator("", store)
@@ -233,7 +234,7 @@ func TestValidate_MasterAndKeycardDistinguishable(t *testing.T) {
 	// Verifies FR-1 storage disjointness from the validator's perspective:
 	// the master path produces SourceMaster; the keycard path produces
 	// SourceClient. There is no fallback that conflates them.
-	rawClient := "engram_aaaa1111000000000000bbbb"
+	rawClient := "engram_aaaa1111000000000000000000000004"
 	keycard := makeKeycard(t, "uuid-c", rawClient, "read-write", false)
 	store := &stubStore{byPrefix: map[string][]gormdb.APIToken{"aaaa1111": {keycard}}}
 	v := auth.NewValidator("master-secret", store)

@@ -12,7 +12,7 @@ import (
 	gormdb "github.com/thebtf/engram/internal/db/gorm"
 )
 
-// Token-shape constants. The dashboard issues raw tokens with the conventional
+// Token-shape constants. The dashboard issues raw tokens with the exact
 // shape "engram_" + 32 hex chars (= 7 + 32 = 39 chars total). The first 8 hex
 // chars form a non-unique prefix index in the api_tokens table; collisions are
 // resolved by bcrypt comparison over the candidate set.
@@ -31,11 +31,29 @@ const (
 	// form the database prefix index.
 	TokenPrefixLen = 8
 
-	// TokenMinLen is the smallest length a candidate keycard can validly
-	// have: prefix + index. Anything shorter cannot match any prefix index
-	// row, so we reject it pre-DB.
-	TokenMinLen = len(TokenRawPrefix) + TokenPrefixLen // 7 + 8 = 15
+	// TokenBodyLen is the EXACT number of hex characters following
+	// TokenRawPrefix in a valid keycard. Issuance always emits exactly 32
+	// hex chars (16 random bytes hex-encoded). The shape gate enforces this
+	// to fail-closed before touching the database, which prevents
+	// prefix-probing from generating bcrypt load.
+	TokenBodyLen = 32
+
+	// TokenTotalLen is the exact total length of a valid raw keycard:
+	// TokenRawPrefix + TokenBodyLen.
+	TokenTotalLen = len(TokenRawPrefix) + TokenBodyLen // 7 + 32 = 39
+
+	// TokenMinLen is preserved for legacy callers that imported it pre-v6;
+	// new code should use TokenTotalLen for length comparisons.
+	//
+	// Deprecated: use TokenTotalLen.
+	TokenMinLen = TokenTotalLen
 )
+
+// isHex reports whether b is a valid lowercase or uppercase ASCII hex digit.
+// Inlined to avoid a unicode-aware helper on the validator hot path.
+func isHex(b byte) bool {
+	return (b >= '0' && b <= '9') || (b >= 'a' && b <= 'f') || (b >= 'A' && b <= 'F')
+}
 
 // TokenStoreReader is the narrow read-side contract Validator depends on. The
 // production binding is *gormdb.TokenStore; tests inject a fake. Keeping the
@@ -110,11 +128,19 @@ func (v *Validator) Validate(ctx context.Context, raw string) (Identity, error) 
 		}
 	}
 
-	// Tier 2 shape gate.
-	if !strings.HasPrefix(raw, TokenRawPrefix) || len(raw) < TokenMinLen {
+	// Tier 2 shape gate. Enforce exact total length AND that the body is
+	// pure hex. Either gate failing avoids any DB / bcrypt work, blocking
+	// prefix-probing and shape-fuzzing as DoS vectors.
+	if !strings.HasPrefix(raw, TokenRawPrefix) || len(raw) != TokenTotalLen {
 		return Identity{}, ErrInvalidCredentials
 	}
-	prefix := raw[len(TokenRawPrefix) : len(TokenRawPrefix)+TokenPrefixLen]
+	body := raw[len(TokenRawPrefix):]
+	for i := 0; i < len(body); i++ {
+		if !isHex(body[i]) {
+			return Identity{}, ErrInvalidCredentials
+		}
+	}
+	prefix := body[:TokenPrefixLen]
 
 	candidates, err := v.store.FindByPrefix(ctx, prefix)
 	if err != nil {

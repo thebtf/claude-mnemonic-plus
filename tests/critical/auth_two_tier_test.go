@@ -64,8 +64,17 @@ func TestCritical_AuthTwoTier(t *testing.T) {
 	// --- Fixtures: valid keycard, valid operator key ---
 	const (
 		operatorKey = "operator-secret-do-not-reuse"
-		clientRaw   = "engram_critic1c000000000000ffeed"
+		// 39-char raw keycard: TokenRawPrefix ("engram_") + 32 hex chars.
+		// The shape gate in auth.Validator rejects anything that isn't
+		// exactly this shape, so the fixture MUST match.
+		clientRaw = "engram_cccccc1c000000000000000000abcdef"
 	)
+
+	// Use auth.TokenRawPrefix / TokenPrefixLen so a future change to the
+	// token shape can't silently desync this test from the validator.
+	prefixStart := len(auth.TokenRawPrefix)
+	prefixEnd := prefixStart + auth.TokenPrefixLen
+	clientPrefix := clientRaw[prefixStart:prefixEnd]
 
 	// Hash the keycard with bcrypt.MinCost (test cost) and seed an in-memory
 	// token store keyed by the 8-hex prefix.
@@ -73,11 +82,11 @@ func TestCritical_AuthTwoTier(t *testing.T) {
 	require.NoError(t, err)
 	store := &critStore{
 		rows: map[string][]gormdb.APIToken{
-			clientRaw[7:15]: {{
+			clientPrefix: {{
 				ID:          "uuid-critical-1",
 				Name:        "critical-test-keycard",
 				TokenHash:   string(hash),
-				TokenPrefix: clientRaw[7:15],
+				TokenPrefix: clientPrefix,
 				Scope:       "read-write",
 			}},
 		},

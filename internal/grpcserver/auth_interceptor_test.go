@@ -113,7 +113,7 @@ func TestAuthInterceptor_MasterToken(t *testing.T) {
 
 func TestAuthInterceptor_ValidKeycard(t *testing.T) {
 	t.Parallel()
-	raw := "engram_aaaa1111000000000000beef"
+	raw := "engram_aaaa111100000000000000000000beef"
 	row := makeKeycardRow(t, "uuid-w", raw, "read-write")
 	srv := &Server{
 		validator: auth.NewValidator("master-secret", &stubReader{
@@ -174,7 +174,7 @@ func (s *stubStream) Context() context.Context { return s.ctx }
 
 func TestStreamAuthInterceptor_ValidKeycard(t *testing.T) {
 	t.Parallel()
-	raw := "engram_bbbb2222000000000000feed"
+	raw := "engram_bbbb222200000000000000000000feed"
 	row := makeKeycardRow(t, "uuid-s", raw, "read-write")
 	srv := &Server{
 		validator: auth.NewValidator("master-secret", &stubReader{
@@ -222,7 +222,7 @@ func TestStreamAuthInterceptor_RevokedKeycardAtOpen(t *testing.T) {
 	// "Revocation" is modelled by the reader returning an empty candidate
 	// set for the prefix — TokenStore.FindByPrefix already filters
 	// "AND NOT revoked", so this matches production wiring.
-	raw := "engram_cccc3333000000000000dead"
+	raw := "engram_cccc333300000000000000000000dead"
 	srv := &Server{
 		validator: auth.NewValidator("master-secret", &stubReader{
 			rows: map[string][]gormdb.APIToken{"cccc3333": {}}, // empty — revoked filtered out
