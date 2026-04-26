@@ -33,17 +33,26 @@ func (s *stubStore) FindByPrefix(_ context.Context, prefix string) ([]gormdb.API
 
 // makeKeycard hashes raw using bcrypt.MinCost (test-only) and returns an
 // APIToken row with the conventional engram_<prefix><tail> shape.
+//
+// Fixture validation is wired to the auth.Token* constants (TokenRawPrefix,
+// TokenPrefixLen, TokenTotalLen) — single source of truth for token shape
+// across producer (issuance), consumer (validator), and tests. A future
+// shape change cannot leave these tests silently green.
 func makeKeycard(t *testing.T, id, raw, scope string, revoked bool) gormdb.APIToken {
 	t.Helper()
 	hash, err := bcrypt.GenerateFromPassword([]byte(raw), bcrypt.MinCost)
 	require.NoError(t, err)
-	require.True(t, strings.HasPrefix(raw, "engram_"), "test fixture: raw must start with engram_")
-	require.GreaterOrEqual(t, len(raw), 15, "test fixture: raw must be ≥ 15 chars")
+	require.True(t, strings.HasPrefix(raw, auth.TokenRawPrefix),
+		"test fixture: raw must start with auth.TokenRawPrefix (%q)", auth.TokenRawPrefix)
+	require.Equal(t, auth.TokenTotalLen, len(raw),
+		"test fixture: raw must be exactly auth.TokenTotalLen chars (got %d, want %d)",
+		len(raw), auth.TokenTotalLen)
+	prefix := raw[len(auth.TokenRawPrefix) : len(auth.TokenRawPrefix)+auth.TokenPrefixLen]
 	return gormdb.APIToken{
 		ID:          id,
 		Name:        "test-" + id,
 		TokenHash:   string(hash),
-		TokenPrefix: raw[7:15],
+		TokenPrefix: prefix,
 		Scope:       scope,
 		Revoked:     revoked,
 	}

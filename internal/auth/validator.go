@@ -142,6 +142,14 @@ func (v *Validator) Validate(ctx context.Context, raw string) (Identity, error) 
 	}
 	prefix := body[:TokenPrefixLen]
 
+	// Fail-closed when no store is wired. Reaches here only via test
+	// constructions and the bootstrap window; production New() must always
+	// pass a non-nil store. Surface as ErrInvalidCredentials (not panic, not
+	// silent success) so the caller's auth pipeline degrades safely.
+	if v.store == nil {
+		return Identity{}, ErrInvalidCredentials
+	}
+
 	candidates, err := v.store.FindByPrefix(ctx, prefix)
 	if err != nil {
 		return Identity{}, fmt.Errorf("auth: token store lookup: %w", err)

@@ -57,7 +57,8 @@ Failure signals:
 
 Steps:
 1. Set `ENGRAM_AUTH_ADMIN_TOKEN=test-operator-key`
-2. Set `ENGRAM_DATABASE_URL=...` (or rely on default sqlite if applicable)
+2. Set `DATABASE_DSN=...` (the canonical name read by `internal/config/config.go`;
+   omit to fall back to the default sqlite store)
 3. Run `engram-server.exe`
 4. Observe startup logs
 
@@ -68,7 +69,9 @@ Expected:
 
 Failure signals:
 - Server exits during startup citing missing env var → FR-4 violated
-- Logs warn about deprecated `ENGRAM_AUTH_TOKEN` env var (renamed in v6)
+- Logs warn about a deprecated env var rename (the v6 surface is
+  `ENGRAM_AUTH_ADMIN_TOKEN` server-host-only; on workstations the
+  pre-v6 `ENGRAM_AUTH_ADMIN_TOKEN` was renamed to `ENGRAM_TOKEN`)
 - gRPC bind fails
 
 ### S3 — Dashboard loads and `/tokens` page is reachable
