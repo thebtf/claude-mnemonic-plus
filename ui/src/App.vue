@@ -106,7 +106,7 @@ onMounted(() => {
         </header>
 
         <!-- Main content -->
-        <main class="flex-1 overflow-auto px-4 py-4 lg:px-6">
+        <main class="flex-1 overflow-auto px-4 pb-4 lg:px-6">
           <router-view />
         </main>
       </SidebarInset>

@@ -191,7 +191,7 @@ const issueTypes = [
 </script>
 
 <template>
-  <div class="space-y-3">
+  <div class="space-y-3 pt-4">
     <!-- Header: title + actions -->
     <div class="flex items-center justify-between flex-wrap gap-2">
       <div class="flex items-center gap-3">

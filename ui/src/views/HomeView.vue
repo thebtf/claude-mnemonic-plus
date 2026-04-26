@@ -81,7 +81,7 @@ function navigateToIssue(id: number) {
 </script>
 
 <template>
-  <div class="flex flex-col gap-6 p-6">
+  <div class="flex flex-col gap-4 pt-4">
 
     <!-- Section 1: Server Status Header -->
     <Card>
@@ -111,7 +111,7 @@ function navigateToIssue(id: number) {
     </Card>
 
     <!-- Section 2: Metric Cards -->
-    <div class="grid grid-cols-2 lg:grid-cols-4 gap-4">
+    <div class="grid grid-cols-2 lg:grid-cols-4 gap-3">
       <!-- Sessions Today -->
       <Card>
         <CardHeader class="pb-2">
@@ -186,7 +186,7 @@ function navigateToIssue(id: number) {
           <div
             v-for="component in health.components"
             :key="component.name"
-            class="flex items-center justify-between rounded-lg border border-border bg-card p-3"
+            class="flex items-center justify-between border border-border bg-card p-3"
           >
             <span class="text-sm font-medium text-foreground capitalize">{{ component.name }}</span>
             <Badge :variant="statusBadgeVariant(component.status)">

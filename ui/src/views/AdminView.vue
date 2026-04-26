@@ -165,7 +165,7 @@ onMounted(async () => {
 </script>
 
 <template>
-  <div class="space-y-8">
+  <div class="space-y-8 pt-4">
     <!-- Header -->
     <div class="flex items-center gap-3">
       <Shield class="text-primary size-5" />

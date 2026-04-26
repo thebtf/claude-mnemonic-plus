@@ -320,7 +320,7 @@ onMounted(loadIssue)
 </script>
 
 <template>
-  <div class="space-y-4">
+  <div class="space-y-4 pt-4">
     <!-- Back button -->
     <Button variant="ghost" size="sm" @click="router.push('/issues')" class="-ml-2">
       <ArrowLeft class="w-4 h-4 mr-1" />

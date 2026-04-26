@@ -85,7 +85,7 @@ const healthIcon = (name: string) => {
 </script>
 
 <template>
-  <div class="space-y-4">
+  <div class="space-y-4 pt-4">
     <h1 class="text-lg font-semibold">System</h1>
 
     <!-- Server Info -->
