@@ -23,6 +23,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/thebtf/engram/internal/config"
 	"github.com/thebtf/engram/internal/control"
 	"github.com/thebtf/engram/internal/handlers/serverevents"
 	"github.com/thebtf/engram/internal/module"
@@ -35,9 +36,39 @@ import (
 
 // daemonVersion is the string reported to gRPC Initialize and used in
 // structured logs. Tracks Constitution §15 unified engram + plugin version.
-const daemonVersion = "v5.2.5"
+const daemonVersion = "v6.0.0"
+
+// startupGate enforces FR-4 / Plan ADR-005. When the daemon process starts
+// with a configured server URL but no ENGRAM_TOKEN, exit non-zero with a
+// single user-actionable diagnostic. When no server URL is configured the
+// gate is silent — local-only flows (loom_*) continue to work without a
+// token. Returns true on pass; false (after writing stderr + os.Exit) is
+// unreachable from the caller's perspective.
+func startupGate() {
+	serverURL := os.Getenv(config.EnvServerURL)
+	if serverURL == "" {
+		serverURL = os.Getenv(config.EnvServerURLAlt)
+	}
+	if serverURL == "" {
+		// No back-end configured — local-only flows are allowed without token.
+		return
+	}
+	if os.Getenv(config.EnvWorkstationToken) != "" {
+		return
+	}
+	fmt.Fprintf(os.Stderr,
+		"[engram] FATAL: %s is empty. Generate a keycard at %s/tokens and run /engram:setup.\n",
+		config.EnvWorkstationToken, serverURL,
+	)
+	os.Exit(1)
+}
 
 func main() {
+	// FR-4 / ADR-005: fail-fast on missing workstation credential BEFORE
+	// any heavy initialisation. Loud failure beats silent loom_*-only
+	// graceful degradation that masked PR #203's regression for days.
+	startupGate()
+
 	// Clean stale binaries from previous upgrades (.old.* files).
 	if exePath, err := os.Executable(); err == nil {
 		if cleaned := upgrade.CleanStale(exePath); cleaned > 0 {

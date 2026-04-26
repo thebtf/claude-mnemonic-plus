@@ -15,6 +15,7 @@ import (
 	"google.golang.org/grpc/keepalive"
 	"google.golang.org/grpc/metadata"
 
+	"github.com/thebtf/engram/internal/config"
 	"github.com/thebtf/engram/internal/module"
 	"github.com/thebtf/engram/internal/module/registry"
 	pb "github.com/thebtf/engram/proto/engram/v1"
@@ -104,14 +105,17 @@ func NewBridge(logger *slog.Logger, reg *registry.Registry, tracker ProjectTrack
 	startUnix := time.Now().Unix()
 	clientID := fmt.Sprintf("%d-%d", pid, startUnix)
 
-	serverURL := os.Getenv("ENGRAM_SERVER_URL")
+	serverURL := os.Getenv(config.EnvServerURLAlt)
 	if serverURL == "" {
-		if fallback := os.Getenv("ENGRAM_URL"); fallback != "" {
+		if fallback := os.Getenv(config.EnvServerURL); fallback != "" {
 			serverURL = fallback
 			logger.Warn("ENGRAM_URL is deprecated for bridge configuration; please use ENGRAM_SERVER_URL instead")
 		}
 	}
-	token := os.Getenv("ENGRAM_AUTH_ADMIN_TOKEN")
+	// FR-3 / Plan ADR-003: workstation reads the client-semantic env var.
+	// The pre-v6 ENGRAM_AUTH_ADMIN_TOKEN is intentionally NOT consulted here
+	// (FR-5 — no legacy fallback chains).
+	token := os.Getenv(config.EnvWorkstationToken)
 
 	return &Bridge{
 		clientID:  clientID,
