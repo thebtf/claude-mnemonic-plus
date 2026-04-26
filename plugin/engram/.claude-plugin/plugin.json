@@ -1,7 +1,7 @@
 {
   "name": "engram",
-  "version": "5.2.5",
-  "description": "Persistent memory for Claude Code — static session-start context, durable memory tools, and compatibility hooks aligned with v5. api_token is optional: set via /config UI or via ENGRAM_AUTH_ADMIN_TOKEN env var in ~/.claude/settings.json (survives CC credential store races).",
+  "version": "6.0.0",
+  "description": "Persistent memory for Claude Code. v6 BREAKING: per-workstation API tokens replace the shared admin token. Issue a keycard via the dashboard /tokens page after upgrade and paste it via /engram:setup. The operator key (ENGRAM_AUTH_ADMIN_TOKEN) lives ONLY on the server host and MUST NOT be pasted into a workstation.",
   "author": {
     "name": "thebtf"
   },
@@ -17,10 +17,10 @@
       "sensitive": false
     },
     "api_token": {
-      "title": "API Token",
-      "description": "API authentication token for your engram server. Optional — if unset here, the plugin falls back to the ENGRAM_AUTH_ADMIN_TOKEN env var (typically set in ~/.claude/settings.json). This workaround survives CC credential-store races that periodically wipe sensitive plugin values (see anthropics/claude-code#45551).",
+      "title": "API Token (worker keycard)",
+      "description": "Per-workstation API token issued via the engram dashboard /tokens page. NOT the operator/admin token (which lives only on the server host). Generate one via the UI, copy it once, paste it here. Revoke from the same page if the workstation is compromised. After rotation, re-run /engram:setup. (v6 breaking: previous versions accepted the operator token here — that is no longer valid.)",
       "type": "string",
-      "required": false,
+      "required": true,
       "sensitive": true
     }
   }

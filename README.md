@@ -25,15 +25,29 @@ A reduced static-first MCP surface remains for the surviving entity model, keepi
 ---
 
 <!-- redoc:start:whats-new -->
-## What's New in v5.0.0
+## What's New in v6.0.0
 
 | Version | Highlight |
 |---------|-----------|
+| **v6.0.0** | **BREAKING** — Two-tier token authentication: per-workstation keycards via dashboard `/tokens`, daemon fail-fast on missing token, issuance hardened to browser session. |
 | **v5.0.0** | Cleaned Baseline — static-only storage, observations split, session-start gRPC + cache fallback |
 | **v4.4.0** | Loom tenant — background task execution and daemon-side project event bridge |
 | **v4.0.0** | Daemon architecture — muxcore engine, gRPC transport, local persistent daemon, auto-binary plugin |
 
 See [Releases](https://github.com/thebtf/engram/releases) for full changelog.
+
+### Two-Tier Token Model (v6)
+
+Engram v6 separates two credential tiers, each pinned to a single host class:
+
+| Tier | Name | Lives in | Purpose | Issuance |
+|---|---|---|---|---|
+| **1 — Operator key** | `ENGRAM_AUTH_ADMIN_TOKEN` | Server-host environment ONLY (Docker, compose) | Admin-grade access for migrations, server-internal RPCs, dashboard bootstrap | Operator-managed (Docker env) |
+| **2 — Worker keycard** | `ENGRAM_TOKEN` | Workstation `~/.claude/settings.json` env | Daemon ↔ server gRPC, regular MCP tool calls | Generated via dashboard `/tokens` page (admin-only browser session) |
+
+Operator keys NEVER appear on workstations. Worker keycards NEVER appear on the server host. There is no `OR`-fallback between the two names — the daemon ignores the admin name; the server ignores the workstation name. Workstation startup with `ENGRAM_URL` set but `ENGRAM_TOKEN` empty exits non-zero with an actionable error. Keycard issuance requires a browser admin session — bearer callers get 403 on `/api/auth/tokens`.
+
+Migration from v5.x: open `<server-url>/tokens`, log in as admin, generate a keycard, paste it via `/engram:setup`. See [CHANGELOG.md](CHANGELOG.md) for full migration steps.
 <!-- redoc:end:whats-new -->
 
 ---

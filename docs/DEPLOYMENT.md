@@ -5,6 +5,26 @@ Engram uses a **client-server architecture**:
 - **Server** (Docker on remote host): Worker (API + MCP) + PostgreSQL
 - **Client** (local workstation): Claude Code plugin (hooks + HTTP MCP)
 
+## Token Model (v6)
+
+Two distinct credential tiers, host-pinned:
+
+- **`ENGRAM_AUTH_ADMIN_TOKEN`** — Operator key. Set ONLY in the server-host
+  environment (Docker compose `.env` / Unraid template / systemd unit).
+  Grants admin-grade access. **MUST NOT be placed on a workstation.**
+- **`ENGRAM_TOKEN`** — Per-workstation API token (worker keycard). Issued
+  via the dashboard `/tokens` page after admin login. Each workstation
+  gets its own. Lives in `~/.claude/settings.json` env or the plugin's
+  `user_config.api_token`. **MUST NOT be set on the server host.**
+
+A workstation that starts with `ENGRAM_URL` set but `ENGRAM_TOKEN` empty
+exits with a fatal stderr line — replacing the pre-v6 silent
+graceful-degrade to `loom_*-only` that masked PR #203's regression.
+
+Keycard issuance, listing, revocation: `/api/auth/tokens` endpoints.
+These require an admin browser session cookie. Bearer-token callers
+(operator key OR keycard) are rejected with 403.
+
 ```
   ┌─── Workstation A ────────────────┐      ┌─── Server (Docker) ──────────────┐
   │                                  │      │                                  │
