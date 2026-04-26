@@ -120,10 +120,6 @@ func (s *Service) handleGetCredential(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	project := r.URL.Query().Get("project")
-	if project == "" {
-		http.Error(w, "project is required", http.StatusBadRequest)
-		return
-	}
 
 	v, err := s.getVault()
 	if err != nil {
@@ -132,7 +128,13 @@ func (s *Service) handleGetCredential(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	cred, err := s.credentialStore.Get(r.Context(), project, name)
+	var cred *models.Credential
+	if project != "" {
+		cred, err = s.credentialStore.Get(r.Context(), project, name)
+	} else {
+		// Dashboard admin view: caller doesn't know the project — find by name.
+		cred, err = s.credentialStore.GetByName(r.Context(), name)
+	}
 	if err != nil {
 		if errors.Is(err, gormlib.ErrRecordNotFound) {
 			http.Error(w, "credential not found", http.StatusNotFound)
@@ -287,12 +289,15 @@ func (s *Service) handleDeleteCredential(w http.ResponseWriter, r *http.Request)
 	}
 
 	project := r.URL.Query().Get("project")
-	if project == "" {
-		http.Error(w, "project is required", http.StatusBadRequest)
-		return
-	}
 
-	if err := s.credentialStore.Delete(r.Context(), project, name); err != nil {
+	var err error
+	if project != "" {
+		err = s.credentialStore.Delete(r.Context(), project, name)
+	} else {
+		// Dashboard admin view: caller doesn't know the project — find and delete by name.
+		err = s.credentialStore.DeleteByName(r.Context(), name)
+	}
+	if err != nil {
 		if errors.Is(err, gormlib.ErrRecordNotFound) {
 			http.Error(w, "credential not found", http.StatusNotFound)
 			return
