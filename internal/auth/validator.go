@@ -1,0 +1,138 @@
+package auth
+
+import (
+	"context"
+	"crypto/subtle"
+	"errors"
+	"fmt"
+	"strings"
+
+	"golang.org/x/crypto/bcrypt"
+
+	gormdb "github.com/thebtf/engram/internal/db/gorm"
+)
+
+// Token-shape constants. The dashboard issues raw tokens with the conventional
+// shape "engram_" + 32 hex chars (= 7 + 32 = 39 chars total). The first 8 hex
+// chars form a non-unique prefix index in the api_tokens table; collisions are
+// resolved by bcrypt comparison over the candidate set.
+const (
+	// tokenRawPrefix is the literal byte sequence every dashboard-issued
+	// keycard begins with. Tokens lacking this prefix are rejected without
+	// touching the database.
+	tokenRawPrefix = "engram_"
+
+	// tokenPrefixLen is the number of characters AFTER tokenRawPrefix that
+	// form the database prefix index. Mirrors the issuance code in
+	// internal/worker/handlers_auth.go.
+	tokenPrefixLen = 8
+
+	// tokenMinLen is the smallest length a candidate keycard can validly
+	// have: prefix + index. Anything shorter cannot match any prefix index
+	// row, so we reject it pre-DB.
+	tokenMinLen = len(tokenRawPrefix) + tokenPrefixLen // 7 + 8 = 15
+)
+
+// TokenStoreReader is the narrow read-side contract Validator depends on. The
+// production binding is *gormdb.TokenStore; tests inject a fake. Keeping the
+// interface in this package means callers cannot accidentally couple the
+// validator to write-side TokenStore methods (Create, Revoke, IncrementStats —
+// those belong to the issuance/audit paths, not the validation hot-path).
+//
+// Compile-time conformance is asserted in validator_test.go via
+//
+//	var _ auth.TokenStoreReader = (*gormdb.TokenStore)(nil)
+//
+// so a signature drift in gormdb is caught at build time.
+type TokenStoreReader interface {
+	// FindByPrefix returns all NON-revoked tokens whose token_prefix column
+	// equals prefix. The contract on the engram side already filters
+	// revoked rows; the validator therefore does not need to inspect the
+	// Revoked field on returned rows.
+	FindByPrefix(ctx context.Context, prefix string) ([]gormdb.APIToken, error)
+}
+
+// Validator is the single source of truth for token-based authentication.
+// It is consumed by both the HTTP middleware (internal/worker/middleware.go)
+// and the gRPC interceptor (internal/grpcserver/server.go).
+//
+// Validator is safe for concurrent use; the store field is the only mutable
+// dependency and TokenStoreReader implementations are expected to be
+// goroutine-safe (gormdb.TokenStore satisfies that via *gorm.DB).
+type Validator struct {
+	masterToken string           // Tier 1 — operator key from server-host env.
+	store       TokenStoreReader // Tier 2 — dashboard-issued keycards.
+}
+
+// NewValidator constructs a Validator bound to the given master token and
+// keycard store. masterToken MAY be empty — when empty, only Tier-2 (keycard)
+// validation is attempted. Use empty masterToken when running with
+// ENGRAM_AUTH_DISABLED=true is not desired but the operator chooses to
+// surface keycards as the sole authentication path.
+func NewValidator(masterToken string, store TokenStoreReader) *Validator {
+	return &Validator{masterToken: masterToken, store: store}
+}
+
+// Validate runs the two-tier authentication chain on raw and returns the
+// resulting Identity, or an error matching ErrEmptyToken / ErrInvalidCredentials
+// / a wrapped store error.
+//
+// The chain is fixed-order:
+//
+//  1. Empty bearer → ErrEmptyToken.
+//  2. Constant-time match against the master token → SourceMaster Identity.
+//  3. Shape gate (tokenRawPrefix + ≥ tokenMinLen chars) — fails closed without
+//     touching the database, preventing token-shape probing from generating DB
+//     load.
+//  4. Prefix lookup → bcrypt loop over candidates → SourceClient Identity on
+//     the first match.
+//  5. No match → ErrInvalidCredentials.
+//
+// The validator deliberately does NOT distinguish "no candidate" from "bcrypt
+// mismatch" in the returned error: both paths surface ErrInvalidCredentials so
+// callers (and downstream observers) cannot use response shape to fingerprint
+// the api_tokens table.
+func (v *Validator) Validate(ctx context.Context, raw string) (Identity, error) {
+	if raw == "" {
+		return Identity{}, ErrEmptyToken
+	}
+
+	// Tier 1 — master operator key. Constant-time compare blocks timing
+	// oracles even when masterToken is unset (we still pay the constant
+	// cost on the empty-vs-token comparison).
+	if v.masterToken != "" {
+		if subtle.ConstantTimeCompare([]byte(raw), []byte(v.masterToken)) == 1 {
+			return Admin(), nil
+		}
+	}
+
+	// Tier 2 shape gate.
+	if !strings.HasPrefix(raw, tokenRawPrefix) || len(raw) < tokenMinLen {
+		return Identity{}, ErrInvalidCredentials
+	}
+	prefix := raw[len(tokenRawPrefix) : len(tokenRawPrefix)+tokenPrefixLen]
+
+	candidates, err := v.store.FindByPrefix(ctx, prefix)
+	if err != nil {
+		return Identity{}, fmt.Errorf("auth: token store lookup: %w", err)
+	}
+	if len(candidates) == 0 {
+		return Identity{}, ErrInvalidCredentials
+	}
+
+	for i := range candidates {
+		err := bcrypt.CompareHashAndPassword(
+			[]byte(candidates[i].TokenHash),
+			[]byte(raw),
+		)
+		if err == nil {
+			return Client(candidates[i].Scope, candidates[i].ID), nil
+		}
+		// bcrypt.ErrMismatchedHashAndPassword is the expected miss; only
+		// log on unexpected errors (bcrypt cost/format issues).
+		if !errors.Is(err, bcrypt.ErrMismatchedHashAndPassword) {
+			return Identity{}, fmt.Errorf("auth: bcrypt: %w", err)
+		}
+	}
+	return Identity{}, ErrInvalidCredentials
+}
