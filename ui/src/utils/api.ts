@@ -206,8 +206,10 @@ async function patchJson<T>(url: string, body: unknown, options: FetchOptions = 
 // ============================================================
 
 export interface VaultCredential {
+  id: number
   name: string
   scope: string
+  project?: string
   created_at: string
   updated_at?: string
 }
@@ -231,12 +233,14 @@ export async function fetchCredentials(signal?: AbortSignal): Promise<VaultCrede
   return fetchWithRetry<VaultCredential[]>(`${API_BASE}/vault/credentials`, { signal })
 }
 
-export async function fetchCredential(name: string, signal?: AbortSignal): Promise<{ name: string; value: string }> {
-  return fetchWithRetry<{ name: string; value: string }>(`${API_BASE}/vault/credentials/${encodeURIComponent(name)}`, { signal })
+export async function fetchCredential(name: string, project?: string, signal?: AbortSignal): Promise<{ name: string; value: string }> {
+  const params = project ? `?project=${encodeURIComponent(project)}` : ''
+  return fetchWithRetry<{ name: string; value: string }>(`${API_BASE}/vault/credentials/${encodeURIComponent(name)}${params}`, { signal })
 }
 
-export async function deleteCredential(name: string, signal?: AbortSignal): Promise<void> {
-  await deleteJson<Record<string, unknown>>(`${API_BASE}/vault/credentials/${encodeURIComponent(name)}`, { signal })
+export async function deleteCredential(name: string, project?: string, signal?: AbortSignal): Promise<void> {
+  const params = project ? `?project=${encodeURIComponent(project)}` : ''
+  await deleteJson<Record<string, unknown>>(`${API_BASE}/vault/credentials/${encodeURIComponent(name)}${params}`, { signal })
 }
 
 // ============================================================

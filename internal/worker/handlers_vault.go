@@ -47,6 +47,7 @@ func (s *Service) handleListCredentials(w http.ResponseWriter, r *http.Request) 
 	type credItem struct {
 		Name      string `json:"name"`
 		Scope     string `json:"scope"`
+		Project   string `json:"project,omitempty"`
 		CreatedAt string `json:"created_at,omitempty"`
 		ID        int64  `json:"id"`
 	}
@@ -64,6 +65,7 @@ func (s *Service) handleListCredentials(w http.ResponseWriter, r *http.Request) 
 			items = append(items, credItem{
 				Name:      c.Key,
 				Scope:     c.Scope,
+				Project:   c.Project,
 				ID:        c.ID,
 				CreatedAt: c.CreatedAt.Format(time.RFC3339),
 			})
@@ -85,6 +87,7 @@ func (s *Service) handleListCredentials(w http.ResponseWriter, r *http.Request) 
 			ID:        c.ID,
 			Name:      c.Key,
 			Scope:     c.Scope,
+			Project:   c.Project,
 			CreatedAt: c.CreatedAt.Format(time.RFC3339),
 		})
 	}

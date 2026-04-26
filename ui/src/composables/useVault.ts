@@ -37,10 +37,10 @@ export function useVault() {
     }
   }
 
-  async function revealCredential(name: string) {
+  async function revealCredential(name: string, project?: string) {
     actionError.value = null
     try {
-      const result = await fetchCredential(name)
+      const result = await fetchCredential(name, project)
       const expiresAt = Date.now() + 30000
 
       revealedValues.value = {
@@ -76,10 +76,10 @@ export function useVault() {
     }
   }
 
-  async function removeCredential(name: string) {
+  async function removeCredential(name: string, project?: string) {
     actionError.value = null
     try {
-      await deleteCredential(name)
+      await deleteCredential(name, project)
       hideCredential(name)
       credentials.value = credentials.value.filter(c => c.name !== name)
       if (vaultStatus.value) {

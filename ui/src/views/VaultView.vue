@@ -52,7 +52,7 @@ const {
   removeCredential,
 } = useVault()
 
-const deleteTarget = ref<string | null>(null)
+const deleteTarget = ref<{ name: string; project?: string } | null>(null)
 const showDeleteConfirm = ref(false)
 const copyFeedback = ref<string | null>(null)
 
@@ -101,8 +101,8 @@ async function copyValue(value: string, name: string) {
   }
 }
 
-function confirmDelete(name: string) {
-  deleteTarget.value = name
+function confirmDelete(name: string, project?: string) {
+  deleteTarget.value = { name, project }
   showDeleteConfirm.value = true
 }
 
@@ -110,7 +110,7 @@ async function handleDelete() {
   if (!deleteTarget.value) return
   showDeleteConfirm.value = false
   try {
-    await removeCredential(deleteTarget.value)
+    await removeCredential(deleteTarget.value.name, deleteTarget.value.project)
   } catch {
     // Error handled by composable
   }
@@ -201,6 +201,7 @@ async function handleDelete() {
           <TableHeader>
             <TableRow>
               <TableHead>Name</TableHead>
+              <TableHead>Project</TableHead>
               <TableHead>Scope</TableHead>
               <TableHead>Created</TableHead>
               <TableHead class="text-right">Actions</TableHead>
@@ -240,6 +241,9 @@ async function handleDelete() {
                   </Button>
                 </div>
               </TableCell>
+              <TableCell class="text-xs text-muted-foreground font-mono">
+                {{ cred.project || '—' }}
+              </TableCell>
               <TableCell>
                 <Badge variant="secondary" class="text-[10px]">{{ cred.scope }}</Badge>
               </TableCell>
@@ -252,7 +256,7 @@ async function handleDelete() {
                     v-if="!revealedValues[cred.name]"
                     variant="outline"
                     size="xs"
-                    @click="revealCredential(cred.name)"
+                    @click="revealCredential(cred.name, cred.project)"
                   >
                     <Eye class="size-3.5" />
                     Reveal
@@ -262,7 +266,7 @@ async function handleDelete() {
                     size="icon-sm"
                     class="text-muted-foreground hover:text-destructive"
                     title="Delete"
-                    @click="confirmDelete(cred.name)"
+                    @click="confirmDelete(cred.name, cred.project)"
                   >
                     <Trash2 class="size-3.5" />
                   </Button>
@@ -280,7 +284,7 @@ async function handleDelete() {
         <AlertDialogHeader>
           <AlertDialogTitle>Delete Credential</AlertDialogTitle>
           <AlertDialogDescription>
-            Are you sure you want to delete <strong>{{ deleteTarget }}</strong>? This action cannot be undone.
+            Are you sure you want to delete <strong>{{ deleteTarget?.name }}</strong>? This action cannot be undone.
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
