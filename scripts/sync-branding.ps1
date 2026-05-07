@@ -27,20 +27,22 @@ if ($svgFiles.Count -eq 0) {
     Write-Error "No SVG files in $src"
     exit 1
 }
-$sourceNames = $svgFiles.Name
+$pngFiles = Get-ChildItem $src -Filter *.png -ErrorAction SilentlyContinue
+$assetFiles = @($svgFiles) + @($pngFiles)
+$sourceNames = $assetFiles.Name
 
-Write-Host "Source: $src ($($svgFiles.Count) SVGs)"
+Write-Host "Source: $src ($($svgFiles.Count) SVGs, $($pngFiles.Count) PNGs)"
 Write-Host ""
 
 foreach ($target in $targets) {
     $dest = $target.Path
     New-Item -ItemType Directory -Force -Path $dest | Out-Null
-    # Remove stale SVGs that no longer exist in the source directory.
-    Get-ChildItem -Path $dest -Filter *.svg -File -ErrorAction SilentlyContinue |
+    # Remove stale assets that no longer exist in the source directory.
+    Get-ChildItem -Path $dest -File -Include *.svg,*.png -ErrorAction SilentlyContinue |
         Where-Object { $_.Name -notin $sourceNames } |
         Remove-Item -Force
-    foreach ($svg in $svgFiles) {
-        Copy-Item $svg.FullName (Join-Path $dest $svg.Name) -Force
+    foreach ($asset in $assetFiles) {
+        Copy-Item $asset.FullName (Join-Path $dest $asset.Name) -Force
     }
     Write-Host "  -> $($target.Description): $dest"
 }
