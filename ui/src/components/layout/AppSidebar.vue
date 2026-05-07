@@ -61,11 +61,13 @@ async function handleLogout() {
     <SidebarHeader>
       <!-- Logo (links to home) -->
       <router-link to="/" class="flex items-center gap-3 px-1 py-1 rounded-md hover:bg-sidebar-accent transition-colors">
-        <div
-          class="w-8 h-8 flex-shrink-0 rounded-lg bg-gradient-to-br from-primary to-primary/70 flex items-center justify-center"
-        >
-          <span class="text-primary-foreground font-bold text-sm">E</span>
-        </div>
+        <img
+          src="/branding/favicon-32.svg"
+          alt="Engram"
+          width="32"
+          height="32"
+          class="w-8 h-8 flex-shrink-0 rounded-lg"
+        />
         <span class="text-sm font-bold truncate group-data-[collapsible=icon]:hidden text-primary">
           engram
         </span>

@@ -20,6 +20,7 @@ colors:
   outline-variant: "#D4D4D8"
   error: "#DC2626"
   on-error: "#FFFFFF"
+  brand-ink: "#0C0F1A"
 typography:
   headline-lg:
     fontFamily: Inter
@@ -208,6 +209,30 @@ components:
     textColor: "{colors.on-error}"
     typography: "{typography.label-sm}"
     rounded: "{rounded.full}"
+brand:
+  source: assets/branding/
+  served-at: /branding/
+  colors:
+    canvas: "{colors.brand-ink}"
+    mark: "{colors.primary}"
+  files:
+    master: engram-icon.svg
+    optimized-512: engram-icon-512.svg
+    optimized-256: engram-icon-256.svg
+    favicon-64: favicon.svg
+    favicon-32: favicon-32.svg
+    favicon-16: favicon-16.svg
+    transparent-master: engram-icon-transparent.svg
+    transparent-512: engram-icon-512-transparent.svg
+    transparent-256: engram-icon-256-transparent.svg
+    transparent-64: favicon-transparent.svg
+    transparent-32: favicon-32-transparent.svg
+    transparent-16: favicon-16-transparent.svg
+  usage:
+    sidebar-logo: /branding/favicon-32.svg
+    apple-touch-icon: /branding/engram-icon-256.svg
+    favicon-svg: /favicon.svg
+    readme-header: assets/branding/engram-icon-256.svg
 ---
 
 # Engram Design System
@@ -243,6 +268,33 @@ Two typefaces serve complementary roles with clear separation of duties.
 - **JetBrains Mono** — strictly for machine-generated content: code snippets, terminal output, API responses, credential names, session IDs, and hash prefixes. Never for UI labels or prose.
 
 The type scale uses a limited set of sizes (12, 14, 16, 18, 20, 24, 36px) to maintain visual consistency. Body text minimum is 14px; nothing smaller appears as readable content.
+
+## Brand Mark
+
+The Engram mark is a bookmark glyph with the orange engram inside a dark canvas. Single-color, single-shape, single-purpose — the silhouette reads at 16 px and at 1024 px without redrawing.
+
+### Canonical source
+
+All SVG assets live in `assets/branding/` and are propagated to deployable locations (`ui/public/branding/`, `docs/public/branding/`) via `scripts/sync-branding.ps1`. Edit only the canonical copies; never edit propagated copies directly.
+
+### Variants
+
+Two axes — size (master, optimized-512/256, favicon-64/32/16) and surface (solid, transparent). The 16/32 px variants are hand-tuned for pixel grids — fewer details, thicker strokes — not down-scales of the master.
+
+- **Solid** (`engram-icon*.svg`, `favicon*.svg`) — orange mark on `brand-ink` canvas with the platform corner radius. Default. Use for app icon, browser tab, marketing card, OG image, README header.
+- **Transparent** (`*-transparent.svg`) — orange mark only, no canvas. Use on already-dark UI where the bookmark frame would duplicate the surrounding chrome (sidebar logo, header on dark hero, in-body inline reference).
+
+### Sizing rules
+
+- ≥ 256 px → `engram-icon-256.svg` or larger
+- 64–128 px → `favicon.svg` (64) scaled within range
+- 32 px → `favicon-32.svg` (optical-tuned)
+- 16 px → `favicon-16.svg` (optical-tuned)
+- Never down-scale the 1024 master inline at small sizes.
+
+### Live gallery
+
+Open `ui/public/branding/index.html` (or `/branding/` on the dashboard origin) for a rendered swatch sheet with usage examples, surface tests, and HTML/Vue snippets.
 
 ## Layout
 
@@ -312,7 +364,7 @@ Pill-shaped (full radius). Default: surface-dim background + on-surface text. St
 
 ### Sidebar
 
-Fixed left with collapsible state. Active item: primary orange text with no background fill. Inactive items: on-surface-variant color. Footer section: theme toggle icon, connection status dot, logout. Logo at top is a router-link to home.
+Fixed left with collapsible state. Active item: primary orange text with no background fill. Inactive items: on-surface-variant color. Footer section: theme toggle icon, connection status dot, logout. Logo at top is a router-link to home — uses the solid `favicon-32.svg` brand mark (32×32 with rounded corner clip), so the mark stays legible against both light and dark sidebar surfaces.
 
 ## Do's and Don'ts
 
@@ -329,3 +381,8 @@ Fixed left with collapsible state. Active item: primary orange text with no back
 - Don't add decorative elements (illustrations, gradients, patterns) that don't convey information
 - Don't mix rounded and sharp corners within the same component
 - Don't use emoji as icons — use Lucide SVG icons exclusively
+- Don't recolor the brand mark — orange `#EE7410` and ink `#0C0F1A` are the only legal fills
+- Don't apply drop shadows, gradients, or strokes to the brand mark SVG
+- Don't use the 1024 master inline at small sizes — pick the closest optimized variant; below 48 px use `favicon-32.svg` or `favicon-16.svg`
+- Don't put the transparent mark on a light or orange surface — picks up no contrast; use the solid variant instead
+- Don't edit propagated brand copies (`ui/public/branding/`, `docs/public/branding/`) — edit `assets/branding/` and run `scripts/sync-branding.ps1`
