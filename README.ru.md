@@ -1,4 +1,8 @@
 <!-- redoc:start:header -->
+<p align="center">
+  <img src="assets/branding/engram-icon-256.svg" alt="Engram" width="128" height="128">
+</p>
+
 [English](README.md) | **Русский** | [中文](README.zh.md)
 
 [![Go](https://img.shields.io/badge/Go-1.25+-00ADD8?logo=go)](https://go.dev/)

@@ -1,0 +1,507 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+  <meta name="theme-color" content="#0C0F1A">
+  <title>Engram — Brand Assets</title>
+  <style>
+    :root {
+      --ink: #0C0F1A;
+      --ink-2: #161A2A;
+      --ink-3: #1F2438;
+      --orange: #EE7410;
+      --orange-soft: #FFB272;
+      --line: #2A2F44;
+      --text: #E6E8EF;
+      --muted: #9AA0B4;
+      --radius: 16px;
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; padding: 0; }
+    body {
+      background: var(--ink);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Inter, system-ui, sans-serif;
+      line-height: 1.55;
+      -webkit-font-smoothing: antialiased;
+    }
+    a { color: var(--orange); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    code, pre {
+      font-family: "JetBrains Mono", "Fira Code", ui-monospace, SFMono-Regular, Consolas, monospace;
+      font-size: 13px;
+    }
+    pre {
+      background: var(--ink-2);
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 16px;
+      overflow-x: auto;
+      color: #D8DCEA;
+    }
+    code { background: var(--ink-3); padding: 2px 6px; border-radius: 6px; }
+    pre code { background: none; padding: 0; }
+
+    .wrap { max-width: 1080px; margin: 0 auto; padding: 64px 32px 96px; }
+    header.hero {
+      display: flex;
+      align-items: center;
+      gap: 24px;
+      margin-bottom: 48px;
+      padding-bottom: 32px;
+      border-bottom: 1px solid var(--line);
+    }
+    header.hero img { width: 96px; height: 96px; }
+    header.hero h1 {
+      font-size: 40px;
+      margin: 0 0 6px;
+      letter-spacing: -0.02em;
+    }
+    header.hero p { margin: 0; color: var(--muted); font-size: 16px; }
+
+    h2 {
+      font-size: 22px;
+      letter-spacing: -0.01em;
+      margin: 56px 0 20px;
+      padding-bottom: 8px;
+      border-bottom: 1px solid var(--line);
+    }
+    h3 { font-size: 16px; margin: 24px 0 12px; color: var(--orange-soft); }
+
+    .grid {
+      display: grid;
+      gap: 20px;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    }
+    .card {
+      background: var(--ink-2);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      padding: 24px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 14px;
+    }
+    .card .label { color: var(--muted); font-size: 13px; }
+    .card .filename { font-size: 12px; color: var(--orange-soft); font-family: monospace; }
+    .card img.preview {
+      background: var(--ink);
+      border-radius: 12px;
+    }
+
+    .swatch-row {
+      display: flex;
+      gap: 16px;
+      flex-wrap: wrap;
+    }
+    .swatch {
+      flex: 1 1 220px;
+      border-radius: var(--radius);
+      border: 1px solid var(--line);
+      overflow: hidden;
+    }
+    .swatch .chip {
+      height: 110px;
+      display: flex;
+      align-items: flex-end;
+      padding: 14px;
+      font-weight: 600;
+      letter-spacing: 0.02em;
+    }
+    .swatch .meta {
+      background: var(--ink-2);
+      padding: 12px 14px;
+      font-size: 13px;
+      display: flex;
+      justify-content: space-between;
+      color: var(--muted);
+    }
+    .swatch .meta strong { color: var(--text); }
+
+    .scale-row {
+      display: flex;
+      align-items: flex-end;
+      gap: 32px;
+      flex-wrap: wrap;
+      padding: 28px;
+      background: var(--ink-2);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+    }
+    .scale-row figure { margin: 0; text-align: center; }
+    .scale-row figcaption { color: var(--muted); font-size: 12px; margin-top: 8px; }
+
+    .demo-bar {
+      background: var(--ink-2);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      padding: 14px 20px;
+      display: flex;
+      align-items: center;
+      gap: 14px;
+    }
+    .demo-bar img { width: 32px; height: 32px; }
+    .demo-bar strong { font-size: 16px; }
+    .demo-bar .dot { color: var(--muted); margin: 0 6px; }
+    .demo-bar .crumb { color: var(--muted); font-size: 14px; }
+
+    .light-card {
+      background: #F5F6FA;
+      color: var(--ink);
+      border: 1px solid #E1E3EC;
+      border-radius: var(--radius);
+      padding: 28px;
+      display: flex;
+      align-items: center;
+      gap: 20px;
+    }
+    .light-card img { width: 64px; height: 64px; }
+    .light-card h4 { margin: 0 0 4px; font-size: 18px; }
+    .light-card p { margin: 0; color: #5A607A; }
+
+    .button {
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+      background: var(--orange);
+      color: #1A0C00;
+      padding: 10px 18px;
+      border-radius: 10px;
+      font-weight: 600;
+      border: none;
+      cursor: pointer;
+    }
+    .button img { width: 18px; height: 18px; }
+    .button:hover { filter: brightness(1.05); }
+
+    .avatar {
+      width: 56px; height: 56px; border-radius: 50%;
+      background: var(--ink); border: 2px solid var(--orange);
+      display: inline-flex; align-items: center; justify-content: center;
+    }
+    .avatar img { width: 36px; height: 36px; }
+
+    .pair {
+      display: flex; gap: 24px; flex-wrap: wrap;
+    }
+    .pair > * { flex: 1 1 320px; }
+
+    .variants-row {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 16px;
+    }
+    .variant-card {
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+    }
+    .variant-card .stage {
+      height: 160px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .variant-card .stage.dark { background: var(--ink); }
+    .variant-card .stage.ink2 { background: var(--ink-2); }
+    .variant-card .stage.orange { background: var(--orange); }
+    .variant-card .stage.light { background: #F5F6FA; }
+    .variant-card .stage.checker {
+      background-image:
+        linear-gradient(45deg, #2A2F44 25%, transparent 25%),
+        linear-gradient(-45deg, #2A2F44 25%, transparent 25%),
+        linear-gradient(45deg, transparent 75%, #2A2F44 75%),
+        linear-gradient(-45deg, transparent 75%, #2A2F44 75%);
+      background-size: 16px 16px;
+      background-position: 0 0, 0 8px, 8px -8px, -8px 0;
+      background-color: #1F2438;
+    }
+    .variant-card .meta {
+      background: var(--ink-2);
+      padding: 10px 14px;
+      font-size: 12px;
+      color: var(--muted);
+      border-top: 1px solid var(--line);
+    }
+    .variant-card .meta strong { color: var(--text); display: block; font-family: monospace; font-size: 12px; }
+
+    footer {
+      margin-top: 80px;
+      padding-top: 24px;
+      border-top: 1px solid var(--line);
+      color: var(--muted);
+      font-size: 13px;
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+
+    <header class="hero">
+      <img src="engram-icon.svg" alt="Engram logo">
+      <div>
+        <h1>Engram — Brand Assets</h1>
+        <p>Bookmark mark on dark canvas. Persistent shared memory infrastructure.</p>
+      </div>
+    </header>
+
+    <h2>1. Files</h2>
+    <p>All assets live in <code>ui/public/branding/</code> and are served at <code>/branding/&lt;file&gt;</code>. Favicon is duplicated at <code>ui/public/favicon.svg</code> for the conventional <code>/favicon.svg</code> path.</p>
+
+    <h3>Solid (mark on dark canvas)</h3>
+    <div class="grid">
+      <div class="card">
+        <img class="preview" src="engram-icon.svg" width="128" height="128" alt="">
+        <div class="label">Master · 1024×1024</div>
+        <div class="filename">engram-icon.svg</div>
+      </div>
+      <div class="card">
+        <img class="preview" src="engram-icon-512.svg" width="128" height="128" alt="">
+        <div class="label">Optimized · 512×512</div>
+        <div class="filename">engram-icon-512.svg</div>
+      </div>
+      <div class="card">
+        <img class="preview" src="engram-icon-256.svg" width="128" height="128" alt="">
+        <div class="label">Optimized · 256×256</div>
+        <div class="filename">engram-icon-256.svg</div>
+      </div>
+      <div class="card">
+        <img class="preview" src="favicon.svg" width="64" height="64" alt="">
+        <div class="label">Favicon · 64×64</div>
+        <div class="filename">favicon.svg</div>
+      </div>
+      <div class="card">
+        <img class="preview" src="favicon-32.svg" width="64" height="64" alt="">
+        <div class="label">Favicon · 32×32 (optical)</div>
+        <div class="filename">favicon-32.svg</div>
+      </div>
+      <div class="card">
+        <img class="preview" src="favicon-16.svg" width="64" height="64" alt="">
+        <div class="label">Favicon · 16×16 (optical)</div>
+        <div class="filename">favicon-16.svg</div>
+      </div>
+    </div>
+
+    <h3>Transparent (mark only — no canvas)</h3>
+    <p style="color: var(--muted); font-size: 14px; margin-top: -4px;">
+      Use on existing surfaces — already-dark backgrounds, brand-colored panels, photos, video. Inherits the orange mark, drops the bookmark frame.
+    </p>
+    <div class="grid">
+      <div class="card" style="background: var(--ink-3);">
+        <img class="preview" src="engram-icon-transparent.svg" width="128" height="128" alt="" style="background: transparent;">
+        <div class="label">Master · 1024×1024</div>
+        <div class="filename">engram-icon-transparent.svg</div>
+      </div>
+      <div class="card" style="background: var(--ink-3);">
+        <img class="preview" src="engram-icon-512-transparent.svg" width="128" height="128" alt="" style="background: transparent;">
+        <div class="label">Optimized · 512×512</div>
+        <div class="filename">engram-icon-512-transparent.svg</div>
+      </div>
+      <div class="card" style="background: var(--ink-3);">
+        <img class="preview" src="engram-icon-256-transparent.svg" width="128" height="128" alt="" style="background: transparent;">
+        <div class="label">Optimized · 256×256</div>
+        <div class="filename">engram-icon-256-transparent.svg</div>
+      </div>
+      <div class="card" style="background: var(--ink-3);">
+        <img class="preview" src="favicon-transparent.svg" width="64" height="64" alt="" style="background: transparent;">
+        <div class="label">Mark · 64×64</div>
+        <div class="filename">favicon-transparent.svg</div>
+      </div>
+      <div class="card" style="background: var(--ink-3);">
+        <img class="preview" src="favicon-32-transparent.svg" width="64" height="64" alt="" style="background: transparent;">
+        <div class="label">Mark · 32×32 (optical)</div>
+        <div class="filename">favicon-32-transparent.svg</div>
+      </div>
+      <div class="card" style="background: var(--ink-3);">
+        <img class="preview" src="favicon-16-transparent.svg" width="64" height="64" alt="" style="background: transparent;">
+        <div class="label">Mark · 16×16 (optical)</div>
+        <div class="filename">favicon-16-transparent.svg</div>
+      </div>
+    </div>
+
+    <h3>Mark on different surfaces</h3>
+    <div class="variants-row">
+      <div class="variant-card">
+        <div class="stage dark"><img src="engram-icon-transparent.svg" width="96" height="96" alt=""></div>
+        <div class="meta">on <strong>#0C0F1A</strong> ink</div>
+      </div>
+      <div class="variant-card">
+        <div class="stage ink2"><img src="engram-icon-transparent.svg" width="96" height="96" alt=""></div>
+        <div class="meta">on <strong>#161A2A</strong> ink-2</div>
+      </div>
+      <div class="variant-card">
+        <div class="stage orange"><img src="engram-icon.svg" width="96" height="96" alt=""></div>
+        <div class="meta">solid mark on <strong>#EE7410</strong></div>
+      </div>
+      <div class="variant-card">
+        <div class="stage light"><img src="engram-icon.svg" width="96" height="96" alt=""></div>
+        <div class="meta">solid on <strong>#F5F6FA</strong> light</div>
+      </div>
+      <div class="variant-card">
+        <div class="stage checker"><img src="engram-icon-transparent.svg" width="96" height="96" alt=""></div>
+        <div class="meta">transparent on noisy bg</div>
+      </div>
+    </div>
+
+    <h2>2. Color tokens</h2>
+    <div class="swatch-row">
+      <div class="swatch">
+        <div class="chip" style="background: #0C0F1A; color: #fff;">Ink</div>
+        <div class="meta"><strong>#0C0F1A</strong><span>background</span></div>
+      </div>
+      <div class="swatch">
+        <div class="chip" style="background: #EE7410; color: #1A0C00;">Engram Orange</div>
+        <div class="meta"><strong>#EE7410</strong><span>brand mark</span></div>
+      </div>
+      <div class="swatch">
+        <div class="chip" style="background: #FFB272; color: #1A0C00;">Orange Soft</div>
+        <div class="meta"><strong>#FFB272</strong><span>accent text</span></div>
+      </div>
+    </div>
+    <h3>Tailwind config snippet</h3>
+<pre><code>// tailwind.config.js
+theme: {
+  extend: {
+    colors: {
+      'engram-ink':         '#0C0F1A',
+      'engram-orange':      '#EE7410',
+      'engram-orange-soft': '#FFB272',
+    },
+  },
+},</code></pre>
+
+    <h2>3. Sizing scale</h2>
+    <div class="scale-row">
+      <figure>
+        <img src="engram-icon.svg" width="160" height="160" alt="">
+        <figcaption>160 px · hero</figcaption>
+      </figure>
+      <figure>
+        <img src="engram-icon-512.svg" width="96" height="96" alt="">
+        <figcaption>96 px · marketing</figcaption>
+      </figure>
+      <figure>
+        <img src="engram-icon-256.svg" width="64" height="64" alt="">
+        <figcaption>64 px · header</figcaption>
+      </figure>
+      <figure>
+        <img src="favicon-32.svg" width="32" height="32" alt="">
+        <figcaption>32 px · nav (optical)</figcaption>
+      </figure>
+      <figure>
+        <img src="favicon-16.svg" width="16" height="16" alt="">
+        <figcaption>16 px · tab (optical)</figcaption>
+      </figure>
+    </div>
+    <p style="color: var(--muted); font-size: 13px; margin-top: 12px;">
+      <strong style="color: var(--text);">Optical sizing:</strong> 16/32 px variants are hand-tuned for pixel grids — fewer details, thicker strokes. Don't downscale the master at &lt;48 px.
+    </p>
+
+    <h2>4. In-app usage</h2>
+
+    <h3>Top bar (dark)</h3>
+    <div class="demo-bar">
+      <img src="engram-icon-256.svg" alt="">
+      <strong>Engram</strong>
+      <span class="dot">/</span>
+      <span class="crumb">Dashboard · Memories</span>
+    </div>
+
+    <h3>Top bar (light surface)</h3>
+    <div class="light-card">
+      <img src="engram-icon.svg" alt="">
+      <div>
+        <h4>Engram</h4>
+        <p>Persistent shared memory for Claude Code workstations.</p>
+      </div>
+    </div>
+
+    <h3>Avatar / Action button</h3>
+    <div class="pair">
+      <div style="display:flex; align-items:center; gap:16px;">
+        <span class="avatar"><img src="favicon-transparent.svg" alt=""></span>
+        <span style="color: var(--muted);">circular avatar (transparent mark on ink fill)</span>
+      </div>
+      <div>
+        <button class="button">
+          <img src="favicon-transparent.svg" alt="" style="filter: brightness(0) invert(0.05);">
+          Open Engram
+        </button>
+      </div>
+    </div>
+
+    <h2>5. HTML — favicon &amp; PWA</h2>
+<pre><code>&lt;!-- ui/index.html --&gt;
+&lt;link rel="icon" type="image/svg+xml" sizes="16x16" href="/branding/favicon-16.svg"&gt;
+&lt;link rel="icon" type="image/svg+xml" sizes="32x32" href="/branding/favicon-32.svg"&gt;
+&lt;link rel="icon" type="image/svg+xml" sizes="any"   href="/favicon.svg"&gt;
+&lt;link rel="apple-touch-icon" href="/branding/engram-icon-256.svg"&gt;
+&lt;meta name="theme-color" content="#0C0F1A"&gt;</code></pre>
+
+    <h2>6. Vue / SFC import</h2>
+<pre><code>// Static URL — Vite serves /public as-is
+&lt;img src="/branding/engram-icon-256.svg" width="32" height="32" alt="Engram"&gt;
+
+// Or import as an asset URL (cache-busted by Vite)
+import logoUrl from '/branding/engram-icon.svg?url'
+&lt;img :src="logoUrl" alt="Engram"&gt;</code></pre>
+
+    <h2>7. Plain HTML / Markdown</h2>
+<pre><code>&lt;!-- absolute path on the dashboard origin --&gt;
+&lt;img src="https://your-engram-domain.com/branding/engram-icon-256.svg"
+     width="48" height="48" alt="Engram"&gt;
+
+&lt;!-- markdown --&gt;
+![Engram](/branding/engram-icon-256.svg)</code></pre>
+
+    <h2>8. Choosing solid vs transparent</h2>
+    <table style="border-collapse: collapse; width: 100%; font-size: 14px;">
+      <thead>
+        <tr style="border-bottom: 1px solid var(--line);">
+          <th style="text-align: left; padding: 10px 12px; color: var(--orange-soft);">Context</th>
+          <th style="text-align: left; padding: 10px 12px; color: var(--orange-soft);">Use</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr style="border-bottom: 1px solid var(--line);">
+          <td style="padding: 10px 12px;">App icon, browser tab, marketing card, OG image</td>
+          <td style="padding: 10px 12px;"><code>engram-icon*.svg</code> (solid)</td>
+        </tr>
+        <tr style="border-bottom: 1px solid var(--line);">
+          <td style="padding: 10px 12px;">Header on already-dark UI, sidebar logo</td>
+          <td style="padding: 10px 12px;"><code>*-transparent.svg</code></td>
+        </tr>
+        <tr style="border-bottom: 1px solid var(--line);">
+          <td style="padding: 10px 12px;">Mention in body text, README badge</td>
+          <td style="padding: 10px 12px;"><code>favicon-transparent.svg</code> at 16-24 px</td>
+        </tr>
+        <tr style="border-bottom: 1px solid var(--line);">
+          <td style="padding: 10px 12px;">Photo / video / patterned overlay</td>
+          <td style="padding: 10px 12px;">Solid (the canvas guarantees contrast)</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <h2>9. Don'ts</h2>
+    <ul>
+      <li>Don't recolor the orange mark — use <code>#EE7410</code> only.</li>
+      <li>Don't apply drop shadows, gradients, or strokes to the SVG.</li>
+      <li>Don't stretch — the icon is square; pad container instead.</li>
+      <li>Don't use the 1024 master inline at small sizes — pick the closest optimized variant.</li>
+      <li>Don't use <code>favicon.svg</code> below 48 px — use <code>favicon-32.svg</code> or <code>favicon-16.svg</code> for crisp pixel rendering.</li>
+      <li>Don't drop the canvas on photos or busy backgrounds — use solid for guaranteed contrast.</li>
+      <li>Don't put the transparent mark on a light or orange surface — picks up no contrast.</li>
+    </ul>
+
+    <footer>
+      Source: <code>assets/branding/</code> · Engram dashboard, generated <span id="ts"></span>.
+      <script>document.getElementById('ts').textContent = new Date().toISOString().slice(0,10);</script>
+    </footer>
+  </div>
+</body>
+</html>
