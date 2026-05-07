@@ -282,7 +282,7 @@ All SVG assets live in `assets/branding/` and are propagated to deployable locat
 Two axes — size (master, optimized-512/256, favicon-64/32/16) and surface (solid, transparent). The 16/32 px variants are hand-tuned for pixel grids — fewer details, thicker strokes — not down-scales of the master.
 
 - **Solid** (`engram-icon*.svg`, `favicon*.svg`) — orange mark on `brand-ink` canvas with the platform corner radius. Default. Use for app icon, browser tab, marketing card, OG image, README header.
-- **Transparent** (`*-transparent.svg`) — orange mark only, no canvas. Use on already-dark UI where the bookmark frame would duplicate the surrounding chrome (sidebar logo, header on dark hero, in-body inline reference).
+- **Transparent** (`*-transparent.svg`) — orange mark only, no canvas. Use on already-dark UI where the bookmark frame would duplicate the surrounding chrome (header on dark hero, in-body inline reference).
 
 ### Sizing rules
 

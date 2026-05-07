@@ -27,6 +27,7 @@ if ($svgFiles.Count -eq 0) {
     Write-Error "No SVG files in $src"
     exit 1
 }
+$sourceNames = $svgFiles.Name
 
 Write-Host "Source: $src ($($svgFiles.Count) SVGs)"
 Write-Host ""
@@ -34,6 +35,10 @@ Write-Host ""
 foreach ($target in $targets) {
     $dest = $target.Path
     New-Item -ItemType Directory -Force -Path $dest | Out-Null
+    # Remove stale SVGs that no longer exist in the source directory.
+    Get-ChildItem -Path $dest -Filter *.svg -File -ErrorAction SilentlyContinue |
+        Where-Object { $_.Name -notin $sourceNames } |
+        Remove-Item -Force
     foreach ($svg in $svgFiles) {
         Copy-Item $svg.FullName (Join-Path $dest $svg.Name) -Force
     }
