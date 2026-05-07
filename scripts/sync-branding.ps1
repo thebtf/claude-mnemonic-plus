@@ -4,17 +4,17 @@
 
 $ErrorActionPreference = "Stop"
 $repoRoot = Split-Path -Parent $PSScriptRoot
-$src = Join-Path $repoRoot "assets\branding"
+$src = Join-Path $repoRoot "assets/branding"
 
 $targets = @(
-    @{ Path = Join-Path $repoRoot "ui\public\branding";   Description = "UI dashboard" }
-    @{ Path = Join-Path $repoRoot "docs\public\branding"; Description = "Docs site" }
+    @{ Path = Join-Path $repoRoot "ui/public/branding";   Description = "UI dashboard" }
+    @{ Path = Join-Path $repoRoot "docs/public/branding"; Description = "Docs site" }
 )
 
 # Favicon at the root path of each Vite public dir (so /favicon.svg works).
 $rootFavicons = @(
-    Join-Path $repoRoot "ui\public\favicon.svg"
-    Join-Path $repoRoot "docs\public\favicon.svg"
+    Join-Path $repoRoot "ui/public/favicon.svg"
+    Join-Path $repoRoot "docs/public/favicon.svg"
 )
 
 if (-not (Test-Path $src)) {

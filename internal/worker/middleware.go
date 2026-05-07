@@ -301,8 +301,11 @@ func (ta *TokenAuth) Middleware(next http.Handler) http.Handler {
 			return
 		}
 
-		// Also exempt static assets and docs.
-		if strings.HasPrefix(r.URL.Path, "/assets/") || strings.HasPrefix(r.URL.Path, "/api/docs") {
+		// Also exempt static assets, branding assets, and docs.
+		if strings.HasPrefix(r.URL.Path, "/assets/") ||
+			strings.HasPrefix(r.URL.Path, "/branding/") ||
+			r.URL.Path == "/favicon.svg" ||
+			strings.HasPrefix(r.URL.Path, "/api/docs") {
 			next.ServeHTTP(w, r)
 			return
 		}

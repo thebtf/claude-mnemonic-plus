@@ -742,6 +742,8 @@ func (s *Service) setupRoutes() {
 	// Serve Vue dashboard from embedded static files
 	s.router.Get("/", serveIndex)
 	s.router.Get("/assets/*", serveAssets)
+	s.router.Get("/branding/*", serveAssets)
+	s.router.Get("/favicon.svg", serveAssets)
 
 	// Auth routes (public — login/logout do not require auth)
 	s.router.Post("/api/auth/login", s.handleAuthLogin)
