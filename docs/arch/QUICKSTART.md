@@ -1,258 +1,151 @@
 # Developer Quickstart
 
-Get engram running locally and integrated with Claude Code.
+Get engram running and integrated with Claude Code.
 
 ---
 
-## Prerequisites
+## Option A: Docker (recommended for production)
+
+### 1. Pull and run
+
+```bash
+docker run -d \
+  --name engram \
+  -p 37777:37777 \
+  -e DATABASE_DSN="postgres://user:pass@db-host:5432/engram?sslmode=disable" \
+  -e ENGRAM_AUTH_ADMIN_TOKEN="your-operator-token" \
+  -e ENGRAM_WORKER_HOST="0.0.0.0" \
+  ghcr.io/thebtf/engram:latest
+```
+
+Migrations run automatically on first startup.
+
+### 2. Verify
+
+```bash
+curl http://localhost:37777/api/version
+# {"version":"v6.0.1"}
+```
+
+Dashboard at `http://localhost:37777`.
+
+### 3. Issue a worker keycard
+
+1. Open the dashboard → `/tokens` page.
+2. Create a new token for your workstation.
+3. Copy the token (shown once).
+
+### 4. Install the Claude Code plugin
+
+```bash
+# Add the marketplace
+/plugin marketplace add thebtf/engram-marketplace
+
+# Install engram
+/plugin install engram
+
+# Configure (paste server URL + worker keycard)
+/engram:setup
+```
+
+---
+
+## Option B: Build from source
+
+### Prerequisites
 
 | Dependency | Version | Purpose |
 |------------|---------|---------|
-| Go | 1.24+ | Build from source |
-| PostgreSQL | 15+ | Primary data store |
+| Go | 1.25+ | Build from source |
+| PostgreSQL | 17+ | Primary data store |
 | pgvector extension | latest | Vector similarity search |
-| CGO | enabled | Required for test build tags |
 | make | any | Build system |
-| jq | any | Used by install scripts |
-| curl | any | Health check and install scripts |
 
-**Platform support:** macOS (amd64/arm64), Linux (amd64/arm64), Windows (amd64 via MSYS/Cygwin)
-
----
-
-## Step 1: PostgreSQL Setup
+### 1. PostgreSQL setup
 
 ```sql
--- Create the database and enable pgvector extension
 CREATE DATABASE engram;
 \c engram
 CREATE EXTENSION IF NOT EXISTS vector;
 ```
 
-> If your PostgreSQL user lacks superuser rights, have a superuser run the `CREATE EXTENSION` command. On managed services (RDS, Supabase, Cloud SQL), enable pgvector through the service control panel.
-
-Verify pgvector is installed:
-```sql
-SELECT * FROM pg_extension WHERE extname = 'vector';
-```
-
----
-
-## Step 2: Environment Setup
-
-Set the database connection string (required — never stored in config file):
-```bash
-export DATABASE_DSN="postgres://user:password@localhost:5432/engram?sslmode=disable"
-```
-
-Configure embeddings (OpenAI-compatible REST API):
-```bash
-export EMBEDDING_PROVIDER=openai
-export EMBEDDING_API_KEY=sk-...
-export EMBEDDING_MODEL_NAME=text-embedding-3-small
-export EMBEDDING_DIMENSIONS=384  # IMPORTANT: match the vector(384) table schema
-```
-
-Optional: authentication token for the worker/SSE endpoints:
-```bash
-export ENGRAM_API_TOKEN=your-secret-token
-```
-
-Persist these in your shell profile or a `.env` file sourced at startup.
-
----
-
-## Step 3: Build
+### 2. Build
 
 ```bash
-git clone https://github.com/YOUR_USER/engram.git
+git clone https://github.com/thebtf/engram.git
 cd engram
-
-# Build all binaries (worker, mcp-server) + Vue dashboard
 make build
 ```
 
-Build artifacts are placed in `bin/`:
-```
-bin/
-  worker
-  mcp-server
-```
+Produces `bin/engram-server` and `bin/engram`.
 
-Hooks are JavaScript files in `plugin/engram/hooks/` — no compilation needed.
-
----
-
-## Step 4: Initialize and Start Worker
-
-On first run, the service creates `~/.engram/settings.json` and runs 19 database migrations automatically.
+### 3. Run server
 
 ```bash
-# Start the worker daemon (background, logs to /tmp/engram-worker.log)
-make start-worker
-
-# Verify it's running
-curl http://localhost:37777/health
+export DATABASE_DSN="postgres://user:pass@localhost:5432/engram?sslmode=disable"
+export ENGRAM_AUTH_ADMIN_TOKEN="your-operator-token"
+./bin/engram-server
 ```
 
-Expected response: `{"status":"ok", ...}` (HTTP 200)
+Server starts on `:37777` (HTTP API + gRPC + dashboard, cmux multiplexed).
 
-Worker binds to `127.0.0.1:37777` by default. To expose on the network:
-```bash
-export ENGRAM_WORKER_HOST=0.0.0.0
-make restart-worker
-```
+### 4. Install plugin
 
----
-
-## Step 5: Install Plugin Into Claude Code
-
-The `make install` command copies binaries and hooks, registers the plugin, and configures the MCP server in Claude Code:
-
-```bash
-make install
-```
-
-This does the following:
-1. Stops any running worker
-2. Copies binaries and JS hooks to `~/.claude/plugins/marketplaces/engram/`
-3. Updates `~/.claude/plugins/installed_plugins.json` and `~/.claude/plugins/known_marketplaces.json`
-4. Registers the MCP server in `~/.claude/settings.json`
-5. Writes hook configuration to `~/.claude/plugins/.../hooks/hooks.json`
-6. Starts the worker
-
-### Manual MCP Configuration (alternative)
-
-If you only want the MCP tools for a specific project, add to the project's `.claude/settings.json`:
-```json
-{
-  "mcpServers": {
-    "engram": {
-      "command": "~/.claude/plugins/marketplaces/engram/mcp-server",
-      "args": ["--project", "${CLAUDE_PROJECT}"],
-      "env": {
-        "DATABASE_DSN": "postgres://user:password@localhost:5432/engram?sslmode=disable"
-      }
-    }
-  }
-}
-```
-
-For global MCP access, add the same block to `~/.claude/settings.json`.
-
----
-
-## Step 6: Verify Integration
-
-1. Start a new Claude Code session — you should see in stderr:
-   ```
-   [engram] Injecting 0 observations from project memory (0 detailed, 0 condensed)
-   ```
-   (Zero observations on first run is correct.)
-
-2. Check the Vue dashboard at `http://localhost:37777` — it shows memory stats.
-
-3. Test a search via MCP (within Claude Code):
-   ```
-   Use the nia search tool to find observations about "database"
-   ```
-
-4. Check worker logs if anything fails:
-   ```bash
-   tail -f /tmp/engram-worker.log
-   ```
+Same as Option A step 4.
 
 ---
 
 ## Multi-Workstation Setup
 
-To share memory across multiple machines:
-
-**On the central server:**
+**Central server** (Docker or bare metal):
 ```bash
-export DATABASE_DSN="postgres://user:password@db-host:5432/engram?sslmode=disable"
 export ENGRAM_WORKER_HOST=0.0.0.0
-export ENGRAM_API_TOKEN=shared-secret-token
-./bin/worker &  # HTTP API + MCP SSE + MCP Streamable HTTP on :37777
+export ENGRAM_AUTH_ADMIN_TOKEN=operator-secret
 ```
 
-**On remote workstations:** Configure Claude Code to use `mcp-stdio-proxy`:
-```json
-{
-  "mcpServers": {
-    "engram": {
-      "command": "/path/to/mcp-stdio-proxy",
-      "args": ["--sse-url", "http://central-server:37778"],
-      "env": {
-        "ENGRAM_API_TOKEN": "shared-secret-token"
-      }
-    }
-  }
-}
-```
+**Each workstation:**
+1. Install the Claude Code plugin (`/plugin install engram`).
+2. Run `/engram:setup` — enter the server URL and a worker keycard.
+3. Each workstation gets a unique `workstation_id` (auto-derived from hostname + machine ID).
 
-Each workstation automatically gets a unique `workstation_id` (derived from hostname + machine ID). Override with `WORKSTATION_ID` env var for consistent cross-session identity.
+Override with `WORKSTATION_ID` env var for consistent identity across reinstalls.
 
 ---
 
-## Worker Management
+## Verify Integration
 
-```bash
-make start-worker    # Start in background
-make stop-worker     # Kill running worker
-make restart-worker  # Stop + start
-make dev             # Run worker in foreground (development)
-```
+1. Start a new Claude Code session — engram hooks fire, memories inject.
+2. Dashboard at `http://server:37777` shows memory stats.
+3. Test search: ask Claude to use `recall_memory` tool.
+4. Check server health: `check_system_health` MCP tool.
 
 ---
 
-## Development Commands
+## Development
 
 ```bash
-make test            # Run all tests with race detector
-make test-coverage   # Tests with HTML coverage report
-make bench           # Run benchmarks
-make lint            # golangci-lint
-make fmt             # gofmt
-make clean           # Remove bin/ and coverage files
-```
-
----
-
-## Uninstall
-
-```bash
-make uninstall  # Stops worker, removes binaries, cleans up Claude Code config
-```
-
-Data directory `~/.engram/` and PostgreSQL database are NOT removed (to preserve memories). Drop the database manually if desired:
-```sql
-DROP DATABASE engram;
+make build           # Build server + client
+make test            # go test ./... with race detector
+go vet ./...         # Static analysis
 ```
 
 ---
 
 ## Troubleshooting
 
-**Worker fails to start:**
-- Check `DATABASE_DSN` is set: `echo $DATABASE_DSN`
-- Check PostgreSQL is accessible: `psql "$DATABASE_DSN" -c "SELECT 1"`
-- Check pgvector extension: `psql "$DATABASE_DSN" -c "SELECT * FROM pg_extension WHERE extname='vector'"`
-- Review logs: `cat /tmp/engram-worker.log`
+**Server fails to start:**
+- Check `DATABASE_DSN` is set and PostgreSQL is accessible.
+- Check pgvector extension: `SELECT * FROM pg_extension WHERE extname='vector';`
+- Check logs via dashboard or `http://server:37777/api/logs`.
 
-**MCP server fails with "data store error":**
-- `DATABASE_DSN` must be set in the MCP server's environment (pass via `env` block in settings.json)
-- The MCP server connects directly to PostgreSQL — it does not go through the worker
+**Plugin not connecting:**
+- Run `/mcp` in Claude Code to check engram connection status.
+- Verify server URL and token via `/engram:setup`.
 
-**No observations returned at session start:**
-- Normal on first use — observations are created during sessions
-- Check worker is running: `curl http://localhost:37777/health`
+**No memories at session start:**
+- Normal on first use — memories are created during sessions.
+- Check server is running: `curl http://server:37777/api/version`.
 
-**Vector search returns no results:**
-- Hub storage threshold: new observations need HubThreshold accesses (default=5) before embeddings are stored
-- Lower threshold: set `ENGRAM_HUB_THRESHOLD=1` in settings.json
-- Check embedding service: `check_system_health` MCP tool
-
-**Embedding dimension error:**
-- If switching to OpenAI embeddings, ensure `EMBEDDING_DIMENSIONS` matches the `vector(384)` schema (use a 384-dim model or recreate tables)
-- See [GOTCHAS.md](GOTCHAS.md#critical-embedding-dimension-mismatch) for recovery steps
+**Auth errors (401):**
+- Verify worker keycard is valid (not revoked) via dashboard `/tokens`.
+- For local dev: set `ENGRAM_AUTH_SKIP_LOCAL=true` on the server.

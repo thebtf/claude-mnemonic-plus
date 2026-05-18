@@ -1,12 +1,13 @@
 # Configuration Reference
 
-engram configuration is loaded from a JSON settings file with environment variable overrides. Environment variables always take precedence over the JSON file.
+Configuration is loaded from a JSON settings file with environment variable
+overrides. Environment variables always take precedence.
 
 ## Config File Location
 
 - **Settings file:** `~/.engram/settings.json`
 - **Data directory:** `~/.engram/` (created with `0700` permissions on first run)
-- **Collections file:** `~/.config/engram/collections.yml` (override with `COLLECTION_CONFIG`)
+- **Collections file:** Override with `COLLECTION_CONFIG` env var
 
 ## Loading Precedence
 
@@ -14,144 +15,82 @@ engram configuration is loaded from a JSON settings file with environment variab
 compiled defaults  <  ~/.engram/settings.json  <  environment variables
 ```
 
-The settings file is created automatically on first run with minimal defaults. Parsing errors in the JSON file are silently ignored and compiled defaults are used.
+The settings file is created on first run with minimal defaults. Parsing errors
+are silently ignored (compiled defaults used).
 
-## Default settings.json (auto-created)
+## Environment Variables
 
-```json
-{
-  "ENGRAM_WORKER_PORT": 37777,
-  "ENGRAM_MODEL": "haiku",
-  "ENGRAM_CONTEXT_OBSERVATIONS": 100,
-  "ENGRAM_CONTEXT_FULL_COUNT": 25,
-  "ENGRAM_CONTEXT_SESSION_COUNT": 10
-}
-```
+### Required
 
-## settings.json Keys
+| Variable | Description |
+|----------|-------------|
+| `DATABASE_DSN` | PostgreSQL connection string. Never stored in config file. Example: `postgres://user:pass@host:5432/engram?sslmode=disable` |
 
-All keys use the `ENGRAM_` prefix unless noted otherwise.
-
-### Core
-
-| Key | Type | Default | Description |
-|-----|------|---------|-------------|
-| `ENGRAM_WORKER_PORT` | int | `37777` | Worker HTTP server port |
-| `ENGRAM_MODEL` | string | `haiku` | Claude model alias for SDK agent (haiku/sonnet/opus) |
-| `ENGRAM_DB_PATH` | string | `~/.engram/engram.db` | Legacy field from SQLite era; parsed but unused in PostgreSQL fork |
-| `CLAUDE_CODE_PATH` | string | — | Path to Claude Code CLI (optional) |
-
-### Embedding
-
-| Key | Type | Default | Description |
-|-----|------|---------|-------------|
-| `ENGRAM_EMBEDDING_MODEL` | string | `bge-v1.5` | Legacy field (unused — OpenAI provider only) |
-| `EMBEDDING_PROVIDER` | string | `openai` | Embedding provider (`openai` = OpenAI-compatible REST API) |
-| `EMBEDDING_BASE_URL` | string | `https://api.openai.com/v1` | OpenAI-compatible API base URL |
-| `EMBEDDING_MODEL_NAME` | string | `text-embedding-3-small` | Model name for `openai` provider |
-| `EMBEDDING_DIMENSIONS` | int | `1536` | Vector dimensions for `openai` provider |
-| `ENGRAM_HUB_THRESHOLD` | int | `5` | Min accesses before storing embedding (hub strategy) |
-| `ENGRAM_VECTOR_STORAGE_STRATEGY` | string | `hub` | Vector storage strategy (`hub` = LEANN-inspired, delay until HubThreshold) |
-
-> Note: The ONNX/builtin provider has been removed. Only the `openai` provider is available.
-
-### Reranking (cross-encoder)
-
-| Key | Type | Default | Description |
-|-----|------|---------|-------------|
-| `ENGRAM_RERANKING_ENABLED` | bool | `true` | Enable cross-encoder reranking |
-| `ENGRAM_RERANKING_CANDIDATES` | int | `100` | Candidate results fetched before reranking |
-| `ENGRAM_RERANKING_RESULTS` | int | `10` | Final results returned after reranking |
-| `ENGRAM_RERANKING_ALPHA` | float | `0.7` | Blend weight: 0.0 = all vector score, 1.0 = all cross-encoder score |
-| `ENGRAM_RERANKING_MIN_IMPROVEMENT` | float | `0` | Minimum score improvement required to apply reranking |
-| `ENGRAM_RERANKING_PURE_MODE` | bool | `false` | Use only cross-encoder scores, discard original vector scores |
-
-### Context Injection
-
-| Key | Type | Default | Description |
-|-----|------|---------|-------------|
-| `ENGRAM_CONTEXT_OBSERVATIONS` | int | `100` | Max observations returned per context injection |
-| `ENGRAM_CONTEXT_FULL_COUNT` | int | `25` | First N observations get full detail (narrative + facts); rest are condensed (title + subtitle only) |
-| `ENGRAM_CONTEXT_SESSION_COUNT` | int | `10` | Max sessions included in context |
-| `ENGRAM_CONTEXT_OBS_TYPES` | string | `bugfix,feature,refactor,change,discovery,decision` | Comma-separated observation types to include |
-| `ENGRAM_CONTEXT_OBS_CONCEPTS` | string | `how-it-works,why-it-exists,what-changed,problem-solution,gotcha,pattern,trade-off` | Comma-separated concept tags to include |
-| `ENGRAM_CONTEXT_RELEVANCE_THRESHOLD` | float | `0.3` | Minimum similarity score to include an observation |
-| `ENGRAM_CONTEXT_MAX_PROMPT_RESULTS` | int | `10` | Max search results per query (0 = threshold-only filtering) |
-
-### Graph Search
-
-| Key | Type | Default | Description |
-|-----|------|---------|-------------|
-| `ENGRAM_GRAPH_ENABLED` | bool | `true` | Enable graph-aware relation traversal in search |
-| `ENGRAM_GRAPH_MAX_HOPS` | int | `2` | Maximum relation hops for graph expansion |
-| `ENGRAM_GRAPH_BRANCH_FACTOR` | int | `5` | Expand top N neighbors per node |
-| `ENGRAM_GRAPH_EDGE_WEIGHT` | float | `0.3` | Minimum edge confidence to follow |
-| `ENGRAM_GRAPH_REBUILD_INTERVAL_MIN` | int | `60` | Graph rebuild interval (minutes) |
-
-### Database
-
-| Key | Type | Default | Description |
-|-----|------|---------|-------------|
-| `database_max_conns` | int | `10` | PostgreSQL connection pool size |
-
-> Note: This key uses lowercase without the `ENGRAM_` prefix.
-
----
-
-## Environment-Only Variables
-
-These variables are **never loaded from settings.json** — they are env-only for security reasons.
+### Authentication (v6)
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `DATABASE_DSN` | — | PostgreSQL connection string (contains password; `json:"-"` in struct) |
-| `ENGRAM_WORKER_HOST` | `127.0.0.1` | Worker bind address. Set to `0.0.0.0` for network access. |
-| `ENGRAM_API_TOKEN` | — | Bearer token for worker and SSE endpoint authentication |
-| `EMBEDDING_API_KEY` | — | API key for OpenAI-compatible embedding provider |
-| `COLLECTION_CONFIG` | `~/.config/engram/collections.yml` | Path to collections YAML config |
-| `SESSIONS_DIR` | `~/.claude/projects/` | Directory for Claude Code JSONL session files (session indexer) |
-| `WORKSTATION_ID` | auto (sha256(hostname+machine_id)[:8]) | Override the auto-generated workstation identifier |
+| `ENGRAM_AUTH_ADMIN_TOKEN` | (none) | Operator token for server admin. Lives ONLY on the server host. |
+| `ENGRAM_AUTH_SKIP_LOCAL` | `false` | Skip auth for RFC 1918 (private) IP addresses. Useful for local dev. |
+| `ENGRAM_AUTH_TRUSTED_PROXY` | (none) | Trusted reverse proxy address for X-Forwarded-For parsing. |
+| `ENGRAM_AUTHENTIK_ENABLED` | `false` | Enable Authentik SSO forward-auth integration. |
+| `ENGRAM_AUTHENTIK_AUTO_PROVISION` | `false` | Auto-create users from Authentik headers. |
+| `ENGRAM_AUTHENTIK_TRUSTED_PROXIES` | (none) | Comma-separated trusted proxy IPs for Authentik headers. |
 
----
+### Server
 
-## Notable Behaviors
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `ENGRAM_WORKER_HOST` | `127.0.0.1` | Bind address. Set to `0.0.0.0` to expose on network. |
+| `ENGRAM_DB_PATH` | `~/.engram` | Data directory path. |
+| `DATABASE_MAX_CONNS` | (driver default) | Max PostgreSQL connection pool size. |
+| `WORKSTATION_ID` | (auto: hostname + machine ID) | Override workstation identity for consistent cross-session tracking. |
 
-### DATABASE_DSN is strictly env-only
-The `DatabaseDSN` field has `json:"-"` in the struct tag — it is never serialized or deserialized from the JSON file. Even if you add `database_dsn` to `settings.json`, it will not be loaded. Always use `DATABASE_DSN` environment variable.
+### Memory Retrieval
 
-### WorkerHost default inconsistency
-The `Config` struct's `WorkerHost` field has default `0.0.0.0`, but `GetWorkerHost()` returns `127.0.0.1` when the field is empty. The net result is that the worker binds to `127.0.0.1` by default (localhost only). To expose the worker on the network, set `ENGRAM_WORKER_HOST=0.0.0.0`.
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `ENGRAM_CONTEXT_MAX_TOKENS` | (compiled) | Max tokens for context injection. |
+| `ENGRAM_ALWAYS_INJECT_LIMIT` | (compiled) | Max always-inject memories per session start. |
+| `ENGRAM_PROJECT_INJECT_LIMIT` | (compiled) | Max project-scoped memories per injection. |
+| `ENGRAM_INJECT_UNIFIED` | `false` | Unified injection mode (single pass vs split). |
+| `ENGRAM_ENFORCE_SOURCE_PROJECT` | `false` | Strict project isolation for memory retrieval. |
 
-### Hub storage strategy
-With `ENGRAM_VECTOR_STORAGE_STRATEGY=hub` (default), embeddings are only stored in the `vectors` table after an observation has been accessed `ENGRAM_HUB_THRESHOLD` times (default: 5). New observations are **not** immediately searchable via vector similarity — only via FTS. This reduces storage but means semantic search misses fresh observations.
+### Vector Storage
 
-### Config file watcher
-The MCP server process watches `~/.engram/settings.json` for changes. On any change, it calls `os.Exit(0)`. Claude Code is expected to restart the process. This is a deliberate crude-but-simple restart mechanism.
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `ENGRAM_VECTOR_STORAGE_STRATEGY` | `hub` | Storage strategy: `hub` (delayed embedding) or `immediate`. |
+| `ENGRAM_HUB_THRESHOLD` | `5` | Access count before embeddings are persisted (hub strategy only). |
 
----
+### Vault
 
-## Collections YAML Schema
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `ENGRAM_VAULT_KEY` | (none) | AES-256-GCM master key (base64). Primary name. |
+| `ENGRAM_ENCRYPTION_KEY` | (none) | Alias for `ENGRAM_VAULT_KEY`. |
+| `ENGRAM_ENCRYPTION_KEY_FILE` | (none) | Path to file containing the master key. |
 
-Path: `~/.config/engram/collections.yml` (or `COLLECTION_CONFIG` env)
+### Operational
 
-```yaml
-collections:
-  - name: docs                       # required: collection identifier (alphanumeric)
-    description: "Project documentation"  # optional: human-readable label
-    path_context:                    # optional: path prefix -> context hint
-      docs/api: "REST API reference documentation"
-      docs/arch: "Architecture documentation"
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `ENGRAM_TELEMETRY_ENABLED` | `true` | Periodic telemetry snapshots. |
+| `ENGRAM_LOG_BUFFER_SIZE` | (compiled) | In-memory log ring buffer size (exposed via `/api/logs`). |
+| `ENGRAM_OUTCOME_RECORDER_INTERVAL_MINUTES` | (compiled) | Interval for periodic session outcome recording. |
+| `COLLECTION_CONFIG` | (none) | Path to collections YAML config file. |
 
-  - name: source
-    description: "Go source code"
-    path_context:
-      internal/: "Internal packages (not exported)"
-      cmd/: "Binary entrypoints"
-      pkg/: "Exported packages"
-```
+### Removed in v5/v6
 
-**Behavior:**
-- If the file does not exist, an empty registry is used — not an error.
-- Collections are loaded at MCP server and worker startup.
-- `path_context` maps path prefixes to descriptive strings used for context-aware document routing.
-- Collection names must be unique. Order is preserved from the YAML file.
+These variables no longer exist — do not set them:
+
+- `ENGRAM_API_TOKEN` → replaced by `ENGRAM_AUTH_ADMIN_TOKEN` (v5)
+- `EMBEDDING_PROVIDER`, `EMBEDDING_API_KEY`, `EMBEDDING_MODEL_NAME`, `EMBEDDING_DIMENSIONS` → removed (v5, no server-side embedding)
+- `ENGRAM_LLM_*` → removed (v5, no server-side LLM)
+- `ENGRAM_MODEL`, `ENGRAM_CONTEXT_OBSERVATIONS`, `ENGRAM_CONTEXT_FULL_COUNT`, `ENGRAM_CONTEXT_SESSION_COUNT` → removed or renamed
+
+## settings.json Keys
+
+The settings file accepts the same names as environment variables (without the
+`ENGRAM_` prefix for some). See `internal/config/config.go` for the full mapping.
+Environment variables always override file values.
