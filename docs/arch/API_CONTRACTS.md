@@ -1,288 +1,171 @@
 # API Contracts
 
-This document covers the MCP tool contracts, known Worker HTTP endpoints, hook interfaces, and the SSE transport protocol.
+MCP tools, HTTP endpoints, gRPC services, and hook interfaces for engram v6.
 
 ---
 
-## MCP Tools (nia namespace)
+## MCP Tools (39 total)
 
-The MCP server exposes 37 tools under the `nia` namespace via the MCP stdio protocol (JSON-RPC 2.0). All tools are registered in `internal/mcp/server.go`.
+Registered in `internal/mcp/server.go`. The `engram` stdio daemon exposes these
+via JSON-RPC 2.0 over stdin/stdout.
 
-Tools accept JSON arguments and return JSON results. Error responses follow the MCP spec (code + message).
+### Primary Tools (7 consolidated)
 
-### Search and Discovery
+These are the recommended entry points. Each supports an `action` parameter
+that routes to the appropriate operation.
 
-| Tool | Key Parameters | Description |
-|------|---------------|-------------|
-| `search` | `query: string`, `project?: string`, `type?: string`, `limit?: int` | Hybrid semantic + FTS search across all memory |
-| `timeline` | `project?: string`, `date_start?: int`, `date_end?: int`, `limit?: int` | Browse observations by time range |
-| `decisions` | `query: string`, `project?: string` | Find architecture/design decisions (keyword-boosted: "decision chose architecture") |
-| `changes` | `query: string`, `project?: string` | Find code modifications (keyword-boosted: "changed modified refactored") |
-| `how_it_works` | `query: string`, `project?: string` | System understanding queries (keyword-boosted: "architecture design pattern implements") |
-| `find_by_concept` | `concept: string`, `project?: string`, `limit?: int` | Find observations matching a concept tag |
-| `find_by_file` | `file: string`, `project?: string` | Find observations related to a specific file path |
-| `find_by_type` | `obs_type: string`, `project?: string`, `limit?: int` | Find by type: decision\|bugfix\|feature\|refactor\|discovery\|change |
-| `find_similar_observations` | `id: int64`, `limit?: int` | Vector similarity search from a given observation |
-| `find_related_observations` | `id: int64`, `relation_type?: string`, `limit?: int` | Graph relation traversal from a given observation |
-| `explain_search_ranking` | `query: string`, `project?: string` | Debug output showing ranking scores and fusion details |
+| Tool | Actions | Description |
+|------|---------|-------------|
+| `recall` | search, by_file, related, reasoning | Search and retrieve memories |
+| `store` | create, edit, merge, import | Store, modify, or merge memories |
+| `feedback` | rate, suppress, outcome | Rate memories, suppress, record session outcomes |
+| `vault` | store, get, list, delete, status | Manage encrypted credentials |
+| `docs` | create, read, list, history, comment, collections, documents, get_doc, remove, ingest, search_docs | Versioned documents and collections |
+| `admin` | stats, search_analytics, backfill_status | Administrative operations |
+| `issues` | create, list, get, update, comment, reopen, close | Cross-project issue tracker |
 
-### Context Retrieval
+### Compatibility Tools (32)
 
-| Tool | Key Parameters | Description |
-|------|---------------|-------------|
-| `get_recent_context` | `project: string`, `limit?: int` | Recent observations for a project |
-| `get_context_timeline` | `project: string`, `periods?: int` | Context organized by time periods |
-| `get_timeline_by_query` | `query: string`, `project?: string` | Query-filtered chronological timeline |
-| `get_patterns` | `project?: string`, `type?: string` | Detected recurring patterns |
+Legacy aliases from before tool consolidation. Each maps to a primary tool action.
 
-### Observation Management
+**Memory:**
+`store_memory`, `recall_memory`, `rate_memory`, `suppress_memory`,
+`find_by_file`, `find_related_observations`, `find_similar_observations`,
+`get_memory_stats`, `set_session_outcome`, `import_instincts`, `backfill_status`
 
-| Tool | Key Parameters | Description |
-|------|---------------|-------------|
-| `get_observation` | `id: int64` | Retrieve a single observation by ID |
-| `edit_observation` | `id: int64`, `title?: string`, `narrative?: string`, `facts?: []string` | Modify observation fields |
-| `tag_observation` | `id: int64`, `concepts: []string` | Add concept tags to an observation |
-| `get_observations_by_tag` | `concept: string`, `project?: string` | Find observations by concept tag |
-| `merge_observations` | `source_id: int64`, `target_id: int64`, `reason?: string` | Merge duplicate observations (source marked superseded) |
-| `bulk_delete_observations` | `ids: []int64` | Batch delete observations by ID |
-| `bulk_mark_superseded` | `ids: []int64`, `reason?: string` | Mark observations as superseded |
-| `bulk_boost_observations` | `ids: []int64`, `boost: float64` | Increase importance scores |
-| `export_observations` | `project?: string`, `format?: string`, `limit?: int` | Export observations as JSON |
+**Sessions:**
+`search_sessions`, `list_sessions`
 
-### Analysis and Quality
+**Credentials:**
+`store_credential`, `get_credential`, `list_credentials`, `delete_credential`, `vault_status`
 
-| Tool | Key Parameters | Description |
-|------|---------------|-------------|
-| `get_memory_stats` | `project?: string` | Overall memory statistics (counts, score distributions) |
-| `get_observation_quality` | `id: int64` | Quality score breakdown for a single observation |
-| `get_temporal_trends` | `project?: string`, `periods?: int` | Trend analysis over time windows |
-| `get_data_quality_report` | `project?: string` | Data quality metrics across observations |
-| `batch_tag_by_pattern` | `pattern: string`, `concepts: []string`, `project?: string` | Auto-tag observations matching a text pattern |
-| `analyze_search_patterns` | — | Search usage analytics (frequent queries, latency stats) |
-| `get_observation_relationships` | `id: int64`, `depth?: int` | Full relation graph for an observation |
-| `get_observation_scoring_breakdown` | `id: int64` | Detailed scoring formula breakdown |
-| `analyze_observation_importance` | `project?: string` | Importance distribution analysis |
-| `check_system_health` | — | System health check (DB, vector client, embedding service) |
+**Documents:**
+`list_collections`, `list_documents`, `get_document`, `remove_document`,
+`ingest_document`, `search_collection`
 
-### Sessions
+**Versioned Documents:**
+`doc_create`, `doc_read`, `doc_list`, `doc_history`, `doc_comment`
 
-| Tool | Key Parameters | Description |
-|------|---------------|-------------|
-| `search_sessions` | `query: string`, `workstation_id?: string`, `project_id?: string`, `limit?: int` | Full-text search across indexed JSONL sessions |
-| `list_sessions` | `workstation_id?: string`, `project_id?: string`, `limit?: int` | List sessions with optional filtering |
+**Rules:**
+`store_rule`, `list_rules` (conditional — only registered when behavioral rules store is initialized)
+
+**System:**
+`check_system_health`
 
 ---
 
-## Worker HTTP API (:37777)
+## HTTP API (:37777)
 
-The worker binds on port 37777 (configurable) using the chi router. The following endpoints are confirmed from hook source code and are likely incomplete — additional endpoints exist in `internal/worker/` handlers.
+`engram-server` serves HTTP via chi router on :37777 (cmux multiplexed with gRPC).
 
-### Confirmed Endpoints (from hook source)
+### Authentication (v6)
 
-| Method | Path | Description |
-|--------|------|-------------|
-| `GET` | `/api/context/inject` | Returns observations for session-start context injection. Query params: `project`, `cwd`. Response: `{observations: [...], full_count: int}` |
-| `GET` | `/api/sessions` | Find session by Claude session ID. Query param: `claudeSessionId`. Response: `{id: float64, ...}` |
-| `POST` | `/sessions/{id}/summarize` | Create session summary. Body: `{lastUserMessage: string, lastAssistantMessage: string}` |
-| `GET` | `/health` | Health check (used by `make start-worker` to verify startup) |
+Two-tier token model:
+- **Operator token** (`ENGRAM_AUTH_ADMIN_TOKEN`): full admin access
+- **Worker keycards** (per-workstation): issued via `/tokens` dashboard page
 
-### Inferred Endpoints (from hook usage patterns)
-
-| Method | Path | Description |
-|--------|------|-------------|
-| `POST` | `/api/hooks/user-prompt` | Record user prompt event |
-| `POST` | `/api/hooks/post-tool-use` | Record tool invocation event |
-| `POST` | `/api/hooks/subagent-stop` | Record subagent completion event |
-| `GET` | `/api/status` | Worker status (used by statusline hook for memory count) |
-
-### Authentication
-
-When `ENGRAM_API_TOKEN` is set, all requests to the worker require:
 ```
 Authorization: Bearer <token>
 ```
 
-Requests without the token return HTTP 401.
+Bypass: `ENGRAM_AUTH_SKIP_LOCAL=true` skips auth for RFC 1918 addresses.
 
-### Response Format
+### Core Endpoints
 
-All API responses are JSON. The worker uses `github.com/goccy/go-json` for faster serialization.
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/api/context/inject` | Context injection for session-start. Params: `project`, `cwd`. Returns memories as JSON. |
+| `GET` | `/api/version` | Server version string. |
+| `GET` | `/api/logs` | Recent log lines from in-memory ring buffer. |
+| `GET` | `/api/health` | Health check. |
+| `GET` | `/api/memories` | List/search memories. |
+| `POST` | `/api/memories` | Create memory. |
+| `PATCH` | `/api/memories/:id` | Update memory. |
+| `DELETE` | `/api/memories/:id` | Delete memory. |
+| `GET` | `/api/issues` | List issues. |
+| `POST` | `/api/issues` | Create issue. |
+| `PATCH` | `/api/issues/:id` | Update issue (status, labels, etc.). |
+| `GET` | `/api/tokens` | List API tokens. |
+| `POST` | `/api/tokens` | Create worker keycard. |
+| `DELETE` | `/api/tokens/:id` | Revoke token. |
+
+### Hook Endpoints
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `POST` | `/api/hooks/session-start` | Session initialization + context injection. |
+| `POST` | `/api/hooks/user-prompt` | Record user prompt text. |
+| `POST` | `/api/hooks/post-tool-use` | Record tool invocation. |
+| `POST` | `/api/hooks/pre-tool-use` | Pre-tool context enrichment. |
+| `POST` | `/api/hooks/pre-compact` | Pre-compaction state capture. |
+| `POST` | `/api/hooks/stop` | Session end summary. |
+| `POST` | `/api/hooks/session-end` | Final session recording. |
+| `POST` | `/api/hooks/subagent-stop` | Subagent completion event. |
+| `GET` | `/api/status` | Statusline data (memory count). |
 
 ### Dashboard
 
-The worker serves a Vue.js dashboard at `/` (embedded from `ui/dist/` at build time). The dashboard provides a real-time view of observations and search via SSE events.
+Vue.js dashboard served at `/` (embedded from `ui/dist/` at build time).
+Real-time updates via SSE event bus at `/api/events`.
 
 ---
 
-## MCP SSE Transport (integrated into worker :37777)
+## gRPC Services (:37777)
 
-The worker exposes the MCP protocol over HTTP Server-Sent Events for remote workstations.
+Multiplexed on the same port via cmux. The `engram` daemon connects via gRPC.
 
-### Endpoints
+Services defined in `internal/grpcserver/`:
+- Memory operations (store, recall, search)
+- Session management
+- Context injection
+- Health checks
 
-| Method | Path | Description |
-|--------|------|-------------|
-| `GET` | `/sse` | SSE stream — client subscribes to receive MCP server messages |
-| `POST` | `/message` | Client sends MCP requests (JSON-RPC) |
-
-### Authentication
-
-Bearer token required when `ENGRAM_API_TOKEN` is set:
-```
-Authorization: Bearer <token>
-```
-
-### Protocol Flow
-
-```
-Remote workstation                    Central SSE Server (:37778)
-      |                                        |
-      | GET /sse  (SSE subscribe)              |
-      |--------------------------------------->|
-      |                          SSE stream    |
-      |<---------------------------------------|
-      |                                        |
-      | POST /message (MCP JSON-RPC request)   |
-      |--------------------------------------->|
-      |               Process request via DB   |
-      |                  SSE event (response)  |
-      |<---------------------------------------|
-```
-
-The `bin/mcp-stdio-proxy` bridges this to the MCP stdio protocol expected by Claude Code:
-- Reads MCP JSON-RPC from stdin
-- POSTs to `/message` on the remote SSE server
-- Subscribes to the SSE stream for the response
-- Writes the response to stdout
+Proto definitions in `proto/` directory.
 
 ---
 
 ## Hook Interfaces
 
-All hooks are JavaScript files in `plugin/engram/hooks/`, executed via `node` by the Claude Code plugin system.
-Each hook reads JSON from stdin, processes it, and writes a JSON response object to stdout.
-Hooks communicate with the remote worker via HTTP using the shared `lib.js` module.
+### Input Format
 
-### Hook Output Contract (stdout)
-
-All hooks (except the statusline hook) must write a JSON object to stdout via `lib.js`'s `writeResponse()`:
+All hooks receive JSON on stdin from Claude Code:
 
 ```json
 {
-    "continue": true,
-    "hookSpecificOutput": {
-        "hookEventName": "string",
-        "additionalContext": "string"
-    }
+  "hook_type": "session-start",
+  "session_id": "uuid",
+  "project": "project-slug",
+  "cwd": "/path/to/project",
+  "transcript_path": "/path/to/transcript.jsonl"
 }
 ```
 
-The `hookSpecificOutput` field is only included when the hook returns a non-empty string (e.g., `session-start` returns an XML context block). For fire-and-forget hooks, only `{ "continue": true }` is written.
+### Output Format
 
-The **statusline hook** is the exception: it writes plain text to stdout (not JSON).
+Hooks write to stdout for Claude Code to consume:
 
-### Hook Input (all hooks receive via stdin)
+- `session-start.js`: `<engram-context>...</engram-context>` block
+- `statusline.js`: statusline text
+- Other hooks: empty (fire-and-forget)
 
-```json
-{
-    "session_id": "string",
-    "cwd": "string"
-}
-```
+### Configuration
 
-The `lib.js` module derives:
-- Worker URL from `ENGRAM_URL` environment variable (origin only; path stripped)
-- Project identifier using `ProjectIDWithName(cwd)`:
-  1. **Primary:** git remote origin URL + relative repo path → SHA-256 hash prefix (cross-workstation stable)
-  2. **Fallback:** CWD path hash (for directories without a git remote)
-
-### session-start Hook
-
-```json
-// Input (stdin JSON)
-{
-    "session_id": "string",
-    "cwd": "string",
-    "source": "startup|resume|clear|compact"
-}
-// Return value (stdout JSON): { "continue": true, "hookSpecificOutput": { "hookEventName": "session-start", "additionalContext": "<engram-context>...</engram-context>" } }
-// On error or empty context: { "continue": true }
-```
-
-**Behavior:**
-1. GET `/api/context/inject?project=X&cwd=Y`
-2. Returns context as XML block injected into Claude Code session
-3. First `full_count` (default 25) observations: full detail (title + narrative + facts)
-4. Remaining observations: condensed (title + subtitle only)
-5. Silent failure on error (returns empty string — Claude Code continues normally)
-
-### user-prompt Hook
-
-**Input:** BaseInput + prompt text fields
-**Return value (stdout JSON):** `{ "continue": true }` (fire-and-forget, no additionalContext)
-**Effect:** Records user prompt in `user_prompts` table via worker POST
-
-### post-tool-use Hook
-
-**Input:** BaseInput + tool name + tool input/output fields
-**Return value (stdout JSON):** `{ "continue": true }`
-**Effect:** Records tool invocation event via worker POST
-
-### subagent-stop Hook
-
-**Input:** BaseInput + subagent fields
-**Return value (stdout JSON):** `{ "continue": true }`
-**Effect:** Records subagent completion event via worker POST
-
-### stop Hook
-
-```go
-// Input
-type Input struct {
-    hooks.BaseInput
-    TranscriptPath string `json:"transcript_path"` // path to session JSONL transcript
-    StopHookActive bool   `json:"stop_hook_active"`
-}
-// Return value (stdout JSON): { "continue": true }
-```
-
-**Behavior:**
-1. GET `/api/sessions?claudeSessionId=X` to find session record
-2. Read `transcript_path` JSONL file directly from disk
-3. Extract last user message and last assistant message
-4. POST `/sessions/{id}/summarize` with extracted messages
-5. Worker generates session summary in `session_summaries` table
-
-**Note:** Transcript file must be accessible from the hook process filesystem.
-
-### statusline Hook
-
-**Input:** BaseInput
-**Return value:** Short status string for Claude Code statusline
-**Effect:** GET `/api/status` — returns memory count, e.g. `"🧠 42 memories"`
+Hook registration in `plugin/engram/hooks/hooks.json`. Each hook specifies:
+- `type`: PreToolUse, PostToolUse, Stop, etc.
+- `command`: path to JS file
+- Matching rules (tool names, event types)
 
 ---
 
-## MCP stdio Protocol (JSON-RPC 2.0)
+## Response Format
 
-The MCP server (`bin/mcp-server`) communicates via newline-delimited JSON on stdin/stdout.
+All HTTP API responses are JSON. Serialization via `github.com/goccy/go-json`.
 
-**Request format:**
+Error responses:
 ```json
-{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"search","arguments":{"query":"authentication","project":"myapp"}}}
+{
+  "error": "human-readable message"
+}
 ```
 
-**Response format:**
-```json
-{"jsonrpc":"2.0","id":1,"result":{"content":[{"type":"text","text":"..."}]}}
-```
-
-**Initialization:**
-```json
-// Client sends:
-{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","clientInfo":{"name":"claude-code","version":"..."}}}
-
-// Server responds with capabilities including tools list
-```
-
-All logs go to **stderr** — stdout is reserved for the MCP protocol.
+No internal error details are exposed in HTTP responses (logged server-side only).
