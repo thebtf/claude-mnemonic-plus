@@ -53,7 +53,7 @@ are silently ignored (compiled defaults used).
 | `ENGRAM_CONTEXT_MAX_TOKENS` | (compiled) | Max tokens for context injection. |
 | `ENGRAM_ALWAYS_INJECT_LIMIT` | (compiled) | Max always-inject memories per session start. |
 | `ENGRAM_PROJECT_INJECT_LIMIT` | (compiled) | Max project-scoped memories per injection. |
-| `ENGRAM_INJECT_UNIFIED` | `false` | Unified injection mode (single pass vs split). |
+| `ENGRAM_INJECT_UNIFIED` | `true` | Unified injection mode (same retrieval as search). Set `false` as emergency rollback. |
 | `ENGRAM_ENFORCE_SOURCE_PROJECT` | `false` | Strict project isolation for memory retrieval. |
 
 ### Vector Storage

@@ -61,7 +61,7 @@ Shared utilities in `lib.js`. Tests: `*.test.js`.
 | `internal/db/gorm` | GORM models, 96 migrations, 25 tables. Substores: MemoryStore, CredentialStore, IssueStore, DocumentStore, SessionStore, BehavioralRulesStore, VersionedDocumentStore, etc. |
 | `internal/mcp` | MCP protocol implementation. 39 tool registrations (7 primary + 32 compat). Tool handlers delegate to stores and services. |
 | `internal/grpcserver` | gRPC service implementations (memory, session, health, context inject). |
-| `internal/worker` | HTTP route layer, middleware (auth, logging), embedded Vue dashboard, SSE events. Sub-packages: `sdk`, `session`, `sse`, `reaper`, `projectevents`. |
+| `internal/worker` | HTTP route layer, middleware (auth, logging), embedded Vue dashboard, SSE events, **retrieval/search logic** (hybrid FTS + vector, moved here after `internal/search` removal in v5). Sub-packages: `sdk`, `session`, `sse`, `reaper`, `projectevents`. |
 | `internal/auth` | Two-tier token authentication, Authentik SSO integration, middleware. |
 
 ### Domain

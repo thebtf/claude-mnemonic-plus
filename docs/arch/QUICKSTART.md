@@ -59,6 +59,7 @@ Dashboard at `http://localhost:37777`.
 | Go | 1.25+ | Build from source |
 | PostgreSQL | 17+ | Primary data store |
 | pgvector extension | latest | Vector similarity search |
+| pgvectorscale extension | latest | DiskANN indexes for 4096-dim embeddings (optional but recommended) |
 | make | any | Build system |
 
 ### 1. PostgreSQL setup

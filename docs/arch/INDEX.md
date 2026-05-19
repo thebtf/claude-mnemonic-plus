@@ -8,7 +8,7 @@ issues, and documents in PostgreSQL 17 with pgvector. MCP tools are exposed via 
 `engram` stdio daemon proxy; REST API and gRPC share port 37777 (cmux multiplexed).
 
 Two binaries: `engram-server` (long-lived server) and `engram` (per-session stdio MCP daemon).
-One utility: `engram-import` (bulk JSONL import). Four JS lifecycle hooks run inside
+One utility: `engram-import` (bulk JSONL import). Nine JS lifecycle hooks run inside
 Claude Code via the plugin system.
 
 ## Documents

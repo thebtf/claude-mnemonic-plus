@@ -71,7 +71,7 @@ Current table count: **25**.
 - **Vector search:** pgvector `vector(N)` columns on `content_chunks` with HNSW index (cosine distance). pgvectorscale for 4096-dim embeddings (beyond HNSW 2000-dim limit).
 - **Soft delete:** `is_superseded`, `is_archived` flags on memories. `active` flag on documents.
 - **Scoping:** `project` + `scope` columns for multi-tenant isolation. Global scope crosses project boundaries.
-- **Timestamps:** `created_at_epoch` (bigint) for efficient range queries alongside `created_at` (text/timestamptz).
+- **Timestamps:** dual `created_at` (text/timestamptz) + `created_at_epoch` (bigint). The epoch column is a legacy pattern from the SQLite era; both are maintained for backward compatibility with existing queries and API contracts.
 
 ## Migration History
 

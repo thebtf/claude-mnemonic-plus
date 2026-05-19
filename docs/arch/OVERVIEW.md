@@ -62,7 +62,7 @@ workstations in a team.
 | `engram-server` | `cmd/engram-server/` | HTTP API + gRPC + dashboard on :37777 (cmux). Long-lived server process. Docker image `ghcr.io/thebtf/engram`. |
 | `engram` | `cmd/engram/` | Stdio MCP daemon. One per Claude Code session. Connects to server via gRPC. Reports `daemonVersion` at startup. |
 | `engram-import` | `cmd/engram-import/` | Bulk JSONL import utility. |
-| JS hooks | `plugin/hooks/*.js` | 4 lifecycle hooks: `session-start`, `user-prompt`, `post-tool-use`, `stop`. Executed by Claude Code via node. |
+| JS hooks | `plugin/engram/hooks/*.js` | 9 lifecycle hooks (session-start, user-prompt, post-tool-use, pre-tool-use, pre-compact, stop, session-end, subagent-stop, statusline). Executed by Claude Code via node. |
 
 ## Authentication (v6)
 

@@ -93,10 +93,15 @@ Bypass: `ENGRAM_AUTH_SKIP_LOCAL=true` skips auth for RFC 1918 addresses.
 
 | Method | Path | Description |
 |--------|------|-------------|
-| `POST` | `/api/hooks/session-start` | Session initialization. |
+| `POST` | `/api/hooks/session-start` | Session initialization + context injection. |
 | `POST` | `/api/hooks/user-prompt` | Record user prompt text. |
 | `POST` | `/api/hooks/post-tool-use` | Record tool invocation. |
+| `POST` | `/api/hooks/pre-tool-use` | Pre-tool context enrichment. |
+| `POST` | `/api/hooks/pre-compact` | Pre-compaction state capture. |
 | `POST` | `/api/hooks/stop` | Session end summary. |
+| `POST` | `/api/hooks/session-end` | Final session recording. |
+| `POST` | `/api/hooks/subagent-stop` | Subagent completion event. |
+| `GET` | `/api/status` | Statusline data (memory count). |
 
 ### Dashboard
 

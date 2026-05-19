@@ -15,9 +15,11 @@ graph TB
             H2["user-prompt.js"]
             H3["post-tool-use.js"]
             H4["pre-tool-use.js"]
-            H5["stop.js"]
-            H6["session-end.js"]
-            H7["statusline.js"]
+            H5["pre-compact.js"]
+            H6["stop.js"]
+            H7["session-end.js"]
+            H8["subagent-stop.js"]
+            H9["statusline.js"]
         end
 
         DAEMON["engram daemon<br/>cmd/engram<br/>(stdio MCP, per-session)"]
